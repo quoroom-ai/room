@@ -92,6 +92,8 @@ Quoroom is an open research project exploring autonomous agent collectives. Each
 
 **Dashboard** — React SPA at [app.quoroom.ai](https://app.quoroom.ai). Manage rooms, agents, goals, memory, wallet — all from the browser. The UI loads from CDN but connects to your local server — all data stays on your machine.
 
+**Auto-updates** — The server polls GitHub for new releases every 4 hours. When a new version is available, the dashboard shows a notification popup and a download row in Settings. One click downloads the installer for your platform directly — no browser redirect.
+
 ---
 
 ## Architecture
