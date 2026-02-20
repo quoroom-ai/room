@@ -174,6 +174,8 @@ export const api = {
       request<{ ok: true; running: boolean }>('POST', `/api/rooms/${id}/queen/start`),
     queenStop: (id: number) =>
       request<{ ok: true; running: boolean }>('POST', `/api/rooms/${id}/queen/stop`),
+    cloudId: (id: number) =>
+      request<{ cloudId: string }>('GET', `/api/rooms/${id}/cloud-id`).then(d => d.cloudId),
   },
 
   // ─── Goals ───────────────────────────────────────────────
@@ -265,6 +267,7 @@ export const api = {
         claude: { available: boolean; version?: string }
         ollama: { available: boolean; models: Array<{ name: string; size: number }> }
         resources: { cpuCount: number; loadAvg1m: number; loadAvg5m: number; memTotalGb: number; memFreeGb: number; memUsedPct: number }
+        updateInfo?: { latestVersion: string; releaseUrl: string; assets: { mac: string | null; windows: string | null; linux: string | null } } | null
       }>('GET', '/api/status'),
   },
 
@@ -308,5 +311,7 @@ export const api = {
   roomMessages: {
     list: (roomId: number, status?: string) =>
       request<RoomMessage[]>('GET', `/api/rooms/${roomId}/messages${qs({ status })}`),
+    markRead: (roomId: number, messageId: number) =>
+      request<{ ok: true }>('POST', `/api/rooms/${roomId}/messages/${messageId}/read`),
   },
 }

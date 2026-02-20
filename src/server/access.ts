@@ -25,6 +25,7 @@ const AUTO_MODE_USER_WHITELIST = [
   /^POST \/api\/settings\/.+$/,                  // change settings
   /^POST \/api\/rooms\/\d+\/credentials$/,       // manage credentials
   /^DELETE \/api\/credentials\/\d+$/,            // delete credential
+  /^POST \/api\/status\/simulate-update$/,       // dev: simulate update notification
 ]
 
 /** Sensitive read endpoints blocked for user token in auto mode. */

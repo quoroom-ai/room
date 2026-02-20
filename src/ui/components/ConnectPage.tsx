@@ -1,20 +1,16 @@
 import { useState, useEffect } from 'react'
+import {
+  detectPlatform,
+  pickLatestStableRelease,
+  parseReleaseAssets,
+  bestDownloadUrl,
+  type ReleaseAssets,
+  type GithubRelease,
+} from '../lib/releases'
 
 interface ConnectPageProps {
   port: string
   onRetry: () => void
-}
-
-function detectPlatform(): 'mac' | 'windows' | 'linux' {
-  const platform = (navigator as { userAgentData?: { platform?: string } }).userAgentData?.platform?.toLowerCase()
-    || navigator.platform?.toLowerCase() || ''
-  if (platform.includes('mac')) return 'mac'
-  if (platform.includes('win')) return 'windows'
-  if (platform.includes('linux')) return 'linux'
-  const ua = navigator.userAgent.toLowerCase()
-  if (ua.includes('mac')) return 'mac'
-  if (ua.includes('win')) return 'windows'
-  return 'linux'
 }
 
 const RELEASES_PAGE = 'https://github.com/quoroom-ai/room/releases'
@@ -37,30 +33,6 @@ const PLATFORM_INFO: Record<string, { label: string; note: string; steps: string
   },
 }
 
-interface PlatformAssets { installer: string | null; archive: string | null }
-interface ReleaseAssets { mac: PlatformAssets; windows: PlatformAssets; linux: PlatformAssets }
-interface GithubReleaseAsset { name: string; browser_download_url: string }
-interface GithubRelease {
-  tag_name: string
-  html_url: string
-  draft: boolean
-  prerelease: boolean
-  assets?: GithubReleaseAsset[]
-}
-
-function isTestTag(tag: string): boolean {
-  return /-test/i.test(tag)
-}
-
-function pickLatestStableRelease(releases: GithubRelease[]): GithubRelease | null {
-  for (const r of releases) {
-    if (r.draft || r.prerelease) continue
-    if (isTestTag(r.tag_name)) continue
-    return r
-  }
-  return null
-}
-
 function useReleaseAssets(): { assets: ReleaseAssets; releaseUrl: string } {
   const empty: ReleaseAssets = {
     mac: { installer: null, archive: null },
@@ -78,29 +50,11 @@ function useReleaseAssets(): { assets: ReleaseAssets; releaseUrl: string } {
         const latest = pickLatestStableRelease(releases)
         if (!latest?.assets) return
         setReleaseUrl(latest.html_url || RELEASES_PAGE)
-        const result: ReleaseAssets = {
-          mac: { installer: null, archive: null },
-          windows: { installer: null, archive: null },
-          linux: { installer: null, archive: null },
-        }
-        for (const a of latest.assets) {
-          const { name, browser_download_url: url } = a
-          if (name.endsWith('.pkg')) result.mac.installer = url
-          else if (name.includes('darwin-universal') && name.endsWith('.tar.gz')) result.mac.archive = url
-          else if (name.includes('setup.exe')) result.windows.installer = url
-          else if (name.includes('win-x64') && name.endsWith('.zip')) result.windows.archive = url
-          else if (name.endsWith('.deb')) result.linux.installer = url
-          else if (name.includes('linux-x64') && name.endsWith('.tar.gz')) result.linux.archive = url
-        }
-        setAssets(result)
+        setAssets(parseReleaseAssets(latest))
       })
       .catch(() => {})
   }, [])
   return { assets, releaseUrl }
-}
-
-function bestUrl(pa: PlatformAssets, fallbackReleaseUrl: string): string {
-  return pa.installer || pa.archive || fallbackReleaseUrl
 }
 
 export function ConnectPage({ port, onRetry }: ConnectPageProps): React.JSX.Element {
@@ -140,7 +94,7 @@ export function ConnectPage({ port, onRetry }: ConnectPageProps): React.JSX.Elem
         {/* Download — primary action */}
         <div className="space-y-2">
           <a
-            href={bestUrl(assets[platform], releaseUrl)}
+            href={bestDownloadUrl(assets[platform], releaseUrl)}
             className="block w-full py-2.5 text-sm font-medium text-white bg-gray-800 hover:bg-gray-900 rounded transition-colors"
           >
             {info.label}
@@ -155,13 +109,13 @@ export function ConnectPage({ port, onRetry }: ConnectPageProps): React.JSX.Elem
           {/* Other platforms */}
           <div className="flex items-center justify-center gap-2 text-[10px]">
             {platform !== 'mac' && (
-              <a href={bestUrl(assets.mac, releaseUrl)} className="text-gray-400 hover:text-gray-600 underline">macOS</a>
+              <a href={bestDownloadUrl(assets.mac, releaseUrl)} className="text-gray-400 hover:text-gray-600 underline">macOS</a>
             )}
             {platform !== 'windows' && (
-              <a href={bestUrl(assets.windows, releaseUrl)} className="text-gray-400 hover:text-gray-600 underline">Windows</a>
+              <a href={bestDownloadUrl(assets.windows, releaseUrl)} className="text-gray-400 hover:text-gray-600 underline">Windows</a>
             )}
             {platform !== 'linux' && (
-              <a href={bestUrl(assets.linux, releaseUrl)} className="text-gray-400 hover:text-gray-600 underline">Linux</a>
+              <a href={bestDownloadUrl(assets.linux, releaseUrl)} className="text-gray-400 hover:text-gray-600 underline">Linux</a>
             )}
           </div>
         </div>

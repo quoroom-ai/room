@@ -3,6 +3,7 @@ import { execSync } from 'node:child_process'
 import os from 'node:os'
 import { getDataDir } from '../db'
 import { isOllamaAvailable, listOllamaModels } from '../../shared/agent-executor'
+import { getUpdateInfo, simulateUpdate } from '../updateChecker'
 
 const startedAt = Date.now()
 
@@ -59,6 +60,11 @@ function getResources(): { cpuCount: number; loadAvg1m: number; loadAvg5m: numbe
 }
 
 export function registerStatusRoutes(router: Router): void {
+  router.post('/api/status/simulate-update', async () => {
+    await simulateUpdate()
+    return { data: { ok: true } }
+  })
+
   router.get('/api/status', async (ctx) => {
     const dataDir = getDataDir()
     const dbPath = ctx.db.name
@@ -75,6 +81,8 @@ export function registerStatusRoutes(router: Router): void {
         claude,
         ollama,
         resources,
+        updateInfo: getUpdateInfo(),
+        serverPlatform: process.platform === 'darwin' ? 'mac' : process.platform === 'win32' ? 'windows' : 'linux',
       }
     }
   })

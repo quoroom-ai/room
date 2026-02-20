@@ -1,37 +1,43 @@
 import { z } from 'zod'
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
-import { getMcpDatabase } from '../db'
-import * as queries from '../../shared/db-queries'
-import { provisionStation, startStation, stopStation, destroyStation, execOnStation, getStationLogs, getStationStatus } from '../../shared/station'
-import type { StationProvider, StationTier } from '../../shared/types'
+import {
+  getRoomCloudId,
+  listCloudStations,
+  execOnCloudStation,
+  getCloudStationLogs,
+  startCloudStation,
+  stopCloudStation,
+  deleteCloudStation,
+} from '../../shared/cloud-sync'
+
+const CLOUD_BASE = 'https://quoroom.ai'
 
 export function registerStationTools(server: McpServer): void {
   server.registerTool(
     'quoroom_station_create',
     {
       title: 'Create Station',
-      description: 'Provision a new cloud server (station) for the room. '
-        + 'RESPONSE STYLE: Confirm briefly in 1 sentence.',
+      description: 'Rent a cloud server (station) for the room via quoroom.ai. '
+        + 'Returns a payment URL — open it in a browser to subscribe. '
+        + 'The station appears in ~30 seconds after payment. '
+        + 'RESPONSE STYLE: Confirm briefly in 1 sentence, include the URL.',
       inputSchema: {
         roomId: z.number().describe('The room ID'),
         name: z.string().min(1).max(100).describe('Station name (e.g., "web-server", "scraper-01")'),
-        provider: z.enum(['flyio', 'e2b', 'modal', 'mock']).describe('Infrastructure provider'),
-        tier: z.enum(['micro', 'small', 'medium', 'large', 'ephemeral', 'gpu']).describe('Station tier/size'),
-        region: z.string().max(50).optional().describe('Region (e.g., "us-east-1")')
+        tier: z.enum(['micro', 'small', 'medium', 'large']).describe(
+          'Station tier: micro ($5/mo, 1 vCPU, 256 MB), small ($15/mo, 2 vCPU, 2 GB), '
+          + 'medium ($40/mo, 2 vCPU perf, 4 GB), large ($100/mo, 4 vCPU perf, 8 GB)'
+        )
       }
     },
-    async ({ roomId, name, provider, tier, region }) => {
-      const db = getMcpDatabase()
-      try {
-        const station = await provisionStation(db, roomId, name, provider as StationProvider, tier as StationTier, { region })
-        return {
-          content: [{
-            type: 'text' as const,
-            text: `Station "${name}" created (id: ${station.id}, provider: ${provider}, tier: ${tier}).`
-          }]
-        }
-      } catch (e) {
-        return { content: [{ type: 'text' as const, text: (e as Error).message }], isError: true }
+    async ({ roomId }) => {
+      const cloudRoomId = getRoomCloudId(roomId)
+      const url = `${CLOUD_BASE}/stations?room=${encodeURIComponent(cloudRoomId)}`
+      return {
+        content: [{
+          type: 'text' as const,
+          text: `To add a station, complete payment at: ${url}\n\nThe station will appear in your room within ~30 seconds after payment.`
+        }]
       }
     }
   )
@@ -40,22 +46,23 @@ export function registerStationTools(server: McpServer): void {
     'quoroom_station_list',
     {
       title: 'List Stations',
-      description: 'List all stations, optionally filtered by room or status.',
+      description: 'List all stations for the room, optionally filtered by status.',
       inputSchema: {
-        roomId: z.number().optional().describe('Filter by room ID'),
-        status: z.enum(['provisioning', 'running', 'stopped', 'error', 'deleted']).optional().describe('Filter by status')
+        roomId: z.number().describe('The room ID'),
+        status: z.enum(['pending', 'active', 'stopped', 'canceling', 'past_due', 'error']).optional()
+          .describe('Filter by status')
       }
     },
     async ({ roomId, status }) => {
-      const db = getMcpDatabase()
-      const stations = queries.listStations(db, roomId, status)
-      if (stations.length === 0) {
+      const cloudRoomId = getRoomCloudId(roomId)
+      const stations = await listCloudStations(cloudRoomId)
+      const filtered = status ? stations.filter(s => s.status === status) : stations
+      if (filtered.length === 0) {
         return { content: [{ type: 'text' as const, text: 'No stations found.' }] }
       }
-      const list = stations.map(s => ({
-        id: s.id, name: s.name, provider: s.provider, tier: s.tier,
-        status: s.status, region: s.region, monthlyCost: s.monthlyCost,
-        roomId: s.roomId, createdAt: s.createdAt
+      const list = filtered.map(s => ({
+        id: s.id, name: s.stationName, tier: s.tier, status: s.status,
+        monthlyCost: s.monthlyCost, createdAt: s.createdAt
       }))
       return { content: [{ type: 'text' as const, text: JSON.stringify(list, null, 2) }] }
     }
@@ -67,17 +74,14 @@ export function registerStationTools(server: McpServer): void {
       title: 'Start Station',
       description: 'Start a stopped station. RESPONSE STYLE: Confirm briefly in 1 sentence.',
       inputSchema: {
-        id: z.number().describe('The station ID to start')
+        roomId: z.number().describe('The room ID'),
+        id: z.number().describe('The station subscription ID to start')
       }
     },
-    async ({ id }) => {
-      const db = getMcpDatabase()
-      try {
-        const station = await startStation(db, id)
-        return { content: [{ type: 'text' as const, text: `Station "${station.name}" started.` }] }
-      } catch (e) {
-        return { content: [{ type: 'text' as const, text: (e as Error).message }], isError: true }
-      }
+    async ({ roomId, id }) => {
+      const cloudRoomId = getRoomCloudId(roomId)
+      await startCloudStation(cloudRoomId, id)
+      return { content: [{ type: 'text' as const, text: `Station ${id} start requested.` }] }
     }
   )
 
@@ -87,17 +91,14 @@ export function registerStationTools(server: McpServer): void {
       title: 'Stop Station',
       description: 'Stop a running station. RESPONSE STYLE: Confirm briefly in 1 sentence.',
       inputSchema: {
-        id: z.number().describe('The station ID to stop')
+        roomId: z.number().describe('The room ID'),
+        id: z.number().describe('The station subscription ID to stop')
       }
     },
-    async ({ id }) => {
-      const db = getMcpDatabase()
-      try {
-        const station = await stopStation(db, id)
-        return { content: [{ type: 'text' as const, text: `Station "${station.name}" stopped.` }] }
-      } catch (e) {
-        return { content: [{ type: 'text' as const, text: (e as Error).message }], isError: true }
-      }
+    async ({ roomId, id }) => {
+      const cloudRoomId = getRoomCloudId(roomId)
+      await stopCloudStation(cloudRoomId, id)
+      return { content: [{ type: 'text' as const, text: `Station ${id} stop requested.` }] }
     }
   )
 
@@ -105,18 +106,21 @@ export function registerStationTools(server: McpServer): void {
     'quoroom_station_delete',
     {
       title: 'Delete Station',
-      description: 'Permanently destroy a station. RESPONSE STYLE: Confirm briefly in 1 sentence.',
+      description: 'Cancel a station subscription and destroy the Fly.io machine. '
+        + 'RESPONSE STYLE: Confirm briefly in 1 sentence.',
       inputSchema: {
-        id: z.number().describe('The station ID to destroy')
+        roomId: z.number().describe('The room ID'),
+        id: z.number().describe('The station subscription ID to delete')
       }
     },
-    async ({ id }) => {
-      const db = getMcpDatabase()
-      try {
-        await destroyStation(db, id)
-        return { content: [{ type: 'text' as const, text: `Station ${id} destroyed.` }] }
-      } catch (e) {
-        return { content: [{ type: 'text' as const, text: (e as Error).message }], isError: true }
+    async ({ roomId, id }) => {
+      const cloudRoomId = getRoomCloudId(roomId)
+      await deleteCloudStation(cloudRoomId, id)
+      return {
+        content: [{
+          type: 'text' as const,
+          text: `Station ${id} deletion requested (subscription canceled, machine destroyed).`
+        }]
       }
     }
   )
@@ -125,24 +129,27 @@ export function registerStationTools(server: McpServer): void {
     'quoroom_station_exec',
     {
       title: 'Execute on Station',
-      description: 'Execute a command on a station and return stdout/stderr.',
+      description: 'Execute a shell command on a station and return stdout/stderr.',
       inputSchema: {
-        id: z.number().describe('The station ID'),
+        roomId: z.number().describe('The room ID'),
+        id: z.number().describe('The station subscription ID'),
         command: z.string().min(1).describe('Shell command to execute')
       }
     },
-    async ({ id, command }) => {
-      const db = getMcpDatabase()
-      try {
-        const result = await execOnStation(db, id, command)
+    async ({ roomId, id, command }) => {
+      const cloudRoomId = getRoomCloudId(roomId)
+      const result = await execOnCloudStation(cloudRoomId, id, command)
+      if (!result) {
         return {
-          content: [{
-            type: 'text' as const,
-            text: JSON.stringify({ exitCode: result.exitCode, stdout: result.stdout, stderr: result.stderr }, null, 2)
-          }]
+          content: [{ type: 'text' as const, text: 'Failed to execute command on station.' }],
+          isError: true
         }
-      } catch (e) {
-        return { content: [{ type: 'text' as const, text: (e as Error).message }], isError: true }
+      }
+      return {
+        content: [{
+          type: 'text' as const,
+          text: JSON.stringify({ exitCode: result.exitCode, stdout: result.stdout, stderr: result.stderr }, null, 2)
+        }]
       }
     }
   )
@@ -153,18 +160,21 @@ export function registerStationTools(server: McpServer): void {
       title: 'Station Logs',
       description: 'Get recent logs from a station.',
       inputSchema: {
-        id: z.number().describe('The station ID'),
+        roomId: z.number().describe('The room ID'),
+        id: z.number().describe('The station subscription ID'),
         lines: z.number().int().positive().max(1000).optional().describe('Number of log lines (default: all)')
       }
     },
-    async ({ id, lines }) => {
-      const db = getMcpDatabase()
-      try {
-        const logs = await getStationLogs(db, id, lines)
-        return { content: [{ type: 'text' as const, text: logs || '(no logs)' }] }
-      } catch (e) {
-        return { content: [{ type: 'text' as const, text: (e as Error).message }], isError: true }
+    async ({ roomId, id, lines }) => {
+      const cloudRoomId = getRoomCloudId(roomId)
+      const logs = await getCloudStationLogs(cloudRoomId, id, lines)
+      if (logs === null) {
+        return {
+          content: [{ type: 'text' as const, text: 'Failed to retrieve logs.' }],
+          isError: true
+        }
       }
+      return { content: [{ type: 'text' as const, text: logs || '(no logs)' }] }
     }
   )
 
@@ -172,79 +182,31 @@ export function registerStationTools(server: McpServer): void {
     'quoroom_station_status',
     {
       title: 'Station Status',
-      description: 'Get live status for a station from the provider.',
+      description: 'Get live status for a station from the cloud.',
       inputSchema: {
-        id: z.number().describe('The station ID')
+        roomId: z.number().describe('The room ID'),
+        id: z.number().describe('The station subscription ID')
       }
     },
-    async ({ id }) => {
-      const db = getMcpDatabase()
-      try {
-        const station = queries.getStation(db, id)
-        if (!station) return { content: [{ type: 'text' as const, text: `Station ${id} not found` }], isError: true }
-        const liveStatus = station.externalId ? await getStationStatus(db, id) : station.status
+    async ({ roomId, id }) => {
+      const cloudRoomId = getRoomCloudId(roomId)
+      const stations = await listCloudStations(cloudRoomId)
+      const station = stations.find(s => s.id === id)
+      if (!station) {
         return {
-          content: [{
-            type: 'text' as const,
-            text: JSON.stringify({
-              id: station.id, name: station.name, provider: station.provider,
-              tier: station.tier, status: liveStatus, region: station.region,
-              monthlyCost: station.monthlyCost, externalId: station.externalId
-            }, null, 2)
-          }]
+          content: [{ type: 'text' as const, text: `Station ${id} not found` }],
+          isError: true
         }
-      } catch (e) {
-        return { content: [{ type: 'text' as const, text: (e as Error).message }], isError: true }
       }
-    }
-  )
-
-  server.registerTool(
-    'quoroom_station_deploy',
-    {
-      title: 'Deploy to Station',
-      description: 'Deploy code or a container to a station. Currently a placeholder — provider-specific deployment coming soon. '
-        + 'RESPONSE STYLE: Confirm briefly in 1 sentence.',
-      inputSchema: {
-        id: z.number().describe('The station ID'),
-        source: z.string().min(1).describe('Source to deploy (git URL, Docker image, or path)')
-      }
-    },
-    async ({ id, source: _source }) => {
-      const db = getMcpDatabase()
-      const station = queries.getStation(db, id)
-      if (!station) return { content: [{ type: 'text' as const, text: `Station ${id} not found` }], isError: true }
       return {
         content: [{
           type: 'text' as const,
-          text: `Deploy to station "${station.name}" is not yet implemented for provider "${station.provider}". Use station_exec to run deployment commands manually.`
-        }],
-        isError: true
-      }
-    }
-  )
-
-  server.registerTool(
-    'quoroom_station_domain',
-    {
-      title: 'Station Domain',
-      description: 'Configure a custom domain for a station. Currently a placeholder — provider-specific domain config coming soon. '
-        + 'RESPONSE STYLE: Confirm briefly in 1 sentence.',
-      inputSchema: {
-        id: z.number().describe('The station ID'),
-        domain: z.string().min(1).describe('Custom domain (e.g., "myapp.com")')
-      }
-    },
-    async ({ id, domain: _domain }) => {
-      const db = getMcpDatabase()
-      const station = queries.getStation(db, id)
-      if (!station) return { content: [{ type: 'text' as const, text: `Station ${id} not found` }], isError: true }
-      return {
-        content: [{
-          type: 'text' as const,
-          text: `Custom domain configuration for station "${station.name}" is not yet implemented for provider "${station.provider}".`
-        }],
-        isError: true
+          text: JSON.stringify({
+            id: station.id, name: station.stationName, tier: station.tier,
+            status: station.status, monthlyCost: station.monthlyCost,
+            currentPeriodEnd: station.currentPeriodEnd, createdAt: station.createdAt
+          }, null, 2)
+        }]
       }
     }
   )

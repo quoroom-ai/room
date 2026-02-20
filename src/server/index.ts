@@ -6,6 +6,7 @@
  */
 
 import http from 'node:http'
+import https from 'node:https'
 import { URL } from 'node:url'
 import fs from 'node:fs'
 import path from 'node:path'
@@ -29,8 +30,59 @@ import { createWsServer } from './ws'
 import { stopCloudSync } from '../shared/cloud-sync'
 import { initCloudSync } from './cloud'
 import { _stopAllLoops } from '../shared/agent-loop'
+import { initUpdateChecker, stopUpdateChecker, getUpdateInfo } from './updateChecker'
 
 const DEFAULT_PORT = 3700
+
+/** Fetch a URL following redirects and pipe the response body to `res`. */
+function streamWithRedirects(
+  url: string,
+  res: http.ServerResponse,
+  corsHeaders: Record<string, string>,
+  filename: string,
+  depth = 0
+): void {
+  if (depth > 5) {
+    if (!res.headersSent) {
+      res.writeHead(502, corsHeaders)
+      res.end(JSON.stringify({ error: 'Too many redirects' }))
+    }
+    return
+  }
+  try {
+    const parsed = new URL(url)
+    const mod = parsed.protocol === 'https:' ? https : http
+    mod.get(url, { headers: { 'User-Agent': 'quoroom-updater/1.0' } }, (assetRes) => {
+      if (
+        (assetRes.statusCode === 301 || assetRes.statusCode === 302 || assetRes.statusCode === 307) &&
+        assetRes.headers.location
+      ) {
+        assetRes.resume()
+        streamWithRedirects(assetRes.headers.location, res, corsHeaders, filename, depth + 1)
+        return
+      }
+      const headers: Record<string, string> = {
+        ...corsHeaders,
+        'Content-Disposition': `attachment; filename="${filename}"`,
+        'Content-Type': (assetRes.headers['content-type'] as string) || 'application/octet-stream',
+      }
+      const contentLength = assetRes.headers['content-length']
+      if (contentLength) headers['Content-Length'] = contentLength as string
+      res.writeHead(assetRes.statusCode ?? 200, headers)
+      assetRes.pipe(res)
+    }).on('error', () => {
+      if (!res.headersSent) {
+        res.writeHead(502, corsHeaders)
+        res.end(JSON.stringify({ error: 'Failed to fetch installer' }))
+      }
+    })
+  } catch {
+    if (!res.headersSent) {
+      res.writeHead(500, corsHeaders)
+      res.end(JSON.stringify({ error: 'Internal error' }))
+    }
+  }
+}
 
 export interface ServerOptions {
   /** Pass a pre-initialized DB (for tests). If omitted, uses getServerDatabase(). */
@@ -220,7 +272,10 @@ export function createApiServer(options: ServerOptions = {}): {
 
     // All other /api/* routes require auth
     if (pathname.startsWith('/api/')) {
-      const role = validateToken(req.headers.authorization)
+      // Support token via ?token= query param (used for binary download links)
+      const queryToken = url.searchParams.get('token')
+      const authValue = req.headers.authorization ?? (queryToken ? `Bearer ${queryToken}` : undefined)
+      const role = validateToken(authValue)
       if (!role) {
         res.writeHead(401, responseHeaders)
         res.end(JSON.stringify({ error: 'Unauthorized' }))
@@ -231,6 +286,27 @@ export function createApiServer(options: ServerOptions = {}): {
       if (!isAllowedForRole(role, req.method!, pathname, db)) {
         res.writeHead(403, responseHeaders)
         res.end(JSON.stringify({ error: 'Forbidden: auto mode restricts this action' }))
+        return
+      }
+
+      // Binary streaming download — must be handled before router (not JSON)
+      if (pathname === '/api/status/update/download' && req.method === 'GET') {
+        const info = getUpdateInfo()
+        if (!info) {
+          res.writeHead(404, responseHeaders)
+          res.end(JSON.stringify({ error: 'No update available' }))
+          return
+        }
+        const osPlatform = process.platform === 'darwin' ? 'mac'
+          : process.platform === 'win32' ? 'windows' : 'linux'
+        const assetUrl = info.assets[osPlatform as 'mac' | 'windows' | 'linux']
+        if (!assetUrl) {
+          res.writeHead(404, responseHeaders)
+          res.end(JSON.stringify({ error: `No installer for ${osPlatform}` }))
+          return
+        }
+        const filename = assetUrl.split('/').pop()?.split('?')[0] ?? 'installer'
+        streamWithRedirects(assetUrl, res, responseHeaders, filename)
         return
       }
 
@@ -371,6 +447,9 @@ export function startServer(options: ServerOptions = {}): void {
   // Start cloud sync if public mode is enabled
   initCloudSync(serverDb)
 
+  // Start background update checker (polls GitHub every 4 hours)
+  initUpdateChecker()
+
   function listen(): void {
     server.listen(port, () => {
       const dashboardUrl = 'https://app.quoroom.ai'
@@ -408,6 +487,7 @@ export function startServer(options: ServerOptions = {}): void {
     console.error('Shutting down...')
     _stopAllLoops()
     stopCloudSync()
+    stopUpdateChecker()
     server.close()
     closeServerDatabase()
     process.exit(0)
@@ -416,6 +496,7 @@ export function startServer(options: ServerOptions = {}): void {
   process.on('SIGTERM', () => {
     _stopAllLoops()
     stopCloudSync()
+    stopUpdateChecker()
     server.close()
     closeServerDatabase()
     process.exit(0)

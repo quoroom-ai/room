@@ -4,6 +4,7 @@ import * as queries from '../../shared/db-queries'
 import { eventBus } from '../event-bus'
 import { triggerAgent, pauseAgent, isAgentRunning } from '../../shared/agent-loop'
 import { initCloudSync } from '../cloud'
+import { getRoomCloudId } from '../../shared/cloud-sync'
 import { QUEEN_DEFAULTS_BY_PLAN, type ClaudePlan } from '../../shared/constants'
 import type { ActivityEventType } from '../../shared/types'
 
@@ -54,6 +55,13 @@ export function registerRoomRoutes(router: Router): void {
     } catch (e) {
       return { status: 404, error: (e as Error).message }
     }
+  })
+
+  router.get('/api/rooms/:id/cloud-id', (ctx) => {
+    const id = Number(ctx.params.id)
+    const room = queries.getRoom(ctx.db, id)
+    if (!room) return { status: 404, error: 'Room not found' }
+    return { data: { cloudId: getRoomCloudId(id) } }
   })
 
   router.get('/api/rooms/:id/activity', (ctx) => {

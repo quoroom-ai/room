@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { getToken, clearToken } from './lib/auth'
+import { getToken, clearToken, API_BASE } from './lib/auth'
 import { TabBar, mainTabs, type Tab } from './components/TabBar'
 import { StatusPanel } from './components/StatusPanel'
 import { MemoryPanel } from './components/MemoryPanel'
@@ -18,10 +18,13 @@ import { TransactionsPanel } from './components/TransactionsPanel'
 import { StationsPanel } from './components/StationsPanel'
 import { RoomSettingsPanel } from './components/RoomSettingsPanel'
 import { ConnectPage } from './components/ConnectPage'
+import { WalkthroughModal } from './components/WalkthroughModal'
+import { UpdateModal } from './components/UpdateModal'
 import { useNotifications } from './hooks/useNotifications'
+import { semverGt } from './lib/releases'
 import { useInstallPrompt, type InstallPrompt } from './hooks/useInstallPrompt'
 import { api } from './lib/client'
-import type { Room } from '@shared/types'
+import type { Room, Escalation, RoomMessage } from '@shared/types'
 
 const ADVANCED_TABS = new Set<Tab>(
   mainTabs.filter((tab) => tab.advanced).map((tab) => tab.id)
@@ -91,9 +94,21 @@ function App(): React.JSX.Element {
   const [createRoomBusy, setCreateRoomBusy] = useState(false)
   const [createRoomError, setCreateRoomError] = useState<string | null>(null)
 
+  const [messagesUnread, setMessagesUnread] = useState(0)
+
   useNotifications()
   const installPrompt = useInstallPrompt()
   const [installDismissed, setInstallDismissed] = useState(() => localStorage.getItem('quoroom_install_dismissed') === 'true')
+  const [showWalkthrough, setShowWalkthrough] = useState(() => !localStorage.getItem('quoroom_walkthrough_seen'))
+
+  // Update check — fetch /api/status once on startup (and every 30 min) to detect new releases
+  const [serverUpdateInfo, setServerUpdateInfo] = useState<{
+    currentVersion: string
+    latestVersion: string
+    releaseUrl: string
+    assets: { mac: string | null; windows: string | null; linux: string | null }
+  } | null>(null)
+  const [updateDismissed, setUpdateDismissed] = useState(false)
 
   // Remote origin gate: 'probing' → 'connect' or redirect to localhost
   const [gate, setGate] = useState<'probing' | 'connect' | 'app'>(() =>
@@ -107,6 +122,24 @@ function App(): React.JSX.Element {
       if (!redirected) setGate('connect')
     })
   }, [gate])
+
+  // Poll unread message counts for the expanded room (for sidebar badge)
+  useEffect(() => {
+    if (!ready || expandedRoomId === null) { setMessagesUnread(0); return }
+    async function fetchUnread(): Promise<void> {
+      const [esc, msgs] = await Promise.all([
+        api.escalations.list(expandedRoomId!).catch(() => [] as Escalation[]),
+        api.roomMessages.list(expandedRoomId!).catch(() => [] as RoomMessage[]),
+      ])
+      setMessagesUnread(
+        esc.filter(e => e.status === 'pending').length +
+        msgs.filter(m => m.status === 'unread').length
+      )
+    }
+    void fetchUnread()
+    const interval = setInterval(fetchUnread, 10000)
+    return () => clearInterval(interval)
+  }, [expandedRoomId, ready])
 
   // Local origin: normal auth flow
   useEffect(() => {
@@ -122,6 +155,28 @@ function App(): React.JSX.Element {
       setAdvancedMode(v === 'true')
     }).catch(() => {})
   }, [gate])
+
+  useEffect(() => {
+    if (gate !== 'app' || !ready) return
+    function checkStatus(): void {
+      api.status.get().then((status) => {
+        const ui = status.updateInfo
+        if (!ui) return
+        if (!semverGt(ui.latestVersion, status.version)) return
+        const dismissed = localStorage.getItem('quoroom_update_dismissed')
+        if (dismissed === ui.latestVersion) return
+        setServerUpdateInfo({
+          currentVersion: status.version,
+          latestVersion: ui.latestVersion,
+          releaseUrl: ui.releaseUrl,
+          assets: ui.assets,
+        })
+      }).catch(() => {})
+    }
+    checkStatus()
+    const interval = setInterval(checkStatus, 30 * 60 * 1000)
+    return () => clearInterval(interval)
+  }, [gate, ready])
 
   function syncRooms(r: Room[]): void {
     setRooms(r)
@@ -281,7 +336,7 @@ function App(): React.JSX.Element {
       case 'settings':
         return <SettingsPanel advancedMode={advancedMode} onAdvancedModeChange={handleAdvancedModeChange} installPrompt={installPrompt} onNavigate={(t) => handleTabChange(t as Tab)} />
       case 'help':
-        return <HelpPanel installPrompt={installPrompt} />
+        return <HelpPanel installPrompt={installPrompt} onStartWalkthrough={() => setShowWalkthrough(true)} />
       default:
         return <StatusPanel onNavigate={(t) => handleTabChange(t as Tab)} advancedMode={advancedMode} roomId={selectedRoomId} />
     }
@@ -414,7 +469,14 @@ function App(): React.JSX.Element {
                             : 'text-gray-500 hover:text-gray-700 hover:bg-gray-100'
                         }`}
                       >
-                        {t.label}
+                        <span className="flex items-center gap-1">
+                          {t.label}
+                          {t.id === 'messages' && messagesUnread > 0 && (
+                            <span className="inline-flex items-center justify-center min-w-[14px] h-3.5 px-0.5 rounded-full bg-red-500 text-white text-[8px] font-bold leading-none">
+                              {messagesUnread}
+                            </span>
+                          )}
+                        </span>
                       </button>
                     ))}
                   </div>
@@ -486,6 +548,28 @@ function App(): React.JSX.Element {
           {renderPanel()}
         </div>
       </div>
+
+      {showWalkthrough && <WalkthroughModal onClose={() => setShowWalkthrough(false)} />}
+      {serverUpdateInfo && !updateDismissed && (
+        <UpdateModal
+          version={serverUpdateInfo.latestVersion}
+          currentVersion={serverUpdateInfo.currentVersion}
+          releaseUrl={serverUpdateInfo.releaseUrl}
+          onDownload={async () => {
+            const token = await getToken()
+            const a = document.createElement('a')
+            a.href = `${API_BASE}/api/status/update/download?token=${encodeURIComponent(token)}`
+            document.body.appendChild(a)
+            a.click()
+            document.body.removeChild(a)
+          }}
+          onSkip={() => {
+            localStorage.setItem('quoroom_update_dismissed', serverUpdateInfo.latestVersion)
+            setUpdateDismissed(true)
+          }}
+          onDismiss={() => setUpdateDismissed(true)}
+        />
+      )}
     </div>
   )
 }

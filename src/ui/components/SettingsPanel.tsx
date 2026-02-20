@@ -1,15 +1,22 @@
 import { useEffect, useState } from 'react'
 import { useContainerWidth } from '../hooks/useContainerWidth'
 import { api } from '../lib/client'
-import { API_BASE, clearToken } from '../lib/auth'
+import { API_BASE, clearToken, getToken } from '../lib/auth'
 import * as notif from '../lib/notifications'
 import type { InstallPrompt } from '../hooks/useInstallPrompt'
+import { semverGt } from '../lib/releases'
 
 interface SettingsPanelProps {
   advancedMode: boolean
   onAdvancedModeChange: (enabled: boolean) => void
   installPrompt: InstallPrompt
   onNavigate?: (tab: string) => void
+}
+
+interface UpdateInfo {
+  latestVersion: string
+  releaseUrl: string
+  assets: { mac: string | null; windows: string | null; linux: string | null }
 }
 
 interface ServerStatus {
@@ -20,6 +27,7 @@ interface ServerStatus {
   claude: { available: boolean; version?: string }
   ollama?: { available: boolean; models: Array<{ name: string; size: number }> }
   resources?: { cpuCount: number; loadAvg1m: number; loadAvg5m: number; memTotalGb: number; memFreeGb: number; memUsedPct: number }
+  updateInfo?: UpdateInfo | null
 }
 
 export function SettingsPanel({ advancedMode, onAdvancedModeChange, installPrompt, onNavigate }: SettingsPanelProps): React.JSX.Element {
@@ -28,8 +36,23 @@ export function SettingsPanel({ advancedMode, onAdvancedModeChange, installPromp
   const [notifications, setNotifications] = useState<boolean | null>(null)
   const [notifDenied, setNotifDenied] = useState(false)
   const [serverStatus, setServerStatus] = useState<ServerStatus | null>(null)
+  const [updateChecking, setUpdateChecking] = useState(false)
+  const [updateChecked, setUpdateChecked] = useState(false)
   const [claudePlan, setClaudePlan] = useState<'pro' | 'max' | 'api' | null>(null)
   const [telemetryEnabled, setTelemetryEnabled] = useState<boolean | null>(null)
+
+  async function handleCheckForUpdates(): Promise<void> {
+    setUpdateChecking(true)
+    try {
+      const status = await api.status.get()
+      setServerStatus(status)
+      setUpdateChecked(true)
+    } catch {
+      // ignore
+    } finally {
+      setUpdateChecking(false)
+    }
+  }
 
   useEffect(() => {
     api.settings.get('notifications_enabled').then((v) => {
@@ -294,8 +317,48 @@ export function SettingsPanel({ advancedMode, onAdvancedModeChange, installPromp
         <div className="bg-gray-50 rounded-lg p-2 divide-y divide-gray-100">
           <div className="flex items-center justify-between text-xs py-1.5">
             <span className="font-medium text-gray-600">Version</span>
-            <span className="text-gray-400">{serverStatus?.version ?? '...'}</span>
+            <div className="flex items-center gap-2">
+              <span className="text-gray-400">{serverStatus?.version ?? '...'}</span>
+              {(() => {
+                const ui = serverStatus?.updateInfo
+                const hasUpdate = ui && serverStatus && semverGt(ui.latestVersion, serverStatus.version)
+                if (hasUpdate) return null
+                if (updateChecking) return <span className="text-gray-400">Checking...</span>
+                if (updateChecked) return <span className="text-green-600">Up to date</span>
+                return (
+                  <button
+                    onClick={() => void handleCheckForUpdates()}
+                    className="text-blue-500 hover:text-blue-700"
+                  >
+                    Check
+                  </button>
+                )
+              })()}
+            </div>
           </div>
+          {(() => {
+            const ui = serverStatus?.updateInfo
+            if (!ui || !serverStatus) return null
+            if (!semverGt(ui.latestVersion, serverStatus.version)) return null
+            return (
+              <div className="flex items-center justify-between text-xs py-1.5">
+                <span className="font-medium text-green-600">v{ui.latestVersion} available</span>
+                <button
+                  onClick={async () => {
+                    const token = await getToken()
+                    const a = document.createElement('a')
+                    a.href = `${API_BASE}/api/status/update/download?token=${encodeURIComponent(token)}`
+                    document.body.appendChild(a)
+                    a.click()
+                    document.body.removeChild(a)
+                  }}
+                  className="px-2 py-0.5 bg-green-500 text-white rounded hover:bg-green-600 transition-colors"
+                >
+                  Download
+                </button>
+              </div>
+            )
+          })()}
           {row('Database', serverStatus?.dbPath ?? null)}
           {row('Data Directory', serverStatus?.dataDir ?? null)}
         </div>

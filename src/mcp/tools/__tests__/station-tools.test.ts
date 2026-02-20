@@ -2,7 +2,6 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import Database from 'better-sqlite3'
 import { initTestDb } from '../../../shared/__tests__/helpers/test-db'
 import * as queries from '../../../shared/db-queries'
-import { MockProvider, registerProvider } from '../../../shared/station'
 import { createToolHarness } from './helpers/tool-harness'
 
 const { toolHandlers, mockServer, getResponseText } = createToolHarness()
@@ -12,14 +11,36 @@ vi.mock('../../db', () => ({
   getMcpDatabase: () => db
 }))
 
+// Mock cloud-sync functions
+vi.mock('../../../shared/cloud-sync', () => ({
+  getRoomCloudId: (roomId: number) => `mock-cloud-id-${roomId}`,
+  listCloudStations: vi.fn().mockResolvedValue([
+    {
+      id: 1,
+      roomId: 'mock-cloud-id-1',
+      tier: 'small',
+      stationName: 'web-server',
+      flyAppName: 'qr-web-server-abc',
+      flyMachineId: 'mch123',
+      status: 'active',
+      monthlyCost: 15,
+      currentPeriodEnd: null,
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    }
+  ]),
+  execOnCloudStation: vi.fn().mockResolvedValue({ stdout: 'hello\n', stderr: '', exitCode: 0 }),
+  getCloudStationLogs: vi.fn().mockResolvedValue('log line 1\nlog line 2'),
+  startCloudStation: vi.fn().mockResolvedValue(undefined),
+  stopCloudStation: vi.fn().mockResolvedValue(undefined),
+  deleteCloudStation: vi.fn().mockResolvedValue(undefined),
+}))
+
 let roomId: number
 
 beforeEach(async () => {
   toolHandlers.clear()
   db = initTestDb()
-
-  // Fresh mock provider
-  registerProvider('mock', new MockProvider())
 
   const room = queries.createRoom(db, 'Station Test Room', 'deploy things')
   roomId = room.id
@@ -30,163 +51,122 @@ beforeEach(async () => {
 
 afterEach(() => {
   db.close()
+  vi.clearAllMocks()
 })
 
 describe('quoroom_station_create', () => {
-  it('creates a station', async () => {
+  it('returns checkout URL', async () => {
     const handler = toolHandlers.get('quoroom_station_create')!
-    const result = await handler({ roomId, name: 'web-server', provider: 'mock', tier: 'small' })
+    const result = await handler({ roomId, name: 'web-server', tier: 'small' })
     expect(result.isError).toBeUndefined()
     const text = getResponseText(result)
-    expect(text).toContain('web-server')
-    expect(text).toContain('created')
-  })
-
-  it('returns error for nonexistent room', async () => {
-    const handler = toolHandlers.get('quoroom_station_create')!
-    const result = await handler({ roomId: 9999, name: 'test', provider: 'mock', tier: 'micro' })
-    expect(result.isError).toBe(true)
-    expect(getResponseText(result)).toContain('not found')
+    expect(text).toContain('https://quoroom.ai/stations?room=')
+    expect(text).toContain('mock-cloud-id')
   })
 })
 
 describe('quoroom_station_list', () => {
-  it('returns empty when no stations', async () => {
+  it('returns stations from cloud', async () => {
     const handler = toolHandlers.get('quoroom_station_list')!
-    const result = await handler({})
-    expect(getResponseText(result)).toBe('No stations found.')
+    const result = await handler({ roomId })
+    expect(result.isError).toBeUndefined()
+    const parsed = JSON.parse(getResponseText(result))
+    expect(Array.isArray(parsed)).toBe(true)
+    expect(parsed[0].name).toBe('web-server')
+    expect(parsed[0].tier).toBe('small')
   })
 
-  it('lists created stations', async () => {
-    const createHandler = toolHandlers.get('quoroom_station_create')!
-    await createHandler({ roomId, name: 'web', provider: 'mock', tier: 'small' })
-
+  it('returns empty message when no stations', async () => {
+    const { listCloudStations } = await import('../../../shared/cloud-sync')
+    vi.mocked(listCloudStations).mockResolvedValueOnce([])
     const handler = toolHandlers.get('quoroom_station_list')!
-    const result = await handler({})
-    const parsed = JSON.parse(getResponseText(result))
-    expect(parsed.length).toBe(1)
-    expect(parsed[0].name).toBe('web')
+    const result = await handler({ roomId })
+    expect(getResponseText(result)).toBe('No stations found.')
   })
 })
 
 describe('quoroom_station_start', () => {
-  it('starts a stopped station', async () => {
-    const createHandler = toolHandlers.get('quoroom_station_create')!
-    await createHandler({ roomId, name: 'test', provider: 'mock', tier: 'micro' })
-    const stations = queries.listStations(db, roomId)
-    const stationId = stations[0].id
-
-    // Stop it first
-    const stopHandler = toolHandlers.get('quoroom_station_stop')!
-    await stopHandler({ id: stationId })
-
+  it('requests station start', async () => {
     const handler = toolHandlers.get('quoroom_station_start')!
-    const result = await handler({ id: stationId })
+    const result = await handler({ roomId, id: 1 })
     expect(result.isError).toBeUndefined()
-    expect(getResponseText(result)).toContain('started')
+    expect(getResponseText(result)).toContain('start requested')
   })
 })
 
 describe('quoroom_station_stop', () => {
-  it('stops a running station', async () => {
-    const createHandler = toolHandlers.get('quoroom_station_create')!
-    await createHandler({ roomId, name: 'test', provider: 'mock', tier: 'micro' })
-    const stations = queries.listStations(db, roomId)
-
+  it('requests station stop', async () => {
     const handler = toolHandlers.get('quoroom_station_stop')!
-    const result = await handler({ id: stations[0].id })
+    const result = await handler({ roomId, id: 1 })
     expect(result.isError).toBeUndefined()
-    expect(getResponseText(result)).toContain('stopped')
+    expect(getResponseText(result)).toContain('stop requested')
   })
 })
 
 describe('quoroom_station_delete', () => {
-  it('destroys a station', async () => {
-    const createHandler = toolHandlers.get('quoroom_station_create')!
-    await createHandler({ roomId, name: 'test', provider: 'mock', tier: 'micro' })
-    const stations = queries.listStations(db, roomId)
-
+  it('requests station deletion', async () => {
     const handler = toolHandlers.get('quoroom_station_delete')!
-    const result = await handler({ id: stations[0].id })
+    const result = await handler({ roomId, id: 1 })
     expect(result.isError).toBeUndefined()
-    expect(getResponseText(result)).toContain('destroyed')
+    expect(getResponseText(result)).toContain('deletion requested')
   })
 })
 
 describe('quoroom_station_exec', () => {
-  it('executes a command', async () => {
-    const createHandler = toolHandlers.get('quoroom_station_create')!
-    await createHandler({ roomId, name: 'test', provider: 'mock', tier: 'micro' })
-    const stations = queries.listStations(db, roomId)
-
+  it('executes command and returns result', async () => {
     const handler = toolHandlers.get('quoroom_station_exec')!
-    const result = await handler({ id: stations[0].id, command: 'ls -la' })
+    const result = await handler({ roomId, id: 1, command: 'echo hello' })
+    expect(result.isError).toBeUndefined()
     const parsed = JSON.parse(getResponseText(result))
     expect(parsed.exitCode).toBe(0)
-    expect(parsed.stdout).toContain('ls -la')
+    expect(parsed.stdout).toBe('hello\n')
+  })
+
+  it('returns error when exec fails', async () => {
+    const { execOnCloudStation } = await import('../../../shared/cloud-sync')
+    vi.mocked(execOnCloudStation).mockResolvedValueOnce(null)
+    const handler = toolHandlers.get('quoroom_station_exec')!
+    const result = await handler({ roomId, id: 1, command: 'ls' })
+    expect(result.isError).toBe(true)
   })
 })
 
 describe('quoroom_station_logs', () => {
   it('returns station logs', async () => {
-    const createHandler = toolHandlers.get('quoroom_station_create')!
-    await createHandler({ roomId, name: 'test', provider: 'mock', tier: 'micro' })
-    const stations = queries.listStations(db, roomId)
-
     const handler = toolHandlers.get('quoroom_station_logs')!
-    const result = await handler({ id: stations[0].id })
-    expect(getResponseText(result)).toContain('created')
+    const result = await handler({ roomId, id: 1 })
+    expect(result.isError).toBeUndefined()
+    expect(getResponseText(result)).toContain('log line 1')
+  })
+
+  it('returns error when logs fail', async () => {
+    const { getCloudStationLogs } = await import('../../../shared/cloud-sync')
+    vi.mocked(getCloudStationLogs).mockResolvedValueOnce(null)
+    const handler = toolHandlers.get('quoroom_station_logs')!
+    const result = await handler({ roomId, id: 1 })
+    expect(result.isError).toBe(true)
   })
 })
 
 describe('quoroom_station_status', () => {
   it('returns station status', async () => {
-    const createHandler = toolHandlers.get('quoroom_station_create')!
-    await createHandler({ roomId, name: 'test', provider: 'mock', tier: 'micro' })
-    const stations = queries.listStations(db, roomId)
-
     const handler = toolHandlers.get('quoroom_station_status')!
-    const result = await handler({ id: stations[0].id })
+    const result = await handler({ roomId, id: 1 })
+    expect(result.isError).toBeUndefined()
     const parsed = JSON.parse(getResponseText(result))
-    expect(parsed.status).toBe('running')
-    expect(parsed.name).toBe('test')
+    expect(parsed.status).toBe('active')
+    expect(parsed.name).toBe('web-server')
   })
 
   it('returns error for nonexistent station', async () => {
     const handler = toolHandlers.get('quoroom_station_status')!
-    const result = await handler({ id: 9999 })
+    const result = await handler({ roomId, id: 9999 })
     expect(result.isError).toBe(true)
-  })
-})
-
-describe('quoroom_station_deploy (stub)', () => {
-  it('returns not-implemented message', async () => {
-    const createHandler = toolHandlers.get('quoroom_station_create')!
-    await createHandler({ roomId, name: 'test', provider: 'mock', tier: 'micro' })
-    const stations = queries.listStations(db, roomId)
-
-    const handler = toolHandlers.get('quoroom_station_deploy')!
-    const result = await handler({ id: stations[0].id, source: 'https://github.com/example/app' })
-    expect(result.isError).toBe(true)
-    expect(getResponseText(result)).toContain('not yet implemented')
-  })
-})
-
-describe('quoroom_station_domain (stub)', () => {
-  it('returns not-implemented message', async () => {
-    const createHandler = toolHandlers.get('quoroom_station_create')!
-    await createHandler({ roomId, name: 'test', provider: 'mock', tier: 'micro' })
-    const stations = queries.listStations(db, roomId)
-
-    const handler = toolHandlers.get('quoroom_station_domain')!
-    const result = await handler({ id: stations[0].id, domain: 'myapp.com' })
-    expect(result.isError).toBe(true)
-    expect(getResponseText(result)).toContain('not yet implemented')
   })
 })
 
 describe('tool registration', () => {
-  it('registers all 10 station tools', () => {
+  it('registers all 8 station tools', () => {
     expect(toolHandlers.has('quoroom_station_create')).toBe(true)
     expect(toolHandlers.has('quoroom_station_list')).toBe(true)
     expect(toolHandlers.has('quoroom_station_start')).toBe(true)
@@ -195,7 +175,7 @@ describe('tool registration', () => {
     expect(toolHandlers.has('quoroom_station_exec')).toBe(true)
     expect(toolHandlers.has('quoroom_station_logs')).toBe(true)
     expect(toolHandlers.has('quoroom_station_status')).toBe(true)
-    expect(toolHandlers.has('quoroom_station_deploy')).toBe(true)
-    expect(toolHandlers.has('quoroom_station_domain')).toBe(true)
+    expect(toolHandlers.has('quoroom_station_deploy')).toBe(false)
+    expect(toolHandlers.has('quoroom_station_domain')).toBe(false)
   })
 })

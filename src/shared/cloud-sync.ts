@@ -121,6 +121,139 @@ export function getRoomCloudId(dbRoomId: number): string {
     .slice(0, 32)
 }
 
+// ─── Cloud Stations ─────────────────────────────────────────
+
+export interface CloudStation {
+  id: number
+  roomId: string
+  tier: string
+  stationName: string
+  flyAppName: string | null
+  flyMachineId: string | null
+  status: string
+  monthlyCost: number
+  currentPeriodEnd: string | null
+  createdAt: string
+  updatedAt: string
+}
+
+/**
+ * List active stations for a room from the cloud API.
+ * Returns empty array on failure (fail silently).
+ */
+export async function listCloudStations(cloudRoomId: string): Promise<CloudStation[]> {
+  try {
+    const res = await fetch(`${CLOUD_API}/rooms/${encodeURIComponent(cloudRoomId)}/stations`, {
+      signal: AbortSignal.timeout(10000)
+    })
+    if (!res.ok) return []
+    const data = await res.json() as { stations: CloudStation[] }
+    return data.stations ?? []
+  } catch {
+    return []
+  }
+}
+
+/**
+ * Execute a command on a cloud station.
+ * Returns null on failure.
+ */
+export async function execOnCloudStation(
+  cloudRoomId: string,
+  subId: number,
+  command: string
+): Promise<{ stdout: string; stderr: string; exitCode: number } | null> {
+  try {
+    const res = await fetch(
+      `${CLOUD_API}/rooms/${encodeURIComponent(cloudRoomId)}/stations/${subId}/exec`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ command }),
+        signal: AbortSignal.timeout(90000)
+      }
+    )
+    if (!res.ok) return null
+    return res.json()
+  } catch {
+    return null
+  }
+}
+
+/**
+ * Get logs from a cloud station.
+ * Returns null on failure.
+ */
+export async function getCloudStationLogs(
+  cloudRoomId: string,
+  subId: number,
+  lines?: number
+): Promise<string | null> {
+  try {
+    const query = lines ? `?lines=${lines}` : ''
+    const res = await fetch(
+      `${CLOUD_API}/rooms/${encodeURIComponent(cloudRoomId)}/stations/${subId}/logs${query}`,
+      { signal: AbortSignal.timeout(15000) }
+    )
+    if (!res.ok) return null
+    const data = await res.json() as { logs: string }
+    return data.logs ?? ''
+  } catch {
+    return null
+  }
+}
+
+/**
+ * Start a stopped cloud station.
+ */
+export async function startCloudStation(cloudRoomId: string, subId: number): Promise<void> {
+  try {
+    await fetch(
+      `${CLOUD_API}/rooms/${encodeURIComponent(cloudRoomId)}/stations/${subId}/start`,
+      {
+        method: 'POST',
+        signal: AbortSignal.timeout(30000)
+      }
+    )
+  } catch {
+    // Fail silently
+  }
+}
+
+/**
+ * Stop a running cloud station.
+ */
+export async function stopCloudStation(cloudRoomId: string, subId: number): Promise<void> {
+  try {
+    await fetch(
+      `${CLOUD_API}/rooms/${encodeURIComponent(cloudRoomId)}/stations/${subId}/stop`,
+      {
+        method: 'POST',
+        signal: AbortSignal.timeout(30000)
+      }
+    )
+  } catch {
+    // Fail silently
+  }
+}
+
+/**
+ * Delete a cloud station (cancels subscription + destroys Fly.io machine).
+ */
+export async function deleteCloudStation(cloudRoomId: string, subId: number): Promise<void> {
+  try {
+    await fetch(
+      `${CLOUD_API}/rooms/${encodeURIComponent(cloudRoomId)}/stations/${subId}`,
+      {
+        method: 'DELETE',
+        signal: AbortSignal.timeout(30000)
+      }
+    )
+  } catch {
+    // Fail silently
+  }
+}
+
 // ─── Cross-Room Learning ────────────────────────────────────
 
 export interface PublicRoom {

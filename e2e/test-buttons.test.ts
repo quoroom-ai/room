@@ -28,14 +28,20 @@ test('Room toggle buttons update room settings', async ({ page }) => {
     }
   })
 
-  // Navigate to the SPA and wait for rooms to load
+  // Navigate to the SPA and wait for rooms to load (suppress walkthrough modal)
+  await page.addInitScript(() => localStorage.setItem('quoroom_walkthrough_seen', 'true'))
   await page.goto(base, { waitUntil: 'networkidle' })
   await page.waitForTimeout(2000)
 
-  // Click the room in the sidebar to expand its submenu
+  // Click the room in the sidebar to expand its submenu (skip if already expanded)
   const sidebar = page.locator('[data-testid="sidebar"]')
-  await sidebar.locator('button').filter({ hasText: /Button Test Room/i }).first().click()
-  await page.waitForTimeout(500)
+  const roomBtn = sidebar.locator('button').filter({ hasText: /Button Test Room/i }).first()
+  await roomBtn.waitFor({ timeout: 10000 })
+  const btnText = await roomBtn.textContent()
+  if (!btnText?.includes('▴')) {
+    await roomBtn.click()
+    await page.waitForTimeout(500)
+  }
 
   // Click the room-level Settings tab in the submenu
   await sidebar.locator('button').filter({ hasText: /^Settings$/i }).first().click()

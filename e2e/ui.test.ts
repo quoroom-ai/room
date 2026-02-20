@@ -32,9 +32,17 @@ test.describe('UI — SPA loads and renders', () => {
 
 test.describe('UI — Tab navigation', () => {
   test.beforeEach(async ({ page }) => {
+    // Enable advanced mode so Workers, Tasks, Skills, Messages tabs are visible
+    const token = getToken()
+    await page.request.put(`${base}/api/settings/advanced_mode`, {
+      headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+      data: { value: 'true' }
+    })
+    // Suppress walkthrough modal so it doesn't intercept pointer events
+    await page.addInitScript(() => localStorage.setItem('quoroom_walkthrough_seen', 'true'))
     await page.goto(base, { waitUntil: 'networkidle' })
     // Wait for UI to be ready
-    await page.locator('button').filter({ hasText: /Overview|Tasks/i }).first().waitFor({ timeout: 10000 })
+    await page.locator('button').filter({ hasText: /Overview|Workers/i }).first().waitFor({ timeout: 10000 })
   })
 
   test('Status/Activity tab (default)', async ({ page }) => {
@@ -103,8 +111,16 @@ test.describe('UI — Tab navigation', () => {
 
 test.describe('UI — Interaction', () => {
   test.beforeEach(async ({ page }) => {
+    // Enable advanced mode so Workers, Tasks tabs are visible
+    const token = getToken()
+    await page.request.put(`${base}/api/settings/advanced_mode`, {
+      headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+      data: { value: 'true' }
+    })
+    // Suppress walkthrough modal so it doesn't intercept pointer events
+    await page.addInitScript(() => localStorage.setItem('quoroom_walkthrough_seen', 'true'))
     await page.goto(base, { waitUntil: 'networkidle' })
-    await page.locator('button').filter({ hasText: /Overview|Tasks/i }).first().waitFor({ timeout: 10000 })
+    await page.locator('button').filter({ hasText: /Overview|Workers/i }).first().waitFor({ timeout: 10000 })
   })
 
   test('tasks panel shows read-only task list', async ({ page }) => {
@@ -166,6 +182,15 @@ test.describe('UI — Interaction', () => {
   })
 
   test('toggle advanced mode shows extra tabs', async ({ page }) => {
+    // Ensure advanced mode starts OFF so toggling turns it ON
+    const token = getToken()
+    await page.request.put(`${base}/api/settings/advanced_mode`, {
+      headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+      data: { value: 'false' }
+    })
+    await page.reload({ waitUntil: 'networkidle' })
+    await page.locator('button').filter({ hasText: /Overview/i }).first().waitFor({ timeout: 10000 })
+
     // Navigate to Global Settings
     await page.locator('button').filter({ hasText: /Global Settings/i }).first().click()
     await page.waitForTimeout(500)

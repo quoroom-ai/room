@@ -22,7 +22,7 @@ function sidebar(page: Page) {
 /** Click a room header in the accordion and wait for its submenu to appear.
  *  If the room is already expanded (▴ chevron), skip the click — it would toggle closed. */
 async function expandRoom(page: Page, roomName: string) {
-  const roomBtn = sidebar(page).locator('button').filter({ hasText: roomName })
+  const roomBtn = sidebar(page).locator('button').filter({ hasText: roomName }).first()
   await roomBtn.waitFor({ timeout: 10000 })
   const btnText = await roomBtn.textContent()
   if (!btnText?.includes('▴')) {
@@ -43,6 +43,18 @@ test.describe('UI — Accordion room navigation', () => {
   const token = getToken()
 
   test.beforeAll(async ({ request }) => {
+    // Clean up any leftover rooms from previous runs to avoid duplicate-name strict mode violations
+    const listRes = await request.get(`${base}/api/rooms`, { headers: { Authorization: `Bearer ${token}` } })
+    if (listRes.ok()) {
+      const body = await listRes.json() as Array<{ id: number; name: string }> | { rooms: Array<{ id: number; name: string }> }
+      const list = Array.isArray(body) ? body : body.rooms ?? []
+      for (const r of list) {
+        if (r.name === 'Accordion Test Room A' || r.name === 'Accordion Test Room B') {
+          await request.delete(`${base}/api/rooms/${r.id}`, { headers: { Authorization: `Bearer ${token}` } })
+        }
+      }
+    }
+
     const a = await request.post(`${base}/api/rooms`, {
       headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
       data: { name: 'Accordion Test Room A', goal: 'Room A goal' }
@@ -71,11 +83,21 @@ test.describe('UI — Accordion room navigation', () => {
   })
 
   test.beforeEach(async ({ page }) => {
-    // Clear tab/room state so each test starts clean
-    await page.goto(base, { waitUntil: 'domcontentloaded' })
-    await page.evaluate(() => {
-      localStorage.removeItem('quoroom_tab')
-      localStorage.removeItem('quoroom_room')
+    // Enable advanced mode so Workers tab is accessible in the accordion
+    await page.request.put(`${base}/api/settings/advanced_mode`, {
+      headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+      data: { value: 'true' }
+    })
+    // On the first load of each test (fresh page = empty sessionStorage), clear tab/room state.
+    // On reloads within individual tests, sessionStorage survives so state is preserved.
+    // Always suppress the walkthrough modal.
+    await page.addInitScript(() => {
+      if (!sessionStorage.getItem('_e2e_init')) {
+        localStorage.removeItem('quoroom_tab')
+        localStorage.removeItem('quoroom_room')
+        sessionStorage.setItem('_e2e_init', '1')
+      }
+      localStorage.setItem('quoroom_walkthrough_seen', 'true')
     })
     await page.goto(base, { waitUntil: 'networkidle' })
     await waitForReady(page)

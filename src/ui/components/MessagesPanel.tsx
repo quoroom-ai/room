@@ -19,6 +19,7 @@ interface MessagesPanelProps {
 export function MessagesPanel({ roomId, autonomyMode }: MessagesPanelProps): React.JSX.Element {
   const semi = autonomyMode === 'semi'
   const [viewSection, setViewSection] = useState<'escalations' | 'rooms'>('escalations')
+  const [collapsed, setCollapsed] = useState(() => localStorage.getItem('quoroom_messages_collapsed') === 'true')
 
   const { data: escalations, refresh } = usePolling<Escalation[]>(
     () => roomId ? api.escalations.list(roomId) : Promise.resolve([]),
@@ -88,13 +89,26 @@ export function MessagesPanel({ roomId, autonomyMode }: MessagesPanelProps): Rea
     }
   }
 
+  async function handleMarkAllRead(): Promise<void> {
+    if (!roomId) return
+    if (viewSection === 'escalations') {
+      const pending = (escalations ?? []).filter(e => e.status === 'pending')
+      await Promise.all(pending.map(e => api.escalations.resolve(e.id, '')))
+      refresh()
+    } else {
+      const unread = (roomMessages ?? []).filter(m => m.status === 'unread')
+      await Promise.all(unread.map(m => api.roomMessages.markRead(roomId, m.id)))
+      refreshMessages()
+    }
+  }
+
   const pending = (escalations ?? []).filter(e => e.status === 'pending')
   const unreadMessages = (roomMessages ?? []).filter(m => m.status === 'unread')
 
   return (
     <div className="flex flex-col h-full">
       {/* Header */}
-      <div className="px-3 py-1.5 border-b border-gray-200 flex items-center justify-between">
+      <div className="px-3 py-1.5 border-b border-gray-200 flex items-center gap-2">
         <div className="flex gap-1 bg-gray-100 rounded p-0.5">
           <button
             onClick={() => setViewSection('escalations')}
@@ -102,7 +116,7 @@ export function MessagesPanel({ roomId, autonomyMode }: MessagesPanelProps): Rea
               viewSection === 'escalations' ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-700'
             }`}
           >
-            Worker{pending.length > 0 ? ` (${pending.length})` : ''}
+            My Room{pending.length > 0 ? ` (${pending.length})` : ''}
           </button>
           <button
             onClick={() => setViewSection('rooms')}
@@ -110,15 +124,29 @@ export function MessagesPanel({ roomId, autonomyMode }: MessagesPanelProps): Rea
               viewSection === 'rooms' ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-700'
             }`}
           >
-            Rooms{unreadMessages.length > 0 ? ` (${unreadMessages.length})` : ''}
+            Outside Rooms{unreadMessages.length > 0 ? ` (${unreadMessages.length})` : ''}
           </button>
         </div>
+        {((viewSection === 'escalations' && pending.length > 0) || (viewSection === 'rooms' && unreadMessages.length > 0)) && (
+          <button
+            onClick={handleMarkAllRead}
+            className="text-[10px] text-gray-400 hover:text-gray-600"
+          >
+            Mark all read
+          </button>
+        )}
+        <button
+          onClick={() => setCollapsed(c => { const next = !c; localStorage.setItem('quoroom_messages_collapsed', String(next)); return next })}
+          className="text-[10px] text-gray-400 hover:text-gray-600"
+        >
+          {collapsed ? 'Expand all' : 'Collapse all'}
+        </button>
         {semi && roomId && viewSection === 'escalations' && (
           <button
             onClick={() => setShowCreateForm(!showCreateForm)}
-            className="text-xs text-blue-500 hover:text-blue-700 font-medium"
+            className="text-xs text-blue-500 hover:text-blue-700 font-medium ml-auto"
           >
-            {showCreateForm ? 'Cancel' : '+ New Message'}
+            {showCreateForm ? 'Cancel' : '+ New'}
           </button>
         )}
       </div>
@@ -186,6 +214,7 @@ export function MessagesPanel({ roomId, autonomyMode }: MessagesPanelProps): Rea
                 <MessageBubble
                   key={esc.id}
                   escalation={esc}
+                  collapsed={collapsed}
                   getWorkerName={getWorkerName}
                   isReplying={replyingTo === esc.id}
                   replyText={replyText}
@@ -243,7 +272,7 @@ export function MessagesPanel({ roomId, autonomyMode }: MessagesPanelProps): Rea
                     </span>
                   </div>
                   <div className="text-xs font-medium text-gray-700">{msg.subject}</div>
-                  <div className="text-xs text-gray-600 mt-0.5 whitespace-pre-wrap">{msg.body}</div>
+                  {!collapsed && <div className="text-xs text-gray-600 mt-0.5 whitespace-pre-wrap">{msg.body}</div>}
                 </div>
               ))}
             </div>
@@ -256,6 +285,7 @@ export function MessagesPanel({ roomId, autonomyMode }: MessagesPanelProps): Rea
 
 interface MessageBubbleProps {
   escalation: Escalation
+  collapsed: boolean
   getWorkerName: (id: number | null) => string
   isReplying: boolean
   replyText: string
@@ -266,6 +296,7 @@ interface MessageBubbleProps {
 
 function MessageBubble({
   escalation: esc,
+  collapsed,
   getWorkerName,
   isReplying,
   replyText,
@@ -300,21 +331,24 @@ function MessageBubble({
             {formatRelativeTime(esc.createdAt)}
           </span>
         </div>
-        <div className="text-xs text-gray-800 whitespace-pre-wrap">{esc.question}</div>
-
-        {/* Reply action for pending */}
-        {isPending && (
-          <button
-            onClick={onReplyToggle}
-            className="mt-1.5 text-[10px] text-blue-500 hover:text-blue-700 font-medium"
-          >
-            {isReplying ? 'Cancel' : 'Reply'}
-          </button>
+        {!collapsed && (
+          <>
+            <div className="text-xs text-gray-800 whitespace-pre-wrap">{esc.question}</div>
+            {/* Reply action for pending */}
+            {isPending && (
+              <button
+                onClick={onReplyToggle}
+                className="mt-1.5 text-[10px] text-blue-500 hover:text-blue-700 font-medium"
+              >
+                {isReplying ? 'Cancel' : 'Reply'}
+              </button>
+            )}
+          </>
         )}
       </div>
 
       {/* Reply input */}
-      {isPending && isReplying && (
+      {!collapsed && isPending && isReplying && (
         <div className="flex gap-1.5 ml-4">
           <input
             value={replyText}
@@ -335,7 +369,7 @@ function MessageBubble({
       )}
 
       {/* Answer bubble */}
-      {esc.answer && (
+      {!collapsed && esc.answer && (
         <div className="ml-8 rounded-lg p-2.5 max-w-[80%] bg-blue-50 border border-blue-100">
           <div className="flex items-center gap-1.5 mb-1">
             <span className="text-[10px] font-medium text-blue-700">
