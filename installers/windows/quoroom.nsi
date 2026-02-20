@@ -110,9 +110,8 @@ SectionEnd
 ; --- Launch server + browser ---
 
 Function LaunchQuoroom
-  ; Start local API/UI server in background (detached process).
-  ; This runs the packaged CLI directly with bundled Node runtime.
-  Exec '"$SYSDIR\WindowsPowerShell\v1.0\powershell.exe" -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -Command "Start-Process -FilePath ''$INSTDIR\runtime\node.exe'' -ArgumentList ''$INSTDIR\lib\cli.js'',''serve'',''--port'',''3700'' -WindowStyle Hidden"'
+  ; Start local API/UI server via the packaged CLI wrapper.
+  ExecShell "open" "$INSTDIR\bin\quoroom.cmd" "serve --port 3700"
   ; Give server a moment to bind before opening the browser.
   Sleep 1500
   ExecShell "open" "http://localhost:3700"
