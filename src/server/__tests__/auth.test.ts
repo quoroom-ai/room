@@ -7,6 +7,7 @@ import {
   setUserToken,
   validateToken,
   isAllowedOrigin,
+  isLocalOrigin,
   setCorsHeaders
 } from '../auth'
 
@@ -103,6 +104,19 @@ describe('isAllowedOrigin', () => {
 
   it('rejects invalid origins', () => {
     expect(isAllowedOrigin('not-a-url')).toBe(false)
+  })
+})
+
+describe('isLocalOrigin', () => {
+  it('allows same-origin requests without Origin header', () => {
+    expect(isLocalOrigin(undefined)).toBe(true)
+  })
+
+  it('allows localhost only', () => {
+    expect(isLocalOrigin('http://localhost')).toBe(true)
+    expect(isLocalOrigin('http://127.0.0.1:3700')).toBe(true)
+    expect(isLocalOrigin('https://app.quoroom.ai')).toBe(false)
+    expect(isLocalOrigin('http://example.com')).toBe(false)
   })
 })
 

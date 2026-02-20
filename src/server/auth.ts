@@ -95,6 +95,18 @@ export function isAllowedOrigin(origin: string | undefined): boolean {
   }
 }
 
+/** Localhost-only origin check, used for auth handshake. */
+export function isLocalOrigin(origin: string | undefined): boolean {
+  // Same-origin requests have no Origin header
+  if (!origin) return true
+  try {
+    const url = new URL(origin)
+    return url.hostname === 'localhost' || url.hostname === '127.0.0.1'
+  } catch {
+    return false
+  }
+}
+
 export function setCorsHeaders(
   origin: string | undefined,
   headers: Record<string, string>

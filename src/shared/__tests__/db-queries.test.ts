@@ -1471,6 +1471,14 @@ describe('credentials', () => {
     expect(cred.providedBy).toBe('keeper')
   })
 
+  it('stores encrypted credential value at rest', () => {
+    const secret = 'top-secret-value'
+    const cred = q.createCredential(db, roomId, 'Encrypted', 'api_key', secret)
+    const raw = db.prepare('SELECT value_encrypted FROM credentials WHERE id = ?').get(cred.id) as { value_encrypted: string }
+    expect(raw.value_encrypted).not.toBe(secret)
+    expect(raw.value_encrypted.startsWith('enc:v1:')).toBe(true)
+  })
+
   it('getCredential returns full value', () => {
     const cred = q.createCredential(db, roomId, 'Secret Key', 'api_key', 'sk-secret-value')
     const fetched = q.getCredential(db, cred.id)

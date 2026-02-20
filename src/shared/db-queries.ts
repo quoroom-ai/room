@@ -1,6 +1,15 @@
 import type Database from 'better-sqlite3'
 import type { Entity, Observation, Relation, MemoryStats, Task, CreateTaskInput, TaskRun, Worker, CreateWorkerInput, TriggerType, TaskStatus, Watch, ConsoleLogEntry, Room, RoomConfig, RoomActivityEntry, ActivityEventType, QuorumDecision, DecisionType, DecisionStatus, QuorumVote, VoteValue, Goal, GoalStatus, GoalUpdate, Skill, SelfModAuditEntry, Escalation, EscalationStatus, ChatMessage, Credential, Wallet, WalletTransaction, WalletTransactionType, Station, StationStatus, StationProvider, StationTier, RoomMessage, RevenueSummary } from './types'
 import { DEFAULT_ROOM_CONFIG } from './constants'
+import { encryptSecret, decryptSecret } from './secret-store'
+
+function clampLimit(limit: number | undefined, fallback: number, max: number): number {
+  if (!Number.isFinite(limit) || limit == null) return fallback
+  const n = Math.trunc(limit)
+  if (n < 1) return fallback
+  if (n > max) return max
+  return n
+}
 
 // ─── Entities ───────────────────────────────────────────────
 
@@ -437,16 +446,18 @@ export function completeTaskRun(db: Database.Database, id: number, result: strin
 }
 
 export function getTaskRuns(db: Database.Database, taskId: number, limit: number = 20): TaskRun[] {
+  const safeLimit = clampLimit(limit, 20, 500)
   const rows = db
     .prepare('SELECT * FROM task_runs WHERE task_id = ? ORDER BY started_at DESC LIMIT ?')
-    .all(taskId, limit)
+    .all(taskId, safeLimit)
   return (rows as Record<string, unknown>[]).map(mapTaskRunRow)
 }
 
 export function listAllRuns(db: Database.Database, limit: number = 20): TaskRun[] {
+  const safeLimit = clampLimit(limit, 20, 500)
   const rows = db
     .prepare('SELECT * FROM task_runs ORDER BY started_at DESC LIMIT ?')
-    .all(limit)
+    .all(safeLimit)
   return (rows as Record<string, unknown>[]).map(mapTaskRunRow)
 }
 
@@ -591,9 +602,11 @@ export function getConsoleLogs(
   afterSeq: number = 0,
   limit: number = 100
 ): ConsoleLogEntry[] {
+  const safeAfterSeq = Number.isFinite(afterSeq) ? Math.max(0, Math.trunc(afterSeq)) : 0
+  const safeLimit = clampLimit(limit, 100, 1000)
   const rows = db
     .prepare('SELECT * FROM console_logs WHERE run_id = ? AND seq > ? ORDER BY seq ASC LIMIT ?')
-    .all(runId, afterSeq, limit)
+    .all(runId, safeAfterSeq, safeLimit)
   return (rows as Record<string, unknown>[]).map(mapConsoleLogRow)
 }
 
@@ -911,9 +924,10 @@ export function deleteEmbeddingsForEntity(db: Database.Database, entityId: numbe
 }
 
 export function getUnembeddedEntities(db: Database.Database, limit: number = 50): Entity[] {
+  const safeLimit = clampLimit(limit, 50, 500)
   return db.prepare(
     'SELECT * FROM entities WHERE embedded_at IS NULL ORDER BY created_at ASC LIMIT ?'
-  ).all(limit) as Entity[]
+  ).all(safeLimit) as Entity[]
 }
 
 // ─── Semantic Search (sqlite-vec) ─────────────────────────
@@ -929,13 +943,14 @@ export function semanticSearchSql(
   limit: number = 20,
   minSimilarity: number = 0.3
 ): Array<{ entityId: number; score: number }> {
+  const safeLimit = clampLimit(limit, 20, 200)
   const rows = db.prepare(`
     SELECT entity_id, 1.0 - vec_distance_cosine(vector, ?) AS similarity
     FROM embeddings
     WHERE similarity >= ?
     ORDER BY similarity DESC
     LIMIT ?
-  `).all(queryVector, minSimilarity, limit) as Array<{ entity_id: number; similarity: number }>
+  `).all(queryVector, minSimilarity, safeLimit) as Array<{ entity_id: number; similarity: number }>
   return rows.map(r => ({ entityId: r.entity_id, score: r.similarity }))
 }
 
@@ -954,6 +969,7 @@ export function hybridSearch(
   semanticResults: Array<{ entityId: number; score: number }> | null,
   limit: number = 10
 ): HybridSearchResult[] {
+  const safeLimit = clampLimit(limit, 10, 200)
   // 1. FTS search
   const ftsEntities = searchEntities(db, query)
   const ftsMap = new Map<number, { entity: Entity; rank: number }>()
@@ -984,7 +1000,7 @@ export function hybridSearch(
   }
 
   results.sort((a, b) => b.combinedScore - a.combinedScore)
-  return results.slice(0, limit)
+  return results.slice(0, safeLimit)
 }
 
 // ─── Rooms ──────────────────────────────────────────────────
@@ -1098,16 +1114,17 @@ export function logRoomActivity(
 export function getRoomActivity(
   db: Database.Database, roomId: number, limit: number = 50, eventTypes?: ActivityEventType[]
 ): RoomActivityEntry[] {
+  const safeLimit = clampLimit(limit, 50, 500)
   if (eventTypes && eventTypes.length > 0) {
     const placeholders = eventTypes.map(() => '?').join(', ')
     const rows = db
       .prepare(`SELECT * FROM room_activity WHERE room_id = ? AND event_type IN (${placeholders}) ORDER BY created_at DESC LIMIT ?`)
-      .all(roomId, ...eventTypes, limit)
+      .all(roomId, ...eventTypes, safeLimit)
     return (rows as Record<string, unknown>[]).map(mapRoomActivityRow)
   }
   const rows = db
     .prepare('SELECT * FROM room_activity WHERE room_id = ? ORDER BY created_at DESC LIMIT ?')
-    .all(roomId, limit)
+    .all(roomId, safeLimit)
   return (rows as Record<string, unknown>[]).map(mapRoomActivityRow)
 }
 
@@ -1289,7 +1306,8 @@ export function logGoalUpdate(
 }
 
 export function getGoalUpdates(db: Database.Database, goalId: number, limit: number = 50): GoalUpdate[] {
-  const rows = db.prepare('SELECT * FROM goal_updates WHERE goal_id = ? ORDER BY created_at DESC LIMIT ?').all(goalId, limit)
+  const safeLimit = clampLimit(limit, 50, 500)
+  const rows = db.prepare('SELECT * FROM goal_updates WHERE goal_id = ? ORDER BY created_at DESC LIMIT ?').all(goalId, safeLimit)
   return (rows as Record<string, unknown>[]).map(mapGoalUpdateRow)
 }
 
@@ -1422,7 +1440,8 @@ export function logSelfMod(
 }
 
 export function getSelfModHistory(db: Database.Database, roomId: number, limit: number = 50): SelfModAuditEntry[] {
-  const rows = db.prepare('SELECT * FROM self_mod_audit WHERE room_id = ? ORDER BY created_at DESC LIMIT ?').all(roomId, limit)
+  const safeLimit = clampLimit(limit, 50, 500)
+  const rows = db.prepare('SELECT * FROM self_mod_audit WHERE room_id = ? ORDER BY created_at DESC LIMIT ?').all(roomId, safeLimit)
   return (rows as Record<string, unknown>[]).map(mapSelfModRow)
 }
 
@@ -1501,15 +1520,23 @@ function mapCredentialRow(row: Record<string, unknown>): Credential {
 export function createCredential(
   db: Database.Database, roomId: number, name: string, type: string, value: string
 ): Credential {
+  const encryptedValue = encryptSecret(value)
   const result = db
     .prepare('INSERT INTO credentials (room_id, name, type, value_encrypted) VALUES (?, ?, ?, ?)')
-    .run(roomId, name, type, value)
+    .run(roomId, name, type, encryptedValue)
   return getCredential(db, result.lastInsertRowid as number)!
 }
 
 export function getCredential(db: Database.Database, id: number): Credential | null {
   const row = db.prepare('SELECT * FROM credentials WHERE id = ?').get(id) as Record<string, unknown> | undefined
-  return row ? mapCredentialRow(row) : null
+  if (!row) return null
+  const credential = mapCredentialRow(row)
+  try {
+    return { ...credential, valueEncrypted: decryptSecret(credential.valueEncrypted) }
+  } catch {
+    // Keep credentials readable even if secret key changed.
+    return credential
+  }
 }
 
 export function listCredentials(db: Database.Database, roomId: number): Credential[] {
@@ -1531,7 +1558,9 @@ export function deleteCredential(db: Database.Database, id: number): void {
 
 export function getCredentialByName(db: Database.Database, roomId: number, name: string): Credential | null {
   const row = db.prepare('SELECT * FROM credentials WHERE room_id = ? AND name = ?').get(roomId, name) as Record<string, unknown> | undefined
-  return row ? mapCredentialRow(row) : null
+  if (!row) return null
+  const credential = mapCredentialRow(row)
+  return { ...credential, valueEncrypted: decryptSecret(credential.valueEncrypted) }
 }
 
 // ─── Room Workers ───────────────────────────────────────────
@@ -1624,7 +1653,8 @@ export function getWalletTransaction(db: Database.Database, id: number): WalletT
 }
 
 export function listWalletTransactions(db: Database.Database, walletId: number, limit: number = 50): WalletTransaction[] {
-  const rows = db.prepare('SELECT * FROM wallet_transactions WHERE wallet_id = ? ORDER BY created_at DESC LIMIT ?').all(walletId, limit)
+  const safeLimit = clampLimit(limit, 50, 500)
+  const rows = db.prepare('SELECT * FROM wallet_transactions WHERE wallet_id = ? ORDER BY created_at DESC LIMIT ?').all(walletId, safeLimit)
   return (rows as Record<string, unknown>[]).map(mapWalletTransactionRow)
 }
 
@@ -1742,7 +1772,8 @@ export function insertChatMessage(db: Database.Database, roomId: number, role: '
 }
 
 export function listChatMessages(db: Database.Database, roomId: number, limit: number = 100): ChatMessage[] {
-  const rows = db.prepare('SELECT * FROM chat_messages WHERE room_id = ? ORDER BY created_at ASC LIMIT ?').all(roomId, limit)
+  const safeLimit = clampLimit(limit, 100, 1000)
+  const rows = db.prepare('SELECT * FROM chat_messages WHERE room_id = ? ORDER BY created_at ASC LIMIT ?').all(roomId, safeLimit)
   return (rows as Record<string, unknown>[]).map(mapChatMessageRow)
 }
 

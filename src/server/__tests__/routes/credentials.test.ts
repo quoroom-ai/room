@@ -23,6 +23,7 @@ describe('Credential routes', () => {
       })
       expect(res.status).toBe(201)
       expect((res.body as any).name).toBe('API Key')
+      expect((res.body as any).valueEncrypted).toBe('***')
     })
 
     it('creates a credential with type', async () => {
@@ -69,6 +70,7 @@ describe('Credential routes', () => {
       const res = await request(ctx, 'GET', `/api/credentials/${id}`)
       expect(res.status).toBe(200)
       expect((res.body as any).name).toBe('FindMe Credential')
+      expect((res.body as any).valueEncrypted).toBe('***')
     })
 
     it('returns 404 for missing credential', async () => {

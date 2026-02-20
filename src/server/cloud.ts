@@ -34,9 +34,19 @@ export function initCloudSync(db: Database.Database): void {
       const tasks = listTasks(db)
       const version = getVersion()
 
+      // Pre-compute counts once to avoid O(rooms * (workers + tasks)) filtering.
+      const workerCounts = new Map<number, number>()
+      for (const worker of workers) {
+        if (worker.roomId == null) continue
+        workerCounts.set(worker.roomId, (workerCounts.get(worker.roomId) ?? 0) + 1)
+      }
+      const taskCounts = new Map<number, number>()
+      for (const task of tasks) {
+        if (task.roomId == null) continue
+        taskCounts.set(task.roomId, (taskCounts.get(task.roomId) ?? 0) + 1)
+      }
+
       return publicRooms.map(room => {
-        const roomWorkers = workers.filter(w => w.roomId === room.id)
-        const roomTasks = tasks.filter(t => t.roomId === room.id)
         let earnings = '0'
         const wallet = getWalletByRoom(db, room.id)
         if (wallet) {
@@ -49,8 +59,8 @@ export function initCloudSync(db: Database.Database): void {
           name: room.name,
           goal: room.goal ?? null,
           mode: room.autonomyMode,
-          workerCount: roomWorkers.length,
-          taskCount: roomTasks.length,
+          workerCount: workerCounts.get(room.id) ?? 0,
+          taskCount: taskCounts.get(room.id) ?? 0,
           earnings,
           version
         }

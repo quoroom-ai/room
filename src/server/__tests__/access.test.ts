@@ -26,6 +26,10 @@ describe('isAllowedForRole', () => {
       expect(isAllowedForRole('user', 'GET', '/api/tasks', db)).toBe(true)
     })
 
+    it('blocks sensitive credential detail reads', () => {
+      expect(isAllowedForRole('user', 'GET', '/api/credentials/1', db)).toBe(false)
+    })
+
     it('allows voting', () => {
       expect(isAllowedForRole('user', 'POST', '/api/decisions/1/vote', db)).toBe(true)
     })

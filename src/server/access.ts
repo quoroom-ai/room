@@ -27,6 +27,11 @@ const AUTO_MODE_USER_WHITELIST = [
   /^DELETE \/api\/credentials\/\d+$/,            // delete credential
 ]
 
+/** Sensitive read endpoints blocked for user token in auto mode. */
+const AUTO_MODE_USER_GET_DENYLIST = [
+  /^\/api\/credentials\/\d+$/,                    // full credential details
+]
+
 export function isAllowedForRole(
   role: TokenRole,
   method: string,
@@ -36,13 +41,15 @@ export function isAllowedForRole(
   // Agent always has full access
   if (role === 'agent') return true
 
-  // GET requests always allowed for user
-  if (method === 'GET') return true
-
   // In semi mode, user has full access — if any active room is semi, grant access
   const rooms = listRooms(db, 'active')
   const hasSemi = rooms.length > 0 ? rooms.some(r => r.autonomyMode === 'semi') : false
   if (hasSemi) return true
+
+  // In auto mode, GET is allowed except sensitive endpoints.
+  if (method === 'GET') {
+    return !AUTO_MODE_USER_GET_DENYLIST.some(pattern => pattern.test(pathname))
+  }
 
   // In auto mode (default), only whitelisted writes
   const key = `${method} ${pathname}`

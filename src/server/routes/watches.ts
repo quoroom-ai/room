@@ -1,11 +1,16 @@
 import type { Router } from '../router'
 import * as queries from '../../shared/db-queries'
+import { validateWatchPath } from '../../shared/watch-path'
 
 export function registerWatchRoutes(router: Router): void {
   router.post('/api/watches', (ctx) => {
     const body = ctx.body as Record<string, unknown> || {}
     if (!body.path || typeof body.path !== 'string') {
       return { status: 400, error: 'path is required' }
+    }
+    const pathError = validateWatchPath(body.path)
+    if (pathError) {
+      return { status: 400, error: pathError }
     }
 
     const watch = queries.createWatch(ctx.db, body.path,

@@ -22,6 +22,13 @@ describe('Server integration', () => {
       expect((res.body as any).token).not.toBe(ctx.token)
     })
 
+    it('GET /api/auth/handshake rejects non-local origins', async () => {
+      const res = await requestNoAuth(ctx, 'GET', '/api/auth/handshake', {
+        Origin: 'https://app.quoroom.ai'
+      })
+      expect(res.status).toBe(403)
+    })
+
     it('GET /api/auth/verify succeeds with agent token', async () => {
       const res = await request(ctx, 'GET', '/api/auth/verify')
       expect(res.status).toBe(200)

@@ -5,6 +5,13 @@ import { eventBus } from '../event-bus'
 import { triggerAgent, pauseAgent, isAgentRunning } from '../../shared/agent-loop'
 import { initCloudSync } from '../cloud'
 import { QUEEN_DEFAULTS_BY_PLAN, type ClaudePlan } from '../../shared/constants'
+import type { ActivityEventType } from '../../shared/types'
+
+function parseLimit(raw: string | undefined, fallback: number, max: number): number {
+  const n = Number(raw)
+  if (!Number.isFinite(n) || n < 1) return fallback
+  return Math.min(Math.trunc(n), max)
+}
 
 export function registerRoomRoutes(router: Router): void {
   router.post('/api/rooms', (ctx) => {
@@ -51,9 +58,9 @@ export function registerRoomRoutes(router: Router): void {
 
   router.get('/api/rooms/:id/activity', (ctx) => {
     const roomId = Number(ctx.params.id)
-    const limit = ctx.query.limit ? Number(ctx.query.limit) : undefined
+    const limit = parseLimit(ctx.query.limit, 50, 500)
     const eventTypes = ctx.query.eventTypes
-      ? (ctx.query.eventTypes as string).split(',') as any
+      ? (ctx.query.eventTypes as string).split(',').filter(Boolean) as ActivityEventType[]
       : undefined
     const activity = queries.getRoomActivity(ctx.db, roomId, limit, eventTypes)
     return { data: activity }

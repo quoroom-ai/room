@@ -37,20 +37,24 @@ export function registerCredentialTools(server: McpServer): void {
       }
     },
     async ({ roomId, name }) => {
-      const db = getMcpDatabase()
-      const credential = queries.getCredentialByName(db, roomId, name)
-      if (!credential) {
-        return { content: [{ type: 'text' as const, text: `Credential "${name}" not found in this room.` }], isError: true }
-      }
-      return {
-        content: [{
-          type: 'text' as const,
-          text: JSON.stringify({
-            name: credential.name,
-            type: credential.type,
-            value: credential.valueEncrypted
-          }, null, 2)
-        }]
+      try {
+        const db = getMcpDatabase()
+        const credential = queries.getCredentialByName(db, roomId, name)
+        if (!credential) {
+          return { content: [{ type: 'text' as const, text: `Credential "${name}" not found in this room.` }], isError: true }
+        }
+        return {
+          content: [{
+            type: 'text' as const,
+            text: JSON.stringify({
+              name: credential.name,
+              type: credential.type,
+              value: credential.valueEncrypted
+            }, null, 2)
+          }]
+        }
+      } catch (e) {
+        return { content: [{ type: 'text' as const, text: (e as Error).message }], isError: true }
       }
     }
   )

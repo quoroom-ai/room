@@ -70,9 +70,13 @@ export class Router {
       const match = pathname.match(route.pattern)
       if (match) {
         const params: Record<string, string> = {}
-        route.paramNames.forEach((name, i) => {
-          params[name] = decodeURIComponent(match[i + 1])
-        })
+        for (const [i, name] of route.paramNames.entries()) {
+          try {
+            params[name] = decodeURIComponent(match[i + 1])
+          } catch {
+            return null
+          }
+        }
         return { handler: route.handler, params }
       }
     }

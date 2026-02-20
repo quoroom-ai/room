@@ -27,6 +27,13 @@ describe('Watch routes', () => {
       const res = await request(ctx, 'POST', '/api/watches', {})
       expect(res.status).toBe(400)
     })
+
+    it('returns 400 for unsafe path', async () => {
+      const res = await request(ctx, 'POST', '/api/watches', {
+        path: '/etc'
+      })
+      expect(res.status).toBe(400)
+    })
   })
 
   describe('GET /api/watches', () => {

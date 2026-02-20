@@ -113,11 +113,12 @@ function requestWithToken(
 export function requestNoAuth(
   ctx: TestContext,
   method: string,
-  path: string
+  path: string,
+  headers?: Record<string, string>
 ): Promise<RequestResult> {
   return new Promise((resolve, reject) => {
     const url = new URL(path, ctx.baseUrl)
-    const req = http.request(url, { method }, (res) => {
+    const req = http.request(url, { method, headers }, (res) => {
       const chunks: Buffer[] = []
       res.on('data', (chunk: Buffer) => chunks.push(chunk))
       res.on('end', () => {

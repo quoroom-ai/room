@@ -17,6 +17,7 @@ import {
   generateToken,
   validateToken,
   isAllowedOrigin,
+  isLocalOrigin,
   setCorsHeaders,
   writeTokenFile,
   getUserToken,
@@ -44,10 +45,36 @@ export interface ServerOptions {
 }
 
 function parseBody(req: http.IncomingMessage): Promise<unknown> {
+  const MAX_BODY_BYTES = 1_048_576 // 1 MiB
   return new Promise((resolve, reject) => {
     const chunks: Buffer[] = []
-    req.on('data', (chunk: Buffer) => chunks.push(chunk))
-    req.on('end', () => {
+    let totalBytes = 0
+    let settled = false
+
+    const fail = (err: Error): void => {
+      if (settled) return
+      settled = true
+      req.removeListener('data', onData)
+      req.removeListener('end', onEnd)
+      req.removeListener('error', onError)
+      // Drain any remaining data so Node can recycle the socket.
+      req.resume()
+      reject(err)
+    }
+
+    const onData = (chunk: Buffer): void => {
+      if (settled) return
+      totalBytes += chunk.length
+      if (totalBytes > MAX_BODY_BYTES) {
+        fail(new Error('Payload too large'))
+        return
+      }
+      chunks.push(chunk)
+    }
+
+    const onEnd = (): void => {
+      if (settled) return
+      settled = true
       const raw = Buffer.concat(chunks).toString()
       if (!raw) return resolve(undefined)
       try {
@@ -55,8 +82,13 @@ function parseBody(req: http.IncomingMessage): Promise<unknown> {
       } catch {
         reject(new Error('Invalid JSON body'))
       }
-    })
-    req.on('error', reject)
+    }
+
+    const onError = (err: Error): void => fail(err)
+
+    req.on('data', onData)
+    req.on('end', onEnd)
+    req.on('error', onError)
   })
 }
 
@@ -163,6 +195,11 @@ export function createApiServer(options: ServerOptions = {}): {
     // Auth handshake — no token needed, Origin must be localhost
     // Returns user token (restricted in auto mode, full in semi mode)
     if (pathname === '/api/auth/handshake' && req.method === 'GET') {
+      if (!isLocalOrigin(origin)) {
+        res.writeHead(403, responseHeaders)
+        res.end(JSON.stringify({ error: 'Handshake allowed only from local origin' }))
+        return
+      }
       res.writeHead(200, responseHeaders)
       res.end(JSON.stringify({ token: getUserToken() }))
       return
@@ -219,7 +256,12 @@ export function createApiServer(options: ServerOptions = {}): {
         res.end(JSON.stringify(result.error ? { error: result.error } : result.data))
       } catch (err) {
         const message = err instanceof Error ? err.message : 'Internal error'
-        res.writeHead(500, responseHeaders)
+        const status = message === 'Invalid JSON body'
+          ? 400
+          : message === 'Payload too large'
+            ? 413
+            : 500
+        res.writeHead(status, responseHeaders)
         res.end(JSON.stringify({ error: message }))
       }
       return

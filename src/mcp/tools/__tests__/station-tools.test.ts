@@ -3,19 +3,9 @@ import Database from 'better-sqlite3'
 import { initTestDb } from '../../../shared/__tests__/helpers/test-db'
 import * as queries from '../../../shared/db-queries'
 import { MockProvider, registerProvider } from '../../../shared/station'
+import { createToolHarness } from './helpers/tool-harness'
 
-type ToolHandler = (params: Record<string, unknown>) => Promise<{
-  content: Array<{ type: string; text: string }>
-  isError?: boolean
-}>
-
-const toolHandlers = new Map<string, ToolHandler>()
-
-const mockServer = {
-  registerTool: (_name: string, _opts: unknown, handler: ToolHandler) => {
-    toolHandlers.set(_name, handler)
-  }
-}
+const { toolHandlers, mockServer, getResponseText } = createToolHarness()
 
 let db: Database.Database
 vi.mock('../../db', () => ({
@@ -41,10 +31,6 @@ beforeEach(async () => {
 afterEach(() => {
   db.close()
 })
-
-function getResponseText(result: { content: Array<{ type: string; text: string }> }): string {
-  return result.content[0].text
-}
 
 describe('quoroom_station_create', () => {
   it('creates a station', async () => {

@@ -2,6 +2,10 @@ import type { Router } from '../router'
 import * as queries from '../../shared/db-queries'
 import { eventBus } from '../event-bus'
 
+function maskCredential<T extends { valueEncrypted: string }>(credential: T): T {
+  return { ...credential, valueEncrypted: '***' }
+}
+
 export function registerCredentialRoutes(router: Router): void {
   router.get('/api/rooms/:roomId/credentials', (ctx) => {
     const roomId = Number(ctx.params.roomId)
@@ -12,7 +16,7 @@ export function registerCredentialRoutes(router: Router): void {
     const id = Number(ctx.params.id)
     const credential = queries.getCredential(ctx.db, id)
     if (!credential) return { status: 404, error: 'Credential not found' }
-    return { data: credential }
+    return { data: maskCredential(credential) }
   })
 
   router.post('/api/rooms/:roomId/credentials', (ctx) => {
@@ -29,8 +33,9 @@ export function registerCredentialRoutes(router: Router): void {
       body.name,
       (body.type as string) || 'other',
       body.value)
-    eventBus.emit(`room:${roomId}`, 'credential:created', credential)
-    return { status: 201, data: credential }
+    const safeCredential = maskCredential(credential)
+    eventBus.emit(`room:${roomId}`, 'credential:created', safeCredential)
+    return { status: 201, data: safeCredential }
   })
 
   router.delete('/api/credentials/:id', (ctx) => {
