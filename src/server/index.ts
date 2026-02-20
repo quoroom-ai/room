@@ -32,7 +32,14 @@ import { initCloudSync } from './cloud'
 import { _stopAllLoops } from '../shared/agent-loop'
 import { initUpdateChecker, stopUpdateChecker, getUpdateInfo } from './updateChecker'
 
+try {
+  (process as unknown as { loadEnvFile?: (path?: string) => void }).loadEnvFile?.('.env')
+} catch {
+  // Ignore missing .env or unsupported Node versions.
+}
+
 const DEFAULT_PORT = 3700
+const DEFAULT_BIND_HOST = '127.0.0.1'
 
 /** Fetch a URL following redirects and pipe the response body to `res`. */
 function streamWithRedirects(
@@ -144,6 +151,11 @@ function parseBody(req: http.IncomingMessage): Promise<unknown> {
   })
 }
 
+function isLoopbackAddress(address: string | undefined): boolean {
+  if (!address) return false
+  return address === '127.0.0.1' || address === '::1' || address === '::ffff:127.0.0.1'
+}
+
 const MIME_TYPES: Record<string, string> = {
   '.html': 'text/html; charset=utf-8',
   '.js': 'application/javascript; charset=utf-8',
@@ -247,9 +259,10 @@ export function createApiServer(options: ServerOptions = {}): {
     // Auth handshake — no token needed, Origin must be localhost
     // Returns user token (restricted in auto mode, full in semi mode)
     if (pathname === '/api/auth/handshake' && req.method === 'GET') {
-      if (!isLocalOrigin(origin)) {
+      const isLocalClient = isLoopbackAddress(req.socket.remoteAddress)
+      if (!isLocalClient || (origin && !isLocalOrigin(origin))) {
         res.writeHead(403, responseHeaders)
-        res.end(JSON.stringify({ error: 'Handshake allowed only from local origin' }))
+        res.end(JSON.stringify({ error: 'Handshake allowed only from localhost clients' }))
         return
       }
       res.writeHead(200, responseHeaders)
@@ -272,8 +285,9 @@ export function createApiServer(options: ServerOptions = {}): {
 
     // All other /api/* routes require auth
     if (pathname.startsWith('/api/')) {
-      // Support token via ?token= query param (used for binary download links)
-      const queryToken = url.searchParams.get('token')
+      // Support query-token only for binary update download links.
+      const isDownloadRoute = pathname === '/api/status/update/download' && req.method === 'GET'
+      const queryToken = isDownloadRoute ? url.searchParams.get('token') : null
       const authValue = req.headers.authorization ?? (queryToken ? `Bearer ${queryToken}` : undefined)
       const role = validateToken(authValue)
       if (!role) {
@@ -428,6 +442,7 @@ function registerMcpGlobally(dbPath: string): void {
 /** Start the server (for CLI use) */
 export function startServer(options: ServerOptions = {}): void {
   const port = options.port ?? DEFAULT_PORT
+  const bindHost = process.env.QUOROOM_BIND_HOST || DEFAULT_BIND_HOST
   // Default to built UI directory next to the compiled server output
   if (!options.staticDir) {
     const defaultUiDir = path.join(__dirname, '../ui')
@@ -451,7 +466,7 @@ export function startServer(options: ServerOptions = {}): void {
   initUpdateChecker()
 
   function listen(): void {
-    server.listen(port, () => {
+    server.listen(port, bindHost, () => {
       const dashboardUrl = 'https://app.quoroom.ai'
       console.error(`Quoroom API server started on http://localhost:${port}`)
       console.error(`Dashboard: ${dashboardUrl}`)

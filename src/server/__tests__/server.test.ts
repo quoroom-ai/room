@@ -52,6 +52,11 @@ describe('Server integration', () => {
       const res = await requestNoAuth(ctx, 'GET', '/api/rooms')
       expect(res.status).toBe(401)
     })
+
+    it('rejects query-token auth on non-download API routes', async () => {
+      const res = await requestNoAuth(ctx, 'GET', `/api/rooms?token=${ctx.token}`)
+      expect(res.status).toBe(401)
+    })
   })
 
   describe('Role-based access (auto mode)', () => {
