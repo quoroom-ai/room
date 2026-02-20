@@ -25,7 +25,6 @@ export function registerRoomRoutes(router: Router): void {
     queries.updateRoom(ctx.db, result.room.id, planDefaults)
 
     const room = queries.getRoom(ctx.db, result.room.id)!
-    triggerAgent(ctx.db, result.room.id, result.queen.id)
     eventBus.emit(`room:${result.room.id}`, 'room:created', room)
     return { status: 201, data: { ...result, room } }
   })

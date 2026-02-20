@@ -13,6 +13,7 @@ import { listRooms } from '../shared/db-queries'
 
 /** Endpoints the user can call even in auto mode (beyond GET). */
 const AUTO_MODE_USER_WHITELIST = [
+  /^POST \/api\/rooms$/,                         // create room
   /^POST \/api\/decisions\/\d+\/vote$/,         // cast vote
   /^POST \/api\/messages\/\d+\/reply$/,          // reply to message
   /^POST \/api\/rooms\/\d+\/chat$/,              // chat with queen

@@ -10,6 +10,9 @@
 [![npm version](https://img.shields.io/npm/v/quoroom)](https://www.npmjs.com/package/quoroom)
 [![Tests](https://img.shields.io/badge/tests-804%20passing-brightgreen)](#)
 [![GitHub stars](https://img.shields.io/github/stars/quoroom-ai/room)](https://github.com/quoroom-ai/room/stargazers)
+[![macOS](https://img.shields.io/badge/macOS-.pkg-000000?logo=apple&logoColor=white)](https://github.com/quoroom-ai/room/releases/latest)
+[![Windows](https://img.shields.io/badge/Windows-.exe-0078D4?logo=windows&logoColor=white)](https://github.com/quoroom-ai/room/releases/latest)
+[![Linux](https://img.shields.io/badge/Linux-.deb-FCC624?logo=linux&logoColor=black)](https://github.com/quoroom-ai/room/releases/latest)
 
 **An open research project in autonomous agent collectives.**
 

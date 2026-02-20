@@ -88,7 +88,7 @@ export function HelpPanel({ installPrompt }: HelpPanelProps): React.JSX.Element 
         <div className="bg-amber-50 rounded-lg p-2 space-y-1.5 text-xs text-gray-600 leading-relaxed">
           <p>
             The queen runs in a continuous loop — without limits she will consume tokens at full speed.
-            Use the controls in <span className="font-medium text-gray-700">Settings → Rooms</span> to manage her activity:
+            Use the controls in <span className="font-medium text-gray-700">Room Settings</span> to manage her activity:
           </p>
           <div className="space-y-1 pt-0.5">
             <div className="flex gap-1.5">

@@ -110,7 +110,16 @@ jobs:
           # Shell wrapper — uses bundled runtime
           cat > staging/quoroom/bin/quoroom << 'WRAPPER'
           #!/bin/sh
-          DIR="$(cd "$(dirname "$0")" && pwd)"
+          SOURCE="$0"
+          while [ -h "$SOURCE" ]; do
+            DIR="$(cd -P "$(dirname "$SOURCE")" && pwd)"
+            TARGET="$(readlink "$SOURCE")"
+            case "$TARGET" in
+              /*) SOURCE="$TARGET" ;;
+              *) SOURCE="$DIR/$TARGET" ;;
+            esac
+          done
+          DIR="$(cd -P "$(dirname "$SOURCE")" && pwd)"
           exec "$DIR/../runtime/node" "$DIR/../lib/cli.js" "$@"
           WRAPPER
           chmod +x staging/quoroom/bin/quoroom
@@ -332,7 +341,16 @@ jobs:
 
           cat > staging/quoroom/bin/quoroom << 'WRAPPER'
           #!/bin/sh
-          DIR="$(cd "$(dirname "$0")" && pwd)"
+          SOURCE="$0"
+          while [ -h "$SOURCE" ]; do
+            DIR="$(cd -P "$(dirname "$SOURCE")" && pwd)"
+            TARGET="$(readlink "$SOURCE")"
+            case "$TARGET" in
+              /*) SOURCE="$TARGET" ;;
+              *) SOURCE="$DIR/$TARGET" ;;
+            esac
+          done
+          DIR="$(cd -P "$(dirname "$SOURCE")" && pwd)"
           exec "$DIR/../runtime/node" "$DIR/../lib/cli.js" "$@"
           WRAPPER
           chmod +x staging/quoroom/bin/quoroom

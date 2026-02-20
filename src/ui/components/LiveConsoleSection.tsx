@@ -97,7 +97,7 @@ export function LiveConsoleSection({
       <div
         ref={scrollRef}
         onScroll={handleScroll}
-        className="flex-1 overflow-y-auto bg-gray-900 m-3 rounded p-2 font-mono text-xs leading-relaxed min-h-[4rem]"
+        className="flex-1 overflow-y-auto overflow-x-hidden bg-gray-900 m-3 rounded p-2 font-mono text-xs leading-relaxed min-h-[4rem]"
       >
         {runningRuns.length === 0 ? (
           <div className="text-gray-500">No tasks running</div>
@@ -118,7 +118,7 @@ export function LiveConsoleSection({
                   entries.map((e) => (
                     <div
                       key={`${run.id}-${e.seq}`}
-                      className={CONSOLE_ENTRY_COLORS[e.entryType] ?? 'text-gray-300'}
+                      className={`${CONSOLE_ENTRY_COLORS[e.entryType] ?? 'text-gray-300'} whitespace-pre-wrap break-words`}
                     >
                       {e.content}
                     </div>

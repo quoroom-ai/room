@@ -44,13 +44,6 @@ export function RoomsPanel({ selectedRoomId, onSelectRoom }: RoomsPanelProps): R
   const [containerRef, containerWidth] = useContainerWidth<HTMLDivElement>()
   const isWide = containerWidth > 500
 
-  // Optimistic state: immediate UI overrides before the next API poll confirms
-  const [roomOverrides, setRoomOverrides] = useState<Record<number, Partial<Room>>>({})
-
-  function optimistic(id: number, patch: Partial<Room>): void {
-    setRoomOverrides(prev => ({ ...prev, [id]: { ...prev[id], ...patch } }))
-  }
-
   // Create form
   const [showCreate, setShowCreate] = useState(false)
   const [createName, setCreateName] = useState('')
@@ -103,69 +96,6 @@ export function RoomsPanel({ selectedRoomId, onSelectRoom }: RoomsPanelProps): R
     await api.rooms.delete(roomId)
     setConfirmDeleteId(null)
     if (selectedRoomId === roomId) onSelectRoom(null)
-    refresh()
-  }
-
-  async function handleToggleVisibility(room: Room): Promise<void> {
-    const next = room.visibility === 'public' ? 'private' : 'public'
-    optimistic(room.id, { visibility: next })
-    await api.rooms.update(room.id, { visibility: next })
-    refresh()
-  }
-
-  async function handleSetAutonomy(room: Room, mode: 'auto' | 'semi'): Promise<void> {
-    optimistic(room.id, { autonomyMode: mode })
-    try {
-      await api.rooms.update(room.id, { autonomyMode: mode })
-      refresh()
-    } catch (e) {
-      console.error('Failed to update autonomy mode:', e)
-      optimistic(room.id, { autonomyMode: room.autonomyMode }) // revert
-    }
-  }
-
-  async function handleChangeMaxTasks(room: Room, delta: number): Promise<void> {
-    const next = Math.max(1, Math.min(10, room.maxConcurrentTasks + delta))
-    if (next === room.maxConcurrentTasks) return
-    optimistic(room.id, { maxConcurrentTasks: next })
-    await api.rooms.update(room.id, { maxConcurrentTasks: next })
-    refresh()
-  }
-
-  async function handleSetWorkerModel(room: Room, useOllama: boolean): Promise<void> {
-    const workerModel = useOllama ? 'ollama:llama3.2' : 'claude'
-    optimistic(room.id, { workerModel })
-    try {
-      await api.rooms.update(room.id, { workerModel })
-      refresh()
-    } catch (e) {
-      console.error('Failed to update worker model:', e)
-      optimistic(room.id, { workerModel: room.workerModel }) // revert
-    }
-  }
-
-  async function handleSetCycleGap(room: Room, ms: number): Promise<void> {
-    optimistic(room.id, { queenCycleGapMs: ms })
-    await api.rooms.update(room.id, { queenCycleGapMs: ms })
-    refresh()
-  }
-
-  async function handleSetMaxTurns(room: Room, delta: number): Promise<void> {
-    const next = Math.max(1, Math.min(50, room.queenMaxTurns + delta))
-    if (next === room.queenMaxTurns) return
-    optimistic(room.id, { queenMaxTurns: next })
-    await api.rooms.update(room.id, { queenMaxTurns: next })
-    refresh()
-  }
-
-  async function handleSetQuietHours(room: Room, from: string, until: string): Promise<void> {
-    if (!from || !until) {
-      optimistic(room.id, { queenQuietFrom: null, queenQuietUntil: null })
-      await api.rooms.update(room.id, { queenQuietFrom: null, queenQuietUntil: null })
-    } else {
-      optimistic(room.id, { queenQuietFrom: from, queenQuietUntil: until })
-      await api.rooms.update(room.id, { queenQuietFrom: from, queenQuietUntil: until })
-    }
     refresh()
   }
 
@@ -245,8 +175,7 @@ export function RoomsPanel({ selectedRoomId, onSelectRoom }: RoomsPanelProps): R
         <p className="text-xs text-gray-400 py-4 text-center">No rooms yet. Create one to get started.</p>
       ) : (
         <div className={isWide ? 'grid grid-cols-2 gap-3' : 'space-y-3'}>
-          {rooms.map(rawRoom => {
-            const room = { ...rawRoom, ...roomOverrides[rawRoom.id] }
+          {rooms.map(room => {
             const isSelected = selectedRoomId === room.id
             return (
               <div
@@ -308,155 +237,6 @@ export function RoomsPanel({ selectedRoomId, onSelectRoom }: RoomsPanelProps): R
                     <span className="ml-2 font-mono text-gray-500" title={wallets[room.id].address}>
                       {wallets[room.id].chain} {wallets[room.id].address.slice(0, 6)}...{wallets[room.id].address.slice(-4)}
                     </span>
-                  )}
-                </div>
-
-                {/* Room settings */}
-                <div className="mb-2 pt-2 border-t border-gray-200 space-y-1.5" onClick={(e) => e.stopPropagation()}>
-                  {/* Public toggle */}
-                  <div className="flex items-center justify-between text-xs">
-                    <span className="text-gray-500">Public</span>
-                    <button
-                      onClick={() => handleToggleVisibility(room)}
-                      className={`w-7 h-3.5 rounded-full relative transition-colors ${
-                        room.visibility === 'public' ? 'bg-green-500' : 'bg-gray-300'
-                      }`}
-                    >
-                      <span className={`absolute top-0.5 w-2.5 h-2.5 bg-white rounded-full transition-transform ${
-                        room.visibility === 'public' ? 'left-3.5' : 'left-0.5'
-                      }`} />
-                    </button>
-                  </div>
-
-                  {/* Autonomy mode */}
-                  <div className="flex items-center justify-between text-xs">
-                    <span className="text-gray-500">Control</span>
-                    <div className="flex rounded overflow-hidden border border-gray-200">
-                      <button
-                        type="button"
-                        onClick={(e) => { e.stopPropagation(); handleSetAutonomy(room, 'auto') }}
-                        className={`px-3 py-1 text-xs font-medium transition-colors ${
-                          room.autonomyMode === 'auto'
-                            ? 'bg-amber-500 text-white'
-                            : 'bg-white text-gray-500 hover:bg-gray-100'
-                        }`}
-                      >Auto</button>
-                      <button
-                        type="button"
-                        onClick={(e) => { e.stopPropagation(); handleSetAutonomy(room, 'semi') }}
-                        className={`px-3 py-1 text-xs font-medium transition-colors ${
-                          room.autonomyMode === 'semi'
-                            ? 'bg-blue-500 text-white'
-                            : 'bg-white text-gray-500 hover:bg-gray-100'
-                        }`}
-                      >Semi</button>
-                    </div>
-                  </div>
-
-                  {/* Queen sessions */}
-                  <div className="flex items-center justify-between text-xs">
-                    <span className="text-gray-500">Queen sessions</span>
-                    <div className="flex items-center gap-1">
-                      <button
-                        onClick={() => handleChangeMaxTasks(room, -1)}
-                        disabled={room.maxConcurrentTasks <= 1}
-                        className="w-4 h-4 rounded bg-gray-200 hover:bg-gray-300 disabled:opacity-30 text-[10px] font-medium text-gray-600"
-                      >-</button>
-                      <span className="w-4 text-center text-xs tabular-nums">{room.maxConcurrentTasks}</span>
-                      <button
-                        onClick={() => handleChangeMaxTasks(room, 1)}
-                        disabled={room.maxConcurrentTasks >= 10}
-                        className="w-4 h-4 rounded bg-gray-200 hover:bg-gray-300 disabled:opacity-30 text-[10px] font-medium text-gray-600"
-                      >+</button>
-                    </div>
-                  </div>
-
-                  {/* Cycle gap */}
-                  <div className="flex items-center justify-between text-xs">
-                    <span className="text-gray-500">Cycle gap</span>
-                    <select
-                      value={room.queenCycleGapMs}
-                      onChange={(e) => handleSetCycleGap(room, Number(e.target.value))}
-                      onClick={(e) => e.stopPropagation()}
-                      className="text-[10px] border border-gray-200 rounded px-1 py-0.5 bg-white text-gray-600"
-                    >
-                      <option value={10000}>10s</option>
-                      <option value={30000}>30s</option>
-                      <option value={60000}>1 min</option>
-                      <option value={300000}>5 min</option>
-                      <option value={900000}>15 min</option>
-                      <option value={1800000}>30 min</option>
-                      <option value={3600000}>1 hr</option>
-                      <option value={7200000}>2 hr</option>
-                    </select>
-                  </div>
-
-                  {/* Max turns */}
-                  <div className="flex items-center justify-between text-xs">
-                    <span className="text-gray-500">Max turns</span>
-                    <div className="flex items-center gap-1">
-                      <button
-                        onClick={() => handleSetMaxTurns(room, -1)}
-                        disabled={room.queenMaxTurns <= 1}
-                        className="w-4 h-4 rounded bg-gray-200 hover:bg-gray-300 disabled:opacity-30 text-[10px] font-medium text-gray-600"
-                      >-</button>
-                      <span className="w-5 text-center text-xs tabular-nums">{room.queenMaxTurns}</span>
-                      <button
-                        onClick={() => handleSetMaxTurns(room, 1)}
-                        disabled={room.queenMaxTurns >= 50}
-                        className="w-4 h-4 rounded bg-gray-200 hover:bg-gray-300 disabled:opacity-30 text-[10px] font-medium text-gray-600"
-                      >+</button>
-                    </div>
-                  </div>
-
-                  {/* Quiet hours */}
-                  <div className="flex items-center justify-between text-xs">
-                    <span className="text-gray-500">Quiet hours</span>
-                    <div className="flex items-center gap-1" onClick={(e) => e.stopPropagation()}>
-                      <input
-                        type="time"
-                        value={room.queenQuietFrom ?? ''}
-                        onChange={(e) => handleSetQuietHours(room, e.target.value, room.queenQuietUntil ?? '')}
-                        className="text-[10px] border border-gray-200 rounded px-1 py-0.5 bg-white text-gray-600 w-20"
-                      />
-                      <span className="text-gray-400">–</span>
-                      <input
-                        type="time"
-                        value={room.queenQuietUntil ?? ''}
-                        onChange={(e) => handleSetQuietHours(room, room.queenQuietFrom ?? '', e.target.value)}
-                        className="text-[10px] border border-gray-200 rounded px-1 py-0.5 bg-white text-gray-600 w-20"
-                      />
-                    </div>
-                  </div>
-
-                  {/* Worker model */}
-                  <div className="flex items-center justify-between text-xs">
-                    <span className="text-gray-500">Workers use</span>
-                    <div className="flex rounded overflow-hidden border border-gray-200">
-                      <button
-                        type="button"
-                        onClick={(e) => { e.stopPropagation(); handleSetWorkerModel(room, false) }}
-                        className={`px-3 py-1 text-xs font-medium transition-colors ${
-                          !(room.workerModel ?? 'claude').startsWith('ollama:')
-                            ? 'bg-blue-500 text-white'
-                            : 'bg-white text-gray-500 hover:bg-gray-100'
-                        }`}
-                      >Claude</button>
-                      <button
-                        type="button"
-                        onClick={(e) => { e.stopPropagation(); handleSetWorkerModel(room, true) }}
-                        className={`px-3 py-1 text-xs font-medium transition-colors ${
-                          (room.workerModel ?? 'claude').startsWith('ollama:')
-                            ? 'bg-green-500 text-white'
-                            : 'bg-white text-gray-500 hover:bg-gray-100'
-                        }`}
-                      >Ollama</button>
-                    </div>
-                  </div>
-                  {(room.workerModel ?? 'claude').startsWith('ollama:') && (
-                    <p className="text-[10px] text-green-600 leading-tight">
-                      Free local LLM — model: {room.workerModel.replace('ollama:', '')}. Requires Ollama running locally.
-                    </p>
                   )}
                 </div>
 

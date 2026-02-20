@@ -5,7 +5,7 @@
 
 import type Database from 'better-sqlite3'
 import { startCloudSync, stopCloudSync, getRoomCloudId, type CloudHeartbeat } from '../shared/cloud-sync'
-import { listRooms, listWorkers, listTasks, getWalletByRoom, getWalletTransactionSummary } from '../shared/db-queries'
+import { listRooms, listWorkers, listTasks, getWalletByRoom, getWalletTransactionSummary, getSetting } from '../shared/db-queries'
 
 function getVersion(): string {
   try {
@@ -24,6 +24,9 @@ export function initCloudSync(db: Database.Database): void {
 
   startCloudSync({
     getHeartbeatDataForPublicRooms(): CloudHeartbeat[] {
+      // Respect telemetry opt-out — keeper can go dark even with public rooms
+      if (getSetting(db, 'telemetry_enabled') === 'false') return []
+
       const publicRooms = listRooms(db).filter(r => r.visibility === 'public')
       if (publicRooms.length === 0) return []
 

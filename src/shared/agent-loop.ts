@@ -8,6 +8,7 @@ import { loadSkillsForAgent } from './skills'
 import { checkExpiredDecisions } from './quorum'
 import { getRoomStatus } from './room'
 import { detectRateLimit, sleep } from './rate-limit'
+import { fetchPublicRooms, type PublicRoom } from './cloud-sync'
 
 interface LoopState {
   running: boolean
@@ -226,6 +227,14 @@ export async function runCycle(
   const roomTasks = queries.listTasks(db, roomId, 'active').slice(0, 10)
   const unreadMessages = queries.listRoomMessages(db, roomId, 'unread').slice(0, 5)
 
+  // Cross-room learning — fetch other public rooms from cloud (fail silently)
+  let publicRooms: PublicRoom[] = []
+  try {
+    publicRooms = await fetchPublicRooms()
+  } catch {
+    // Cloud unavailability never affects local operation
+  }
+
   // 2. BUILD PROMPT
   const skillContent = loadSkillsForAgent(db, roomId, status.room.goal ?? '')
 
@@ -286,6 +295,15 @@ export async function runCycle(
     contextParts.push(`## Unread Messages\n${unreadMessages.map(m =>
       `- #${m.id} from ${m.fromRoomId ?? 'unknown'}: ${m.subject}`
     ).join('\n')}`)
+  }
+
+  if (publicRooms.length > 0) {
+    const top3 = publicRooms.slice(0, 3)
+    contextParts.push(
+      `## Public Rooms (cross-room learning)\nOther rooms you can learn strategies from:\n${top3.map((r, i) =>
+        `${i + 1}. "${r.name}" — ${r.earnings} USDC | Goal: ${r.goal ?? 'No goal set'}`
+      ).join('\n')}`
+    )
   }
 
   contextParts.push(`## Instructions\nBased on the current state, decide what to do next. You can:\n- Update goal progress\n- Create sub-goals\n- Propose decisions to the quorum\n- Create new workers\n- Escalate questions\n- Report observations\n\nRespond with your analysis and any actions you want to take.`)

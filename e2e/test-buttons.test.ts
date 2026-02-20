@@ -28,12 +28,20 @@ test('Room toggle buttons update room settings', async ({ page }) => {
     }
   })
 
-  // Navigate to Settings tab (the SPA)
+  // Navigate to the SPA and wait for rooms to load
   await page.goto(base, { waitUntil: 'networkidle' })
-  await page.locator('button').filter({ hasText: /^Settings$/i }).first().click()
   await page.waitForTimeout(2000)
 
-  // Find the "Semi" button inside the rooms panel
+  // Click the room in the sidebar to expand its submenu
+  const sidebar = page.locator('[data-testid="sidebar"]')
+  await sidebar.locator('button').filter({ hasText: /Button Test Room/i }).first().click()
+  await page.waitForTimeout(500)
+
+  // Click the room-level Settings tab in the submenu
+  await sidebar.locator('button').filter({ hasText: /^Settings$/i }).first().click()
+  await page.waitForTimeout(1000)
+
+  // Find the "Semi" button inside the room settings panel
   const semiBtn = page.locator('button').filter({ hasText: /^Semi$/i }).first()
   await expect(semiBtn).toBeVisible({ timeout: 5000 })
 

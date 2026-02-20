@@ -1,7 +1,38 @@
 #!/bin/bash
-# Create symlink so 'quoroom' is on PATH
-ln -sf /usr/local/lib/quoroom/bin/quoroom /usr/local/bin/quoroom
 
-# Open browser (runs as the installing user)
-sudo -u "$USER" open "http://localhost:3700" 2>/dev/null || true
+# Create symlink so 'quoroom' is on PATH.
+BIN_PATH="/usr/local/lib/quoroom/bin/quoroom"
+ln -sf "${BIN_PATH}" /usr/local/bin/quoroom
+
+PORT="${QUOROOM_PORT:-3700}"
+URL="http://localhost:${PORT}"
+
+# Installers run as root; detect the active desktop user.
+CONSOLE_USER="$(stat -f%Su /dev/console 2>/dev/null || true)"
+if [ -z "${CONSOLE_USER}" ] || [ "${CONSOLE_USER}" = "root" ]; then
+  exit 0
+fi
+CONSOLE_UID="$(id -u "${CONSOLE_USER}" 2>/dev/null || true)"
+if [ -z "${CONSOLE_UID}" ]; then
+  exit 0
+fi
+
+LOG_DIR="/Users/${CONSOLE_USER}/Library/Logs/Quoroom"
+LOG_FILE="${LOG_DIR}/server.log"
+mkdir -p "${LOG_DIR}"
+chown "${CONSOLE_USER}" "${LOG_DIR}" 2>/dev/null || true
+
+# Auto-start server if nothing is listening yet.
+if ! lsof -nP -iTCP:"${PORT}" -sTCP:LISTEN >/dev/null 2>&1; then
+  START_CMD="nohup \"${BIN_PATH}\" serve --port ${PORT} >> \"${LOG_FILE}\" 2>&1 &"
+  launchctl asuser "${CONSOLE_UID}" sudo -u "${CONSOLE_USER}" /bin/bash -lc "${START_CMD}" 2>/dev/null \
+    || sudo -u "${CONSOLE_USER}" /bin/bash -lc "${START_CMD}" 2>/dev/null \
+    || true
+fi
+
+# Open dashboard in the logged-in user's browser.
+launchctl asuser "${CONSOLE_UID}" sudo -u "${CONSOLE_USER}" open "${URL}" 2>/dev/null \
+  || sudo -u "${CONSOLE_USER}" open "${URL}" 2>/dev/null \
+  || true
+
 exit 0

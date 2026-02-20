@@ -1,23 +1,24 @@
-export type Tab = 'status' | 'memory' | 'workers' | 'tasks' | 'watches' | 'results' | 'goals' | 'votes' | 'messages' | 'skills' | 'credentials' | 'transactions' | 'stations' | 'settings' | 'help'
+export type Tab = 'status' | 'memory' | 'workers' | 'tasks' | 'watches' | 'results' | 'goals' | 'votes' | 'messages' | 'skills' | 'credentials' | 'transactions' | 'stations' | 'room-settings' | 'settings' | 'help'
 
 export const mainTabs: { id: Tab; label: string; advanced?: boolean }[] = [
-  { id: 'status', label: 'Activity' },
+  { id: 'status', label: 'Overview' },
   { id: 'goals', label: 'Goals' },
   { id: 'votes', label: 'Votes' },
-  { id: 'messages', label: 'Messages' },
-  { id: 'workers', label: 'Workers' },
-  { id: 'tasks', label: 'Tasks' },
-  { id: 'skills', label: 'Skills' },
+  { id: 'messages', label: 'Messages', advanced: true },
+  { id: 'workers', label: 'Workers', advanced: true },
+  { id: 'tasks', label: 'Tasks', advanced: true },
+  { id: 'skills', label: 'Skills', advanced: true },
   { id: 'credentials', label: 'Credentials' },
-  { id: 'transactions', label: 'Transactions' },
+  { id: 'transactions', label: 'Transactions', advanced: true },
   { id: 'stations', label: 'Stations' },
   { id: 'memory', label: 'Memory', advanced: true },
   { id: 'watches', label: 'Watches', advanced: true },
   { id: 'results', label: 'Results', advanced: true },
+  { id: 'room-settings', label: 'Settings' },
 ]
 
 const bottomTabs: { id: Tab; label: string }[] = [
-  { id: 'settings', label: 'Settings' },
+  { id: 'settings', label: 'Global Settings' },
   { id: 'help', label: 'Help' },
 ]
 

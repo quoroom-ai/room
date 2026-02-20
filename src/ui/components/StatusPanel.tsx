@@ -235,7 +235,7 @@ export function StatusPanel({ onNavigate, advancedMode, roomId }: StatusPanelPro
   }
 
   const activitySection = roomId ? (
-    <div className="bg-gray-50 rounded-lg p-3 flex-1 flex flex-col min-h-0">
+    <div className="bg-gray-50 rounded-lg p-3 flex-1 flex flex-col min-h-0 overflow-x-hidden">
       {/* Filter chips */}
       {presentTypes.length > 1 && (
         <div className="flex flex-wrap gap-1 mb-2 shrink-0">
@@ -261,11 +261,11 @@ export function StatusPanel({ onNavigate, advancedMode, roomId }: StatusPanelPro
           {allActivity.length === 0 ? 'No room activity yet.' : 'No matching events.'}
         </div>
       ) : (
-        <div className="space-y-1 flex-1 overflow-y-auto">
+        <div className="space-y-1 flex-1 overflow-y-auto overflow-x-hidden">
           {filteredActivity.map(entry => (
             <div
               key={entry.id}
-              className="cursor-pointer hover:bg-white rounded px-1.5 py-1 -mx-1.5 transition-colors"
+              className="cursor-pointer hover:bg-white rounded px-1.5 py-1 transition-colors"
               onClick={() => setExpandedActivityId(expandedActivityId === entry.id ? null : entry.id)}
             >
               <div className="flex items-center gap-1.5">
@@ -283,7 +283,7 @@ export function StatusPanel({ onNavigate, advancedMode, roomId }: StatusPanelPro
                     </div>
                   )}
                   {entry.details && (
-                    <div className="text-[10px] text-gray-500 whitespace-pre-wrap">{entry.details}</div>
+                    <div className="text-[10px] text-gray-500 whitespace-pre-wrap break-words">{entry.details}</div>
                   )}
                 </div>
               )}
@@ -305,7 +305,7 @@ export function StatusPanel({ onNavigate, advancedMode, roomId }: StatusPanelPro
           activeView === 'activity' ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-700'
         }`}
       >
-        Activity
+        Timeline
       </button>
       <button
         onClick={() => setViewMode('console')}
@@ -326,11 +326,19 @@ export function StatusPanel({ onNavigate, advancedMode, roomId }: StatusPanelPro
     </div>
   ) : null
 
-  const chatSection = <QueenChat roomId={roomId ?? null} />
+  function renderMainSection(): React.JSX.Element {
+    if (activeView === 'activity') {
+      return activitySection ?? <LiveConsoleSection runningRuns={data.runningRuns} taskNames={taskNames} />
+    }
+    if (activeView === 'console') {
+      return consoleSection
+    }
+    return <QueenChat roomId={roomId ?? null} />
+  }
 
   if (!wide) {
     return (
-      <div ref={containerRef} className="p-4 flex flex-col gap-3 min-h-full">
+      <div ref={containerRef} className="p-4 flex flex-col gap-3 min-h-full overflow-x-hidden">
         {errorAlert}
         {memoryCard}
         {workersCard}
@@ -340,7 +348,7 @@ export function StatusPanel({ onNavigate, advancedMode, roomId }: StatusPanelPro
         {lastRunCard}
         {walletCard}
         {toggleBar}
-        {activeView === 'activity' ? activitySection : activeView === 'console' ? consoleSection : chatSection}
+        {renderMainSection()}
       </div>
     )
   }
@@ -348,12 +356,12 @@ export function StatusPanel({ onNavigate, advancedMode, roomId }: StatusPanelPro
   const cards = [memoryCard, workersCard, tasksCard, watchesCard, lastRunCard, walletCard].filter(Boolean)
 
   return (
-    <div ref={containerRef} className="p-4 flex flex-col gap-3 min-h-full">
+    <div ref={containerRef} className="p-4 flex flex-col gap-3 min-h-full overflow-x-hidden">
       {errorAlert}
       <div className="grid grid-cols-2 gap-3">{cards}</div>
       {runningSection}
       {toggleBar}
-      {activeView === 'activity' ? activitySection : activeView === 'console' ? consoleSection : chatSection}
+      {renderMainSection()}
     </div>
   )
 }

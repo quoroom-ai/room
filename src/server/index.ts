@@ -87,7 +87,16 @@ function serveStatic(staticDir: string, pathname: string, res: http.ServerRespon
       filePath = path.join(filePath, 'index.html')
     }
   } catch {
-    // File doesn't exist — SPA fallback to index.html
+    // If URL looks like a concrete file path (has extension), return 404.
+    // SPA fallback is only for app routes like /rooms/123.
+    if (path.extname(safePath)) {
+      res.writeHead(404, {
+        'Content-Type': 'text/plain; charset=utf-8',
+        'Cache-Control': 'no-cache, no-store, must-revalidate',
+      })
+      res.end('Not Found')
+      return
+    }
     filePath = path.join(staticDir, 'index.html')
   }
 
@@ -95,7 +104,11 @@ function serveStatic(staticDir: string, pathname: string, res: http.ServerRespon
     const data = fs.readFileSync(filePath)
     const ext = path.extname(filePath).toLowerCase()
     const contentType = MIME_TYPES[ext] ?? 'application/octet-stream'
-    res.writeHead(200, { 'Content-Type': contentType })
+    const headers: Record<string, string> = {
+      'Content-Type': contentType,
+      'Cache-Control': 'no-cache, no-store, must-revalidate',
+    }
+    res.writeHead(200, headers)
     res.end(data)
   } catch {
     res.writeHead(404, { 'Content-Type': 'text/plain' })

@@ -47,6 +47,20 @@ if (!existsSync('out/mcp/node_modules')) {
   require('child_process').execSync('npm install --omit=dev', { cwd: 'out/mcp', stdio: 'inherit' })
 }
 
+function killExistingServer(port) {
+  try {
+    const pids = require('child_process').execSync(`lsof -ti TCP:${port} -s TCP:LISTEN`, { encoding: 'utf8' }).trim()
+    if (pids) {
+      pids.split('\n').forEach(pid => {
+        try { process.kill(Number(pid), 'SIGKILL') } catch {}
+      })
+      console.error(`  Killed PID(s): ${pids.replace(/\n/g, ', ')}`)
+    }
+  } catch {
+    // No process on this port
+  }
+}
+
 let serverProcess = null
 
 function startServer() {
@@ -97,6 +111,10 @@ async function main() {
 
   console.error(`\n  Watching ${ready} entry points + UI for changes...`)
   console.error(`  Server will start on port ${port}\n`)
+
+  // Kill any existing server on this port before starting
+  console.error(`\n  Killing any existing process on port ${port}...\n`)
+  killExistingServer(port)
 
   // Initial start
   startServer()

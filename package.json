@@ -1,6 +1,6 @@
 {
   "name": "quoroom",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "Autonomous AI agent collective engine — Queen, Workers, Quorum",
   "main": "./out/mcp/server.js",
   "bin": {
@@ -22,7 +22,7 @@
     "build": "npm run typecheck && npm run build:mcp && npm run build:ui",
     "build:mcp": "node scripts/build-mcp.js",
     "build:ui": "vite build --config src/ui/vite.config.ts",
-    "dev": "node scripts/dev-server.js",
+    "dev": "npm run build:mcp && npm run build:ui && node scripts/dev-server.js",
     "dev:ui": "vite --config src/ui/vite.config.ts",
     "typecheck": "tsc --noEmit",
     "test": "npm run rebuild:native:node && vitest run --pool=forks",

@@ -127,9 +127,142 @@ class StubProvider implements StationProviderInterface {
   async getLogs(): Promise<never> { this.fail() }
 }
 
+// ─── Fly.io Provider ─────────────────────────────────────────
+
+const FLY_API_BASE = 'https://api.machines.dev/v1'
+
+const TIER_TO_FLY_GUEST: Record<string, { cpu_kind: string; cpus: number; memory_mb: number }> = {
+  micro:     { cpu_kind: 'shared',      cpus: 1, memory_mb: 256 },
+  small:     { cpu_kind: 'shared',      cpus: 2, memory_mb: 2048 },
+  medium:    { cpu_kind: 'performance', cpus: 2, memory_mb: 4096 },
+  large:     { cpu_kind: 'performance', cpus: 4, memory_mb: 8192 },
+  ephemeral: { cpu_kind: 'shared',      cpus: 1, memory_mb: 256 },
+  gpu:       { cpu_kind: 'performance', cpus: 8, memory_mb: 32768 },
+}
+
+function flyStateToStatus(state: string | undefined): StationStatus {
+  switch (state) {
+    case 'created':
+    case 'starting':   return 'provisioning'
+    case 'started':    return 'running'
+    case 'stopping':   return 'running'
+    case 'stopped':    return 'stopped'
+    case 'destroying':
+    case 'destroyed':  return 'deleted'
+    default:           return 'error'
+  }
+}
+
+class FlyioProvider implements StationProviderInterface {
+  private getToken(): string {
+    const token = process.env.FLY_API_TOKEN
+    if (!token) throw new Error('Fly.io provider not configured. Set FLY_API_TOKEN environment variable.')
+    return token
+  }
+
+  private async request(method: string, path: string, body?: unknown): Promise<unknown> {
+    const response = await fetch(`${FLY_API_BASE}${path}`, {
+      method,
+      headers: {
+        'Authorization': `Bearer ${this.getToken()}`,
+        'Content-Type': 'application/json',
+      },
+      body: body !== undefined ? JSON.stringify(body) : undefined,
+    })
+    if (!response.ok) {
+      const text = await response.text().catch(() => '')
+      throw new Error(`Fly.io API error ${response.status} ${method} ${path}: ${text.slice(0, 200)}`)
+    }
+    if (response.status === 204) return null
+    return response.json()
+  }
+
+  private parseId(externalId: string): { appName: string; machineId: string } {
+    const sep = externalId.indexOf(':')
+    if (sep < 0) throw new Error(`Invalid Fly.io external ID: ${externalId}`)
+    return { appName: externalId.slice(0, sep), machineId: externalId.slice(sep + 1) }
+  }
+
+  async create(opts: CreateStationOpts): Promise<{ externalId: string; status: string }> {
+    const slug = opts.name.toLowerCase().replace(/[^a-z0-9-]/g, '-').replace(/-+/g, '-').slice(0, 28)
+    const appName = `qr-${slug}-${Date.now().toString(36)}`
+    const orgSlug = process.env.FLY_ORG_SLUG ?? 'personal'
+
+    await this.request('POST', '/apps', { app_name: appName, org_slug: orgSlug })
+
+    const guest = TIER_TO_FLY_GUEST[opts.tier] ?? TIER_TO_FLY_GUEST.micro
+    const machineConfig: Record<string, unknown> = {
+      image: (opts.config?.image as string | undefined) ?? 'ubuntu:22.04',
+      guest,
+      ...(opts.tier === 'ephemeral' ? { auto_destroy: true } : {}),
+    }
+
+    const machine = await this.request('POST', `/apps/${appName}/machines`, {
+      name: opts.name,
+      region: opts.region,
+      config: machineConfig,
+    }) as { id: string; state?: string }
+
+    return {
+      externalId: `${appName}:${machine.id}`,
+      status: flyStateToStatus(machine.state),
+    }
+  }
+
+  async start(externalId: string): Promise<void> {
+    const { appName, machineId } = this.parseId(externalId)
+    await this.request('POST', `/apps/${appName}/machines/${machineId}/start`)
+  }
+
+  async stop(externalId: string): Promise<void> {
+    const { appName, machineId } = this.parseId(externalId)
+    await this.request('POST', `/apps/${appName}/machines/${machineId}/stop`)
+  }
+
+  async destroy(externalId: string): Promise<void> {
+    const { appName, machineId } = this.parseId(externalId)
+    try { await this.request('POST', `/apps/${appName}/machines/${machineId}/stop`) } catch { /* already stopped */ }
+    await this.request('DELETE', `/apps/${appName}/machines/${machineId}`)
+    try { await this.request('DELETE', `/apps/${appName}`) } catch { /* best-effort app cleanup */ }
+  }
+
+  async exec(externalId: string, command: string): Promise<ExecResult> {
+    const { appName, machineId } = this.parseId(externalId)
+    const result = await this.request('POST', `/apps/${appName}/machines/${machineId}/exec`, {
+      cmd: ['/bin/sh', '-c', command],
+      timeout: 60,
+    }) as { stdout?: string; stderr?: string; exit_code?: number }
+    return {
+      stdout: result.stdout ?? '',
+      stderr: result.stderr ?? '',
+      exitCode: result.exit_code ?? 0,
+    }
+  }
+
+  async getStatus(externalId: string): Promise<StationStatus> {
+    const { appName, machineId } = this.parseId(externalId)
+    try {
+      const machine = await this.request('GET', `/apps/${appName}/machines/${machineId}`) as { state?: string }
+      return flyStateToStatus(machine.state)
+    } catch (err) {
+      if (err instanceof Error && err.message.includes('404')) return 'deleted'
+      throw err
+    }
+  }
+
+  async getLogs(externalId: string, lines?: number): Promise<string> {
+    const { appName, machineId } = this.parseId(externalId)
+    const query = lines ? `?limit=${lines}` : ''
+    const result = await this.request('GET', `/apps/${appName}/machines/${machineId}/logs${query}`) as
+      Array<{ message: string }> | { logs?: Array<{ message: string }> }
+    const entries = Array.isArray(result) ? result : (result.logs ?? [])
+    return entries.map(l => l.message).join('\n')
+  }
+}
+
 // Register default providers
 registerProvider('mock', new MockProvider())
-registerProvider('flyio', new StubProvider('Fly.io'))
+registerProvider('flyio', new FlyioProvider())
 registerProvider('e2b', new StubProvider('E2B'))
 registerProvider('modal', new StubProvider('Modal'))
 

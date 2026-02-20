@@ -16,21 +16,35 @@ import { MessagesPanel } from './components/MessagesPanel'
 import { CredentialsPanel } from './components/CredentialsPanel'
 import { TransactionsPanel } from './components/TransactionsPanel'
 import { StationsPanel } from './components/StationsPanel'
+import { RoomSettingsPanel } from './components/RoomSettingsPanel'
 import { ConnectPage } from './components/ConnectPage'
 import { useNotifications } from './hooks/useNotifications'
 import { useInstallPrompt, type InstallPrompt } from './hooks/useInstallPrompt'
 import { api } from './lib/client'
 import type { Room } from '@shared/types'
 
-const ADVANCED_TABS = new Set<Tab>(['memory', 'watches', 'results'])
+const ADVANCED_TABS = new Set<Tab>(
+  mainTabs.filter((tab) => tab.advanced).map((tab) => tab.id)
+)
 
-const ALL_TAB_IDS: Tab[] = ['status', 'goals', 'votes', 'messages', 'workers', 'tasks', 'skills', 'credentials', 'transactions', 'stations', 'memory', 'watches', 'results', 'settings', 'help']
+const ALL_TAB_IDS: Tab[] = ['status', 'goals', 'votes', 'messages', 'workers', 'tasks', 'skills', 'credentials', 'transactions', 'stations', 'room-settings', 'memory', 'watches', 'results', 'settings', 'help']
 
 const DEFAULT_PORT = '3700'
 const isRemoteOrigin = location.hostname !== 'localhost' && location.hostname !== '127.0.0.1'
 
 function getLocalPort(): string {
   return localStorage.getItem('quoroom_port') || DEFAULT_PORT
+}
+
+function parseCreatedRoomId(payload: unknown): number | null {
+  if (!payload || typeof payload !== 'object') return null
+  const record = payload as Record<string, unknown>
+  if (typeof record.id === 'number') return record.id
+  if (record.room && typeof record.room === 'object') {
+    const nestedId = (record.room as Record<string, unknown>).id
+    if (typeof nestedId === 'number') return nestedId
+  }
+  return null
 }
 
 async function probeLocalServer(port: string): Promise<boolean> {
@@ -71,6 +85,11 @@ function App(): React.JSX.Element {
   })
   const [rooms, setRooms] = useState<Room[]>([])
   const [queenRunning, setQueenRunning] = useState<Record<number, boolean>>({})
+  const [showCreateRoom, setShowCreateRoom] = useState(false)
+  const [createRoomName, setCreateRoomName] = useState('')
+  const [createRoomGoal, setCreateRoomGoal] = useState('')
+  const [createRoomBusy, setCreateRoomBusy] = useState(false)
+  const [createRoomError, setCreateRoomError] = useState<string | null>(null)
 
   useNotifications()
   const installPrompt = useInstallPrompt()
@@ -104,38 +123,40 @@ function App(): React.JSX.Element {
     }).catch(() => {})
   }, [gate])
 
+  function syncRooms(r: Room[]): void {
+    setRooms(r)
+    // Auto-select first room if none selected
+    if (selectedRoomId === null && r.length > 0) {
+      handleRoomChange(r[0].id)
+      setExpandedRoomId(r[0].id)
+    }
+    // Clear selection if room no longer exists
+    if (selectedRoomId !== null && !r.find(room => room.id === selectedRoomId)) {
+      const next = r.length > 0 ? r[0].id : null
+      handleRoomChange(next)
+      setExpandedRoomId(next)
+    }
+    // Sync expandedRoomId on first load
+    setExpandedRoomId(prev => {
+      if (prev === null && selectedRoomId !== null && r.find(room => room.id === selectedRoomId)) {
+        return selectedRoomId
+      }
+      return prev
+    })
+    // Fetch queen running status for all rooms
+    Promise.all(
+      r.map(async room => {
+        const q = await api.rooms.queenStatus(room.id).catch(() => null)
+        return [room.id, q?.running ?? false] as const
+      })
+    ).then(entries => setQueenRunning(Object.fromEntries(entries))).catch(() => {})
+  }
+
   // Load rooms list and poll for updates
   useEffect(() => {
     if (!ready) return
     function loadRooms(): void {
-      api.rooms.list().then((r) => {
-        setRooms(r)
-        // Auto-select first room if none selected
-        if (selectedRoomId === null && r.length > 0) {
-          handleRoomChange(r[0].id)
-          setExpandedRoomId(r[0].id)
-        }
-        // Clear selection if room no longer exists
-        if (selectedRoomId !== null && !r.find(room => room.id === selectedRoomId)) {
-          const next = r.length > 0 ? r[0].id : null
-          handleRoomChange(next)
-          setExpandedRoomId(next)
-        }
-        // Sync expandedRoomId on first load
-        setExpandedRoomId(prev => {
-          if (prev === null && selectedRoomId !== null && r.find(room => room.id === selectedRoomId)) {
-            return selectedRoomId
-          }
-          return prev
-        })
-        // Fetch queen running status for all rooms
-        Promise.all(
-          r.map(async room => {
-            const q = await api.rooms.queenStatus(room.id).catch(() => null)
-            return [room.id, q?.running ?? false] as const
-          })
-        ).then(entries => setQueenRunning(Object.fromEntries(entries))).catch(() => {})
-      }).catch(() => {})
+      api.rooms.list().then(syncRooms).catch(() => {})
     }
     loadRooms()
     const interval = setInterval(loadRooms, 10000)
@@ -181,6 +202,50 @@ function App(): React.JSX.Element {
     handleTabChange(t)
   }
 
+  function toggleCreateRoomForm(): void {
+    setShowCreateRoom(prev => {
+      const next = !prev
+      if (!next) {
+        setCreateRoomName('')
+        setCreateRoomGoal('')
+        setCreateRoomError(null)
+      }
+      return next
+    })
+  }
+
+  async function handleCreateRoom(): Promise<void> {
+    const name = createRoomName.trim()
+    const goal = createRoomGoal.trim()
+    if (!name || createRoomBusy) return
+
+    setCreateRoomBusy(true)
+    setCreateRoomError(null)
+    try {
+      const created = await api.rooms.create({ name, goal: goal || undefined })
+      const createdRoomId = parseCreatedRoomId(created)
+      const nextRooms = await api.rooms.list()
+      syncRooms(nextRooms)
+
+      const resolvedRoomId = createdRoomId
+        ?? [...nextRooms].reverse().find(r => r.name === name)?.id
+        ?? null
+      if (resolvedRoomId !== null) {
+        handleRoomChange(resolvedRoomId)
+        setExpandedRoomId(resolvedRoomId)
+      }
+      handleTabChange('room-settings')
+
+      setCreateRoomName('')
+      setCreateRoomGoal('')
+      setShowCreateRoom(false)
+    } catch (err) {
+      setCreateRoomError(err instanceof Error ? err.message : 'Failed to create room')
+    } finally {
+      setCreateRoomBusy(false)
+    }
+  }
+
   const selectedRoom = rooms.find(r => r.id === selectedRoomId) ?? null
 
   function renderPanel(): React.JSX.Element {
@@ -207,12 +272,14 @@ function App(): React.JSX.Element {
         return <TransactionsPanel roomId={selectedRoomId} />
       case 'stations':
         return <StationsPanel roomId={selectedRoomId} autonomyMode={autonomyMode} />
+      case 'room-settings':
+        return <RoomSettingsPanel roomId={selectedRoomId} />
       case 'watches':
         return <WatchesPanel roomId={selectedRoomId} autonomyMode={autonomyMode} />
       case 'results':
         return <ResultsPanel roomId={selectedRoomId} autonomyMode={autonomyMode} />
       case 'settings':
-        return <SettingsPanel advancedMode={advancedMode} onAdvancedModeChange={handleAdvancedModeChange} installPrompt={installPrompt} onNavigate={(t) => handleTabChange(t as Tab)} selectedRoomId={selectedRoomId} onSelectRoom={handleRoomChange} />
+        return <SettingsPanel advancedMode={advancedMode} onAdvancedModeChange={handleAdvancedModeChange} installPrompt={installPrompt} onNavigate={(t) => handleTabChange(t as Tab)} />
       case 'help':
         return <HelpPanel installPrompt={installPrompt} />
       default:
@@ -270,6 +337,48 @@ function App(): React.JSX.Element {
     <div className="flex h-screen bg-white">
       {/* Left sidebar */}
       <div data-testid="sidebar" className="w-40 flex-shrink-0 flex flex-col bg-gray-50 border-r border-gray-200 py-1.5 px-1.5">
+        {/* Create room */}
+        <div className="pb-1.5 mb-1.5 border-b border-gray-200">
+          <button
+            onClick={toggleCreateRoomForm}
+            className="w-full px-2 py-1 text-xs text-left text-blue-500 hover:text-blue-700 rounded hover:bg-blue-50 transition-colors"
+          >
+            {showCreateRoom ? 'Cancel' : '+ New Room'}
+          </button>
+          {showCreateRoom && (
+            <div className="mt-1 space-y-1 px-1">
+              <input
+                value={createRoomName}
+                onChange={(e) => setCreateRoomName(e.target.value)}
+                placeholder="Room name"
+                className="w-full bg-white border border-gray-200 rounded px-1.5 py-1 text-[11px] text-gray-700"
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') void handleCreateRoom()
+                }}
+              />
+              <input
+                value={createRoomGoal}
+                onChange={(e) => setCreateRoomGoal(e.target.value)}
+                placeholder="Goal (optional)"
+                className="w-full bg-white border border-gray-200 rounded px-1.5 py-1 text-[11px] text-gray-500"
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') void handleCreateRoom()
+                }}
+              />
+              <button
+                onClick={() => void handleCreateRoom()}
+                disabled={createRoomBusy || !createRoomName.trim()}
+                className="w-full px-2 py-1 text-[11px] rounded bg-blue-500 text-white hover:bg-blue-600 disabled:opacity-40"
+              >
+                {createRoomBusy ? 'Creating...' : 'Create'}
+              </button>
+              {createRoomError && (
+                <p className="text-[10px] text-red-500 leading-tight">{createRoomError}</p>
+              )}
+            </div>
+          )}
+        </div>
+
         {/* Room accordion — scrollable */}
         <div className="flex-1 overflow-y-auto min-h-0">
           {rooms.length === 0 && (

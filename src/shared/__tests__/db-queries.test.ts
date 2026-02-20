@@ -512,8 +512,10 @@ describe('getDueOnceTasks', () => {
   })
 
   it('returns tasks where scheduled_at is in the past', () => {
-    // Use SQLite-compatible datetime format (no T, no Z)
-    const past = new Date(Date.now() - 120000).toISOString().replace('T', ' ').replace('Z', '')
+    // Use local time (matching datetime('now','localtime') in the query)
+    const d = new Date(Date.now() - 120000)
+    const past = new Date(d.getTime() - d.getTimezoneOffset() * 60000)
+      .toISOString().replace('T', ' ').replace('Z', '').slice(0, 19)
     q.createTask(db, {
       name: 'Due Task',
       prompt: 'run me',
@@ -525,13 +527,16 @@ describe('getDueOnceTasks', () => {
     expect(due[0].name).toBe('Due Task')
   })
 
-  it('returns due tasks for ISO-8601 values written by APIs', () => {
-    const pastIso = new Date(Date.now() - 120000).toISOString()
+  it('returns due tasks for local ISO-8601 values written by APIs', () => {
+    // APIs send local time without Z (e.g. "2026-02-20T15:00:00")
+    const d = new Date(Date.now() - 120000)
+    const pastLocal = new Date(d.getTime() - d.getTimezoneOffset() * 60000)
+      .toISOString().replace('Z', '').slice(0, 19)
     q.createTask(db, {
       name: 'Due ISO Task',
       prompt: 'run me',
       triggerType: 'once',
-      scheduledAt: pastIso
+      scheduledAt: pastLocal
     })
 
     const due = q.getDueOnceTasks(db)

@@ -23,7 +23,7 @@ test.describe('UI — SPA loads and renders', () => {
     await page.goto(base, { waitUntil: 'networkidle' })
 
     // After auth, the tab bar should appear
-    const anyTab = page.locator('button').filter({ hasText: /Activity|Tasks|Workers|Settings|Help/i }).first()
+    const anyTab = page.locator('button').filter({ hasText: /Overview|Tasks|Workers|Settings|Help/i }).first()
     await anyTab.waitFor({ timeout: 10000 })
 
     await page.screenshot({ path: 'e2e/screenshots/ui-02-tabs-loaded.png', fullPage: true })
@@ -34,7 +34,7 @@ test.describe('UI — Tab navigation', () => {
   test.beforeEach(async ({ page }) => {
     await page.goto(base, { waitUntil: 'networkidle' })
     // Wait for UI to be ready
-    await page.locator('button').filter({ hasText: /Activity|Tasks/i }).first().waitFor({ timeout: 10000 })
+    await page.locator('button').filter({ hasText: /Overview|Tasks/i }).first().waitFor({ timeout: 10000 })
   })
 
   test('Status/Activity tab (default)', async ({ page }) => {
@@ -59,7 +59,7 @@ test.describe('UI — Tab navigation', () => {
   })
 
   test('Settings tab', async ({ page }) => {
-    await page.locator('button').filter({ hasText: /^Settings$/i }).first().click()
+    await page.locator('button').filter({ hasText: /Global Settings/i }).first().click()
     await expect(page.getByText('Preferences')).toBeVisible({ timeout: 5000 })
     await expect(page.getByText('Connection')).toBeVisible({ timeout: 5000 })
     await page.screenshot({ path: 'e2e/screenshots/ui-06-settings-panel.png', fullPage: true })
@@ -104,7 +104,7 @@ test.describe('UI — Tab navigation', () => {
 test.describe('UI — Interaction', () => {
   test.beforeEach(async ({ page }) => {
     await page.goto(base, { waitUntil: 'networkidle' })
-    await page.locator('button').filter({ hasText: /Activity|Tasks/i }).first().waitFor({ timeout: 10000 })
+    await page.locator('button').filter({ hasText: /Overview|Tasks/i }).first().waitFor({ timeout: 10000 })
   })
 
   test('tasks panel shows read-only task list', async ({ page }) => {
@@ -166,8 +166,8 @@ test.describe('UI — Interaction', () => {
   })
 
   test('toggle advanced mode shows extra tabs', async ({ page }) => {
-    // Navigate to Settings
-    await page.locator('button').filter({ hasText: /^Settings$/i }).first().click()
+    // Navigate to Global Settings
+    await page.locator('button').filter({ hasText: /Global Settings/i }).first().click()
     await page.waitForTimeout(500)
 
     // Find and click the Advanced mode toggle (the toggle button next to "Advanced mode" text)

@@ -20,17 +20,17 @@ VIAddVersionKey "LegalCopyright" "MIT License"
 ; Modern UI
 !define MUI_ABORTWARNING
 
-; Finish page — launch local server and open browser
-!define MUI_FINISHPAGE_RUN
-!define MUI_FINISHPAGE_RUN_TEXT "Launch Quoroom"
-!define MUI_FINISHPAGE_RUN_FUNCTION "LaunchQuoroom"
+; Welcome copy
+!define MUI_WELCOMEPAGE_TEXT "This installer adds Quoroom to your PATH.$\r$\n$\r$\nAfter install, the local server starts automatically and your browser opens http://localhost:3700.$\r$\n$\r$\nYour browser controls Quoroom locally on this PC. Room data stays on your machine and is not sent to the internet by default."
 
 ; Pages
 !insertmacro MUI_PAGE_WELCOME
 !insertmacro MUI_PAGE_LICENSE "..\..\LICENSE"
 !insertmacro MUI_PAGE_DIRECTORY
 !insertmacro MUI_PAGE_INSTFILES
+!define MUI_PAGE_CUSTOMFUNCTION_LEAVE FinishPageLeave
 !insertmacro MUI_PAGE_FINISH
+!undef MUI_PAGE_CUSTOMFUNCTION_LEAVE
 
 !insertmacro MUI_UNPAGE_CONFIRM
 !insertmacro MUI_UNPAGE_INSTFILES
@@ -115,6 +115,11 @@ Function LaunchQuoroom
   ; Give server a moment to bind before opening the browser.
   Sleep 1500
   ExecShell "open" "http://localhost:3700"
+FunctionEnd
+
+; Launch automatically when the user leaves the Finish page.
+Function FinishPageLeave
+  Call LaunchQuoroom
 FunctionEnd
 
 ; --- Helper functions ---

@@ -1,5 +1,5 @@
-const CACHE_NAME = 'quoroom-v1'
-const SHELL = ['/', '/logo.png', '/favicon.ico']
+const CACHE_NAME = 'quoroom-v3'
+const SHELL = ['/logo.png', '/favicon.ico']
 
 self.addEventListener('install', (event) => {
   event.waitUntil(
@@ -19,6 +19,12 @@ self.addEventListener('activate', (event) => {
   )
 })
 
+self.addEventListener('message', (event) => {
+  if (event.data?.type === 'SKIP_WAITING') {
+    self.skipWaiting()
+  }
+})
+
 self.addEventListener('fetch', (event) => {
   const { request } = event
   if (request.method !== 'GET') return
@@ -27,13 +33,20 @@ self.addEventListener('fetch', (event) => {
   const url = new URL(request.url)
   if (url.pathname.startsWith('/api') || url.pathname.startsWith('/ws')) return
 
+  // Never cache HTML documents to avoid stale app shells after deploys.
+  if (request.mode === 'navigate' || request.destination === 'document') {
+    event.respondWith(fetch(request))
+    return
+  }
+
   event.respondWith(
     fetch(request)
       .then((response) => {
+        if (!response.ok) return response
         const clone = response.clone()
         caches.open(CACHE_NAME).then((cache) => cache.put(request, clone))
         return response
       })
-      .catch(() => caches.match(request))
+      .catch(async () => (await caches.match(request)) || Response.error())
   )
 })

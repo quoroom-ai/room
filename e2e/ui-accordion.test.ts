@@ -28,8 +28,8 @@ async function expandRoom(page: Page, roomName: string) {
   if (!btnText?.includes('▴')) {
     await roomBtn.click()
   }
-  // Wait for Activity (first tab) to appear in this room's submenu
-  await expect(sidebar(page).locator('button').filter({ hasText: /^Activity$/ })).toBeVisible({ timeout: 5000 })
+  // Wait for Overview (first tab) to appear in this room's submenu
+  await expect(sidebar(page).locator('button').filter({ hasText: /^Overview$/ })).toBeVisible({ timeout: 5000 })
 }
 
 /** Click a tab within the currently open room submenu. */
@@ -90,7 +90,7 @@ test.describe('UI — Accordion room navigation', () => {
   test('clicking a room expands its tab submenu', async ({ page }) => {
     await expandRoom(page, 'Accordion Test Room B')
     // Submenu tab is visible inside the sidebar
-    await expect(sidebar(page).locator('button').filter({ hasText: /^Activity$/ })).toBeVisible()
+    await expect(sidebar(page).locator('button').filter({ hasText: /^Overview$/ })).toBeVisible()
     await page.screenshot({ path: 'e2e/screenshots/accordion-02-expanded.png', fullPage: true })
   })
 
@@ -115,12 +115,12 @@ test.describe('UI — Accordion room navigation', () => {
   test('only one room submenu open at a time', async ({ page }) => {
     // Expand Room A
     await expandRoom(page, 'Accordion Test Room A')
-    let activityCount = await sidebar(page).locator('button').filter({ hasText: /^Activity$/ }).count()
+    let activityCount = await sidebar(page).locator('button').filter({ hasText: /^Overview$/ }).count()
     expect(activityCount).toBe(1)
 
     // Expand Room B — Room A should collapse, Room B opens
     await expandRoom(page, 'Accordion Test Room B')
-    activityCount = await sidebar(page).locator('button').filter({ hasText: /^Activity$/ }).count()
+    activityCount = await sidebar(page).locator('button').filter({ hasText: /^Overview$/ }).count()
     expect(activityCount).toBe(1)
 
     await page.screenshot({ path: 'e2e/screenshots/accordion-05-one-open.png', fullPage: true })
@@ -139,7 +139,7 @@ test.describe('UI — Accordion room navigation', () => {
     // Goals panel still active
     await expect(page.getByText(/goal\(s\)/i)).toBeVisible({ timeout: 5000 })
     // Room B submenu still expanded
-    await expect(sidebar(page).locator('button').filter({ hasText: /^Activity$/ })).toBeVisible({ timeout: 5000 })
+    await expect(sidebar(page).locator('button').filter({ hasText: /^Overview$/ })).toBeVisible({ timeout: 5000 })
 
     await page.screenshot({ path: 'e2e/screenshots/accordion-06-after-refresh.png', fullPage: true })
   })

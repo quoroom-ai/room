@@ -4,15 +4,12 @@ import { api } from '../lib/client'
 import { API_BASE, clearToken } from '../lib/auth'
 import * as notif from '../lib/notifications'
 import type { InstallPrompt } from '../hooks/useInstallPrompt'
-import { RoomsPanel } from './RoomsPanel'
 
 interface SettingsPanelProps {
   advancedMode: boolean
   onAdvancedModeChange: (enabled: boolean) => void
   installPrompt: InstallPrompt
   onNavigate?: (tab: string) => void
-  selectedRoomId: number | null
-  onSelectRoom: (roomId: number | null) => void
 }
 
 interface ServerStatus {
@@ -25,13 +22,14 @@ interface ServerStatus {
   resources?: { cpuCount: number; loadAvg1m: number; loadAvg5m: number; memTotalGb: number; memFreeGb: number; memUsedPct: number }
 }
 
-export function SettingsPanel({ advancedMode, onAdvancedModeChange, installPrompt, onNavigate, selectedRoomId, onSelectRoom }: SettingsPanelProps): React.JSX.Element {
+export function SettingsPanel({ advancedMode, onAdvancedModeChange, installPrompt, onNavigate }: SettingsPanelProps): React.JSX.Element {
   const [containerRef, containerWidth] = useContainerWidth<HTMLDivElement>()
   const wide = containerWidth >= 600
   const [notifications, setNotifications] = useState<boolean | null>(null)
   const [notifDenied, setNotifDenied] = useState(false)
   const [serverStatus, setServerStatus] = useState<ServerStatus | null>(null)
   const [claudePlan, setClaudePlan] = useState<'pro' | 'max' | 'api' | null>(null)
+  const [telemetryEnabled, setTelemetryEnabled] = useState<boolean | null>(null)
 
   useEffect(() => {
     api.settings.get('notifications_enabled').then((v) => {
@@ -45,11 +43,21 @@ export function SettingsPanel({ advancedMode, onAdvancedModeChange, installPromp
       const plan = valid.find(p => p === v) ?? null
       setClaudePlan(plan)
     }).catch(() => {})
+
+    api.settings.get('telemetry_enabled').then((v) => {
+      setTelemetryEnabled(v !== 'false')
+    }).catch(() => setTelemetryEnabled(true))
   }, [])
 
   async function setClaudePlanSetting(plan: 'pro' | 'max' | 'api' | null): Promise<void> {
     await api.settings.set('claude_plan', plan ?? '')
     setClaudePlan(plan)
+  }
+
+  async function toggleTelemetry(): Promise<void> {
+    const next = !telemetryEnabled
+    await api.settings.set('telemetry_enabled', String(next))
+    setTelemetryEnabled(next)
   }
 
   async function toggleAdvancedMode(): Promise<void> {
@@ -125,14 +133,6 @@ export function SettingsPanel({ advancedMode, onAdvancedModeChange, installPromp
 
   return (
     <div ref={containerRef} className={`p-4 ${wide ? 'grid grid-cols-2 gap-4' : 'space-y-4'}`}>
-      {/* Rooms */}
-      <div className={wide ? 'col-span-2' : ''}>
-        <RoomsPanel selectedRoomId={selectedRoomId} onSelectRoom={onSelectRoom} />
-      </div>
-
-      {/* Separator */}
-      <div className={`${wide ? 'col-span-2' : ''} border-t border-gray-200 my-1`} />
-
       {/* Preferences */}
       <div>
         <h3 className="text-xs font-semibold text-gray-700 mb-1">Preferences</h3>
@@ -142,6 +142,7 @@ export function SettingsPanel({ advancedMode, onAdvancedModeChange, installPromp
             <p className="text-[10px] text-red-400 mt-0.5 leading-tight">Permission denied by browser. Allow notifications in browser settings.</p>
           )}
           {toggle('Advanced mode', advancedMode, toggleAdvancedMode, 'Show memory, watches, results tabs and extra controls')}
+          {toggle('Telemetry', telemetryEnabled, toggleTelemetry, 'Send heartbeats to quoroom.ai (room appears in online counter and leaderboard)')}
           <div className="py-1">
             <div className="flex items-center justify-between text-xs">
               <span className="text-gray-600">Claude plan</span>
