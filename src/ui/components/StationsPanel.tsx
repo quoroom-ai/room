@@ -3,7 +3,6 @@ import { usePolling } from '../hooks/usePolling'
 import { api } from '../lib/client'
 import { formatRelativeTime } from '../utils/time'
 
-const CLOUD_API = 'https://quoroom.ai/api'
 const CLOUD_STATIONS_URL = 'https://quoroom.ai/stations'
 
 const STATUS_COLORS: Record<string, string> = {
@@ -53,7 +52,7 @@ interface StationsPanelProps {
 export function StationsPanel({ roomId, autonomyMode }: StationsPanelProps): React.JSX.Element {
   const semi = autonomyMode === 'semi'
   const [cloudRoomId, setCloudRoomId] = useState<string | null>(null)
-  const [confirmDelete, setConfirmDelete] = useState<number | null>(null)
+  const [confirmAction, setConfirmAction] = useState<{ id: number; action: 'cancel' | 'delete' } | null>(null)
   const [busy, setBusy] = useState<number | null>(null)
 
   // Fetch the cloud room ID (stable hash) from local server
@@ -65,12 +64,10 @@ export function StationsPanel({ roomId, autonomyMode }: StationsPanelProps): Rea
   // Poll cloud API for stations every 10s
   const { data: stations, refresh } = usePolling<CloudStation[]>(
     async () => {
-      if (!cloudRoomId) return []
+      if (!roomId) return []
       try {
-        const res = await fetch(`${CLOUD_API}/rooms/${encodeURIComponent(cloudRoomId)}/stations`)
-        if (!res.ok) return []
-        const data = await res.json() as { stations: CloudStation[] }
-        return data.stations ?? []
+        const data = await api.cloudStations.list(roomId)
+        return data as CloudStation[]
       } catch {
         return []
       }
@@ -79,10 +76,10 @@ export function StationsPanel({ roomId, autonomyMode }: StationsPanelProps): Rea
   )
 
   async function handleStart(id: number): Promise<void> {
-    if (!cloudRoomId) return
+    if (!roomId) return
     setBusy(id)
     try {
-      await fetch(`${CLOUD_API}/rooms/${encodeURIComponent(cloudRoomId)}/stations/${id}/start`, { method: 'POST' })
+      await api.cloudStations.start(roomId, id)
       refresh()
     } finally {
       setBusy(null)
@@ -90,10 +87,22 @@ export function StationsPanel({ roomId, autonomyMode }: StationsPanelProps): Rea
   }
 
   async function handleStop(id: number): Promise<void> {
-    if (!cloudRoomId) return
+    if (!roomId) return
     setBusy(id)
     try {
-      await fetch(`${CLOUD_API}/rooms/${encodeURIComponent(cloudRoomId)}/stations/${id}/stop`, { method: 'POST' })
+      await api.cloudStations.stop(roomId, id)
+      refresh()
+    } finally {
+      setBusy(null)
+    }
+  }
+
+  async function handleCancel(id: number): Promise<void> {
+    if (!roomId) return
+    setBusy(id)
+    try {
+      await api.cloudStations.cancel(roomId, id)
+      setConfirmAction(null)
       refresh()
     } finally {
       setBusy(null)
@@ -101,11 +110,11 @@ export function StationsPanel({ roomId, autonomyMode }: StationsPanelProps): Rea
   }
 
   async function handleDelete(id: number): Promise<void> {
-    if (!cloudRoomId) return
+    if (!roomId) return
     setBusy(id)
     try {
-      await fetch(`${CLOUD_API}/rooms/${encodeURIComponent(cloudRoomId)}/stations/${id}`, { method: 'DELETE' })
-      setConfirmDelete(null)
+      await api.cloudStations.delete(roomId, id)
+      setConfirmAction(null)
       refresh()
     } finally {
       setBusy(null)
@@ -162,7 +171,11 @@ export function StationsPanel({ roomId, autonomyMode }: StationsPanelProps): Rea
                     <span>{TIER_COSTS[station.tier] ?? `$${station.monthlyCost}/mo`}</span>
                   </div>
                 </div>
-                <div className="text-[10px] text-gray-400">{formatRelativeTime(station.createdAt)}</div>
+                <div className="text-[10px] text-gray-400">
+                  {station.status === 'canceling' && station.currentPeriodEnd
+                    ? `ends ${formatRelativeTime(station.currentPeriodEnd)}`
+                    : formatRelativeTime(station.createdAt)}
+                </div>
               </div>
 
               {semi && (
@@ -185,29 +198,45 @@ export function StationsPanel({ roomId, autonomyMode }: StationsPanelProps): Rea
                       Stop
                     </button>
                   )}
-                  {confirmDelete === station.id ? (
+                  {confirmAction?.id === station.id ? (
                     <>
                       <button
-                        onClick={() => handleDelete(station.id)}
+                        onClick={() => confirmAction.action === 'cancel'
+                          ? handleCancel(station.id)
+                          : handleDelete(station.id)}
                         disabled={busy === station.id}
                         className="text-[10px] px-1.5 py-0.5 bg-red-500 text-white rounded disabled:opacity-50"
                       >
-                        Confirm
+                        {confirmAction.action === 'cancel' ? 'Confirm cancel' : 'Confirm delete'}
                       </button>
                       <button
-                        onClick={() => setConfirmDelete(null)}
+                        onClick={() => setConfirmAction(null)}
                         className="text-[10px] px-1.5 py-0.5 bg-gray-200 rounded"
                       >
-                        Cancel
+                        Back
                       </button>
                     </>
                   ) : (
-                    <button
-                      onClick={() => setConfirmDelete(station.id)}
-                      className="text-[10px] text-red-400 hover:text-red-600"
-                    >
-                      Cancel sub
-                    </button>
+                    <>
+                      {(station.status === 'active' || station.status === 'stopped') && (
+                        <button
+                          onClick={() => setConfirmAction({ id: station.id, action: 'cancel' })}
+                          className="text-[10px] text-orange-500 hover:text-orange-700"
+                          title="Cancel subscription at end of billing period"
+                        >
+                          Cancel sub
+                        </button>
+                      )}
+                      {station.status !== 'canceled' && (
+                        <button
+                          onClick={() => setConfirmAction({ id: station.id, action: 'delete' })}
+                          className="text-[10px] text-red-400 hover:text-red-600"
+                          title="Immediately destroy station and cancel subscription"
+                        >
+                          Delete
+                        </button>
+                      )}
+                    </>
                   )}
                 </div>
               )}

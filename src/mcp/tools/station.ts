@@ -1,7 +1,10 @@
 import { z } from 'zod'
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
+import { getMcpDatabase } from '../db'
+import * as queries from '../../shared/db-queries'
 import {
   getRoomCloudId,
+  ensureCloudRoomToken,
   listCloudStations,
   execOnCloudStation,
   getCloudStationLogs,
@@ -11,6 +14,18 @@ import {
 } from '../../shared/cloud-sync'
 
 const CLOUD_BASE = 'https://quoroom.ai'
+
+async function bootstrapRoomToken(roomId: number): Promise<void> {
+  const db = getMcpDatabase()
+  const room = queries.getRoom(db, roomId)
+  if (!room) return
+  await ensureCloudRoomToken({
+    roomId: getRoomCloudId(roomId),
+    name: room.name,
+    goal: room.goal ?? null,
+    visibility: room.visibility,
+  })
+}
 
 export function registerStationTools(server: McpServer): void {
   server.registerTool(
@@ -31,6 +46,7 @@ export function registerStationTools(server: McpServer): void {
       }
     },
     async ({ roomId }) => {
+      await bootstrapRoomToken(roomId)
       const cloudRoomId = getRoomCloudId(roomId)
       const url = `${CLOUD_BASE}/stations?room=${encodeURIComponent(cloudRoomId)}`
       return {
@@ -54,6 +70,7 @@ export function registerStationTools(server: McpServer): void {
       }
     },
     async ({ roomId, status }) => {
+      await bootstrapRoomToken(roomId)
       const cloudRoomId = getRoomCloudId(roomId)
       const stations = await listCloudStations(cloudRoomId)
       const filtered = status ? stations.filter(s => s.status === status) : stations
@@ -79,6 +96,7 @@ export function registerStationTools(server: McpServer): void {
       }
     },
     async ({ roomId, id }) => {
+      await bootstrapRoomToken(roomId)
       const cloudRoomId = getRoomCloudId(roomId)
       await startCloudStation(cloudRoomId, id)
       return { content: [{ type: 'text' as const, text: `Station ${id} start requested.` }] }
@@ -96,6 +114,7 @@ export function registerStationTools(server: McpServer): void {
       }
     },
     async ({ roomId, id }) => {
+      await bootstrapRoomToken(roomId)
       const cloudRoomId = getRoomCloudId(roomId)
       await stopCloudStation(cloudRoomId, id)
       return { content: [{ type: 'text' as const, text: `Station ${id} stop requested.` }] }
@@ -114,6 +133,7 @@ export function registerStationTools(server: McpServer): void {
       }
     },
     async ({ roomId, id }) => {
+      await bootstrapRoomToken(roomId)
       const cloudRoomId = getRoomCloudId(roomId)
       await deleteCloudStation(cloudRoomId, id)
       return {
@@ -137,6 +157,7 @@ export function registerStationTools(server: McpServer): void {
       }
     },
     async ({ roomId, id, command }) => {
+      await bootstrapRoomToken(roomId)
       const cloudRoomId = getRoomCloudId(roomId)
       const result = await execOnCloudStation(cloudRoomId, id, command)
       if (!result) {
@@ -166,6 +187,7 @@ export function registerStationTools(server: McpServer): void {
       }
     },
     async ({ roomId, id, lines }) => {
+      await bootstrapRoomToken(roomId)
       const cloudRoomId = getRoomCloudId(roomId)
       const logs = await getCloudStationLogs(cloudRoomId, id, lines)
       if (logs === null) {
@@ -189,6 +211,7 @@ export function registerStationTools(server: McpServer): void {
       }
     },
     async ({ roomId, id }) => {
+      await bootstrapRoomToken(roomId)
       const cloudRoomId = getRoomCloudId(roomId)
       const stations = await listCloudStations(cloudRoomId)
       const station = stations.find(s => s.id === id)

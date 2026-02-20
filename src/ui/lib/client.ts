@@ -307,6 +307,20 @@ export const api = {
       request<{ ok: true }>('DELETE', `/api/stations/${id}`),
   },
 
+  // ─── Cloud Stations (remote control via local proxy) ──────
+  cloudStations: {
+    list: (roomId: number) =>
+      request<Array<Record<string, unknown>>>('GET', `/api/rooms/${roomId}/cloud-stations`),
+    start: (roomId: number, id: number) =>
+      request<{ ok: true }>('POST', `/api/rooms/${roomId}/cloud-stations/${id}/start`),
+    stop: (roomId: number, id: number) =>
+      request<{ ok: true }>('POST', `/api/rooms/${roomId}/cloud-stations/${id}/stop`),
+    cancel: (roomId: number, id: number) =>
+      request<{ ok: true }>('POST', `/api/rooms/${roomId}/cloud-stations/${id}/cancel`),
+    delete: (roomId: number, id: number) =>
+      request<{ ok: true }>('DELETE', `/api/rooms/${roomId}/cloud-stations/${id}`),
+  },
+
   // ─── Room Messages (inter-room) ───────────────────────
   roomMessages: {
     list: (roomId: number, status?: string) =>

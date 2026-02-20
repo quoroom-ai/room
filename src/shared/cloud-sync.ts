@@ -9,14 +9,75 @@
  */
 
 import { createHash } from 'crypto'
+import { homedir } from 'os'
+import { dirname, join } from 'path'
+import { mkdirSync, readFileSync, writeFileSync } from 'fs'
 import { getMachineId } from './telemetry'
 
 const CLOUD_API = 'https://quoroom.ai/api'
+const CLOUD_MASTER_TOKEN = (process.env.QUOROOM_CLOUD_API_KEY ?? '').trim()
+const TOKEN_FILE_NAME = 'cloud-room-tokens.json'
+
+type CloudTokenStore = Record<string, string>
+let cachedTokens: CloudTokenStore | null = null
+
+function getCloudTokenFilePath(): string {
+  const explicitDataDir = process.env.QUOROOM_DATA_DIR?.trim()
+  if (explicitDataDir) return join(explicitDataDir, TOKEN_FILE_NAME)
+
+  const dbPath = process.env.QUOROOM_DB_PATH?.trim()
+  if (dbPath) return join(dirname(dbPath), TOKEN_FILE_NAME)
+
+  return join(homedir(), '.quoroom', TOKEN_FILE_NAME)
+}
+
+function loadTokenStore(): CloudTokenStore {
+  if (cachedTokens) return cachedTokens
+  const filePath = getCloudTokenFilePath()
+  try {
+    const parsed = JSON.parse(readFileSync(filePath, 'utf-8')) as { rooms?: Record<string, string> }
+    cachedTokens = parsed.rooms ?? {}
+  } catch {
+    cachedTokens = {}
+  }
+  return cachedTokens
+}
+
+function saveTokenStore(): void {
+  const filePath = getCloudTokenFilePath()
+  mkdirSync(dirname(filePath), { recursive: true })
+  const payload = JSON.stringify({ rooms: loadTokenStore() }, null, 2) + '\n'
+  writeFileSync(filePath, payload, { mode: 0o600 })
+}
+
+function getRoomToken(roomId: string): string | undefined {
+  return loadTokenStore()[roomId]
+}
+
+function setRoomToken(roomId: string, token: string): void {
+  loadTokenStore()[roomId] = token
+  saveTokenStore()
+}
+
+function clearRoomToken(roomId: string): void {
+  const store = loadTokenStore()
+  if (!(roomId in store)) return
+  delete store[roomId]
+  saveTokenStore()
+}
+
+function cloudHeaders(roomId?: string, extra: Record<string, string> = {}): Record<string, string> {
+  const roomToken = roomId ? getRoomToken(roomId) : undefined
+  const token = roomToken || CLOUD_MASTER_TOKEN
+  if (!token) return extra
+  return { ...extra, 'X-Room-Token': token }
+}
 
 export interface CloudRegistration {
   roomId: string
   name: string
   goal: string | null
+  visibility?: 'public' | 'private'
 }
 
 export interface CloudHeartbeat {
@@ -30,17 +91,28 @@ export interface CloudHeartbeat {
   version: string
 }
 
+export async function ensureCloudRoomToken(data: CloudRegistration): Promise<boolean> {
+  if (getRoomToken(data.roomId)) return true
+  await registerWithCloud(data)
+  return Boolean(getRoomToken(data.roomId))
+}
+
 /**
  * Register room with cloud. Called once when public mode is enabled.
  */
 export async function registerWithCloud(data: CloudRegistration): Promise<void> {
   try {
-    await fetch(`${CLOUD_API}/rooms/register`, {
+    const res = await fetch(`${CLOUD_API}/rooms/register`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: cloudHeaders(data.roomId, { 'Content-Type': 'application/json' }),
       body: JSON.stringify(data),
       signal: AbortSignal.timeout(10000)
     })
+    if (!res.ok) return
+    const payload = await res.json().catch(() => ({})) as { roomToken?: string }
+    if (typeof payload.roomToken === 'string' && payload.roomToken.length > 0) {
+      setRoomToken(data.roomId, payload.roomToken)
+    }
   } catch {
     // Fail silently — cloud unavailability must never affect local operation
   }
@@ -51,12 +123,23 @@ export async function registerWithCloud(data: CloudRegistration): Promise<void> 
  */
 export async function sendCloudHeartbeat(data: CloudHeartbeat): Promise<void> {
   try {
-    await fetch(`${CLOUD_API}/rooms/${encodeURIComponent(data.roomId)}/heartbeat`, {
+    const res = await fetch(`${CLOUD_API}/rooms/${encodeURIComponent(data.roomId)}/heartbeat`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: cloudHeaders(data.roomId, { 'Content-Type': 'application/json' }),
       body: JSON.stringify(data),
       signal: AbortSignal.timeout(10000)
     })
+    if (res.status === 401) {
+      clearRoomToken(data.roomId)
+      await registerWithCloud({ roomId: data.roomId, name: data.name, goal: data.goal, visibility: 'public' })
+      if (!getRoomToken(data.roomId)) return
+      await fetch(`${CLOUD_API}/rooms/${encodeURIComponent(data.roomId)}/heartbeat`, {
+        method: 'POST',
+        headers: cloudHeaders(data.roomId, { 'Content-Type': 'application/json' }),
+        body: JSON.stringify(data),
+        signal: AbortSignal.timeout(10000)
+      })
+    }
   } catch {
     // Fail silently
   }
@@ -79,14 +162,16 @@ export function startCloudSync(opts: CloudSyncOptions): void {
 
   const allData = opts.getHeartbeatDataForPublicRooms()
   for (const data of allData) {
-    registerWithCloud({ roomId: data.roomId, name: data.name, goal: data.goal })
-    sendCloudHeartbeat(data)
+    void (async () => {
+      await registerWithCloud({ roomId: data.roomId, name: data.name, goal: data.goal, visibility: 'public' })
+      await sendCloudHeartbeat(data)
+    })()
   }
 
   heartbeatInterval = setInterval(() => {
     const rooms = opts.getHeartbeatDataForPublicRooms()
     for (const data of rooms) {
-      sendCloudHeartbeat(data)
+      void sendCloudHeartbeat(data)
     }
   }, 5 * 60 * 1000)
 }
@@ -144,6 +229,7 @@ export interface CloudStation {
 export async function listCloudStations(cloudRoomId: string): Promise<CloudStation[]> {
   try {
     const res = await fetch(`${CLOUD_API}/rooms/${encodeURIComponent(cloudRoomId)}/stations`, {
+      headers: cloudHeaders(cloudRoomId),
       signal: AbortSignal.timeout(10000)
     })
     if (!res.ok) return []
@@ -168,7 +254,7 @@ export async function execOnCloudStation(
       `${CLOUD_API}/rooms/${encodeURIComponent(cloudRoomId)}/stations/${subId}/exec`,
       {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: cloudHeaders(cloudRoomId, { 'Content-Type': 'application/json' }),
         body: JSON.stringify({ command }),
         signal: AbortSignal.timeout(90000)
       }
@@ -193,7 +279,10 @@ export async function getCloudStationLogs(
     const query = lines ? `?lines=${lines}` : ''
     const res = await fetch(
       `${CLOUD_API}/rooms/${encodeURIComponent(cloudRoomId)}/stations/${subId}/logs${query}`,
-      { signal: AbortSignal.timeout(15000) }
+      {
+        headers: cloudHeaders(cloudRoomId),
+        signal: AbortSignal.timeout(15000)
+      }
     )
     if (!res.ok) return null
     const data = await res.json() as { logs: string }
@@ -212,6 +301,7 @@ export async function startCloudStation(cloudRoomId: string, subId: number): Pro
       `${CLOUD_API}/rooms/${encodeURIComponent(cloudRoomId)}/stations/${subId}/start`,
       {
         method: 'POST',
+        headers: cloudHeaders(cloudRoomId),
         signal: AbortSignal.timeout(30000)
       }
     )
@@ -229,6 +319,7 @@ export async function stopCloudStation(cloudRoomId: string, subId: number): Prom
       `${CLOUD_API}/rooms/${encodeURIComponent(cloudRoomId)}/stations/${subId}/stop`,
       {
         method: 'POST',
+        headers: cloudHeaders(cloudRoomId),
         signal: AbortSignal.timeout(30000)
       }
     )
@@ -246,6 +337,25 @@ export async function deleteCloudStation(cloudRoomId: string, subId: number): Pr
       `${CLOUD_API}/rooms/${encodeURIComponent(cloudRoomId)}/stations/${subId}`,
       {
         method: 'DELETE',
+        headers: cloudHeaders(cloudRoomId),
+        signal: AbortSignal.timeout(30000)
+      }
+    )
+  } catch {
+    // Fail silently
+  }
+}
+
+/**
+ * Cancel a cloud station subscription at period end (soft cancel — machine keeps running).
+ */
+export async function cancelCloudStation(cloudRoomId: string, subId: number): Promise<void> {
+  try {
+    await fetch(
+      `${CLOUD_API}/rooms/${encodeURIComponent(cloudRoomId)}/billing/cancel/${subId}`,
+      {
+        method: 'POST',
+        headers: cloudHeaders(cloudRoomId),
         signal: AbortSignal.timeout(30000)
       }
     )

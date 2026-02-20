@@ -14,6 +14,7 @@ vi.mock('../../db', () => ({
 // Mock cloud-sync functions
 vi.mock('../../../shared/cloud-sync', () => ({
   getRoomCloudId: (roomId: number) => `mock-cloud-id-${roomId}`,
+  ensureCloudRoomToken: vi.fn().mockResolvedValue(true),
   listCloudStations: vi.fn().mockResolvedValue([
     {
       id: 1,
