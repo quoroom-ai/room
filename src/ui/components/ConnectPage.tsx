@@ -17,7 +17,7 @@ function detectPlatform(): 'mac' | 'windows' | 'linux' {
   return 'linux'
 }
 
-const RELEASES_PAGE = 'https://github.com/quoroom-ai/room/releases/latest'
+const RELEASES_PAGE = 'https://github.com/quoroom-ai/room/releases'
 
 const PLATFORM_INFO: Record<string, { label: string; note: string; steps: string[] }> = {
   mac: {
@@ -39,25 +39,51 @@ const PLATFORM_INFO: Record<string, { label: string; note: string; steps: string
 
 interface PlatformAssets { installer: string | null; archive: string | null }
 interface ReleaseAssets { mac: PlatformAssets; windows: PlatformAssets; linux: PlatformAssets }
+interface GithubReleaseAsset { name: string; browser_download_url: string }
+interface GithubRelease {
+  tag_name: string
+  html_url: string
+  draft: boolean
+  prerelease: boolean
+  assets?: GithubReleaseAsset[]
+}
 
-function useReleaseAssets(): ReleaseAssets {
+function isTestTag(tag: string): boolean {
+  return /-test/i.test(tag)
+}
+
+function pickLatestStableRelease(releases: GithubRelease[]): GithubRelease | null {
+  for (const r of releases) {
+    if (r.draft || r.prerelease) continue
+    if (isTestTag(r.tag_name)) continue
+    return r
+  }
+  return null
+}
+
+function useReleaseAssets(): { assets: ReleaseAssets; releaseUrl: string } {
   const empty: ReleaseAssets = {
     mac: { installer: null, archive: null },
     windows: { installer: null, archive: null },
     linux: { installer: null, archive: null },
   }
   const [assets, setAssets] = useState<ReleaseAssets>(empty)
+  const [releaseUrl, setReleaseUrl] = useState<string>(RELEASES_PAGE)
+
   useEffect(() => {
-    fetch('https://api.github.com/repos/quoroom-ai/room/releases/latest')
-      .then(r => r.ok ? r.json() : null)
-      .then((data: { assets?: { name: string; browser_download_url: string }[] } | null) => {
-        if (!data?.assets) return
+    fetch('https://api.github.com/repos/quoroom-ai/room/releases?per_page=20')
+      .then(r => r.ok ? r.json() as Promise<GithubRelease[]> : null)
+      .then((releases) => {
+        if (!releases || releases.length === 0) return
+        const latest = pickLatestStableRelease(releases)
+        if (!latest?.assets) return
+        setReleaseUrl(latest.html_url || RELEASES_PAGE)
         const result: ReleaseAssets = {
           mac: { installer: null, archive: null },
           windows: { installer: null, archive: null },
           linux: { installer: null, archive: null },
         }
-        for (const a of data.assets) {
+        for (const a of latest.assets) {
           const { name, browser_download_url: url } = a
           if (name.endsWith('.pkg')) result.mac.installer = url
           else if (name.includes('darwin-universal') && name.endsWith('.tar.gz')) result.mac.archive = url
@@ -70,11 +96,11 @@ function useReleaseAssets(): ReleaseAssets {
       })
       .catch(() => {})
   }, [])
-  return assets
+  return { assets, releaseUrl }
 }
 
-function bestUrl(pa: PlatformAssets): string {
-  return pa.installer || pa.archive || RELEASES_PAGE
+function bestUrl(pa: PlatformAssets, fallbackReleaseUrl: string): string {
+  return pa.installer || pa.archive || fallbackReleaseUrl
 }
 
 export function ConnectPage({ port, onRetry }: ConnectPageProps): React.JSX.Element {
@@ -83,7 +109,7 @@ export function ConnectPage({ port, onRetry }: ConnectPageProps): React.JSX.Elem
   const [showDev, setShowDev] = useState(false)
   const platform = detectPlatform()
   const info = PLATFORM_INFO[platform]
-  const assets = useReleaseAssets()
+  const { assets, releaseUrl } = useReleaseAssets()
 
   function handleRetry(): void {
     localStorage.setItem('quoroom_port', editPort)
@@ -114,7 +140,7 @@ export function ConnectPage({ port, onRetry }: ConnectPageProps): React.JSX.Elem
         {/* Download — primary action */}
         <div className="space-y-2">
           <a
-            href={bestUrl(assets[platform])}
+            href={bestUrl(assets[platform], releaseUrl)}
             className="block w-full py-2.5 text-sm font-medium text-white bg-gray-800 hover:bg-gray-900 rounded transition-colors"
           >
             {info.label}
@@ -129,13 +155,13 @@ export function ConnectPage({ port, onRetry }: ConnectPageProps): React.JSX.Elem
           {/* Other platforms */}
           <div className="flex items-center justify-center gap-2 text-[10px]">
             {platform !== 'mac' && (
-              <a href={bestUrl(assets.mac)} className="text-gray-400 hover:text-gray-600 underline">macOS</a>
+              <a href={bestUrl(assets.mac, releaseUrl)} className="text-gray-400 hover:text-gray-600 underline">macOS</a>
             )}
             {platform !== 'windows' && (
-              <a href={bestUrl(assets.windows)} className="text-gray-400 hover:text-gray-600 underline">Windows</a>
+              <a href={bestUrl(assets.windows, releaseUrl)} className="text-gray-400 hover:text-gray-600 underline">Windows</a>
             )}
             {platform !== 'linux' && (
-              <a href={bestUrl(assets.linux)} className="text-gray-400 hover:text-gray-600 underline">Linux</a>
+              <a href={bestUrl(assets.linux, releaseUrl)} className="text-gray-400 hover:text-gray-600 underline">Linux</a>
             )}
           </div>
         </div>

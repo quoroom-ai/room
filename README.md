@@ -330,6 +330,10 @@ npm run test:watch       # Watch mode
 npm run test:e2e         # End-to-end tests (Playwright)
 ```
 
+## Releasing
+
+Use the release runbook: [`docs/RELEASE_RUNBOOK.md`](docs/RELEASE_RUNBOOK.md)
+
 <details>
 <summary>Project structure</summary>
 

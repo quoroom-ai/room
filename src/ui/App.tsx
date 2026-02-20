@@ -216,7 +216,7 @@ function App(): React.JSX.Element {
       case 'help':
         return <HelpPanel installPrompt={installPrompt} />
       default:
-        return <div className="p-4 text-xs text-gray-400">Coming soon</div>
+        return <StatusPanel onNavigate={(t) => handleTabChange(t as Tab)} advancedMode={advancedMode} roomId={selectedRoomId} />
     }
   }
 
