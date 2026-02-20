@@ -1,0 +1,701 @@
+name: Build & Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+env:
+  NODE_VERSION: '20.18.1'
+
+jobs:
+  validate-secrets:
+    runs-on: macos-latest
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Validate release secrets
+        env:
+          APPLE_ID: ${{ secrets.APPLE_ID || secrets.APPLE_DEVELOPER_ID }}
+          APPLE_APP_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD || secrets.APPLE_APP_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID || secrets.APPLE_DEVELOPER_TEAM_ID }}
+          CSC_INSTALLER_LINK: ${{ secrets.CSC_INSTALLER_LINK }}
+          CSC_INSTALLER_PASSWORD: ${{ secrets.CSC_INSTALLER_PASSWORD }}
+          CSC_LINK: ${{ secrets.CSC_LINK }}
+          CSC_KEY_PASSWORD: ${{ secrets.CSC_KEY_PASSWORD }}
+          ES_USERNAME: ${{ secrets.ES_USERNAME }}
+          ES_PASSWORD: ${{ secrets.ES_PASSWORD }}
+          ES_CREDENTIAL_ID: ${{ secrets.ES_CREDENTIAL_ID }}
+          ES_TOTP_SECRET: ${{ secrets.ES_TOTP_SECRET }}
+          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
+          HOMEBREW_TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+        run: .github/scripts/validate-release-secrets.sh
+
+  build-mac:
+    needs: validate-secrets
+    runs-on: macos-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Install cross-arch native deps (universal build)
+        run: |
+          VEC_VERSION=$(node -p "require('./node_modules/sqlite-vec-darwin-arm64/package.json').version")
+          npm install "sqlite-vec-darwin-x64@${VEC_VERSION}" --no-save --force
+
+      - name: Rebuild better-sqlite3 for Node.js (tests only)
+        run: npx --yes node-gyp rebuild --directory=node_modules/better-sqlite3
+
+      - name: TypeScript check
+        run: npm run typecheck
+
+      - name: Run tests
+        run: npm test
+
+      - name: Build
+        run: npm run build
+
+      - name: Build universal native deps
+        working-directory: out/mcp
+        run: |
+          # Install x64 sqlite-vec alongside arm64
+          VEC_VERSION=$(node -p "require('./node_modules/sqlite-vec-darwin-arm64/package.json').version")
+          npm install "sqlite-vec-darwin-x64@${VEC_VERSION}" --no-save --force
+
+          # Create universal better-sqlite3 via lipo
+          cp node_modules/better-sqlite3/build/Release/better_sqlite3.node better_sqlite3_arm64.node
+          arch -x86_64 npx --yes node-gyp rebuild --directory=node_modules/better-sqlite3 --arch=x64
+          lipo -create \
+            better_sqlite3_arm64.node \
+            node_modules/better-sqlite3/build/Release/better_sqlite3.node \
+            -output node_modules/better-sqlite3/build/Release/better_sqlite3.node
+          rm better_sqlite3_arm64.node
+
+      - name: Download Node.js runtimes
+        run: |
+          # ARM64
+          curl -fsSL "https://nodejs.org/dist/v${NODE_VERSION}/node-v${NODE_VERSION}-darwin-arm64.tar.gz" | tar xz
+          mv "node-v${NODE_VERSION}-darwin-arm64" node-arm64
+          # x64
+          curl -fsSL "https://nodejs.org/dist/v${NODE_VERSION}/node-v${NODE_VERSION}-darwin-x64.tar.gz" | tar xz
+          mv "node-v${NODE_VERSION}-darwin-x64" node-x64
+          # Create universal node binary via lipo
+          lipo -create node-arm64/bin/node node-x64/bin/node -output node-universal
+
+      - name: Package tarball
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          mkdir -p staging/quoroom/bin staging/quoroom/lib staging/quoroom/runtime
+
+          # Bundled Node.js runtime (universal)
+          cp node-universal staging/quoroom/runtime/node
+          chmod +x staging/quoroom/runtime/node
+
+          # Shell wrapper — uses bundled runtime
+          cat > staging/quoroom/bin/quoroom << 'WRAPPER'
+          #!/bin/sh
+          DIR="$(cd "$(dirname "$0")" && pwd)"
+          exec "$DIR/../runtime/node" "$DIR/../lib/cli.js" "$@"
+          WRAPPER
+          chmod +x staging/quoroom/bin/quoroom
+
+          # Copy built output
+          cp -r out/mcp/* staging/quoroom/lib/
+
+          tar czf "quoroom-v${VERSION}-darwin-universal.tar.gz" -C staging quoroom
+
+      - name: Import signing certificates
+        id: certs
+        env:
+          CSC_LINK: ${{ secrets.CSC_LINK }}
+          CSC_KEY_PASSWORD: ${{ secrets.CSC_KEY_PASSWORD }}
+          CSC_INSTALLER_LINK: ${{ secrets.CSC_INSTALLER_LINK }}
+          CSC_INSTALLER_PASSWORD: ${{ secrets.CSC_INSTALLER_PASSWORD }}
+        run: |
+          # Create temporary keychain
+          KEYCHAIN="build.keychain"
+          KEYCHAIN_PASSWORD="actions"
+          security create-keychain -p "${KEYCHAIN_PASSWORD}" "${KEYCHAIN}"
+          security default-keychain -s "${KEYCHAIN}"
+          security unlock-keychain -p "${KEYCHAIN_PASSWORD}" "${KEYCHAIN}"
+          security set-keychain-settings -t 3600 -u "${KEYCHAIN}"
+
+          # Import Application cert (for codesigning binaries) — optional
+          if [ -n "${CSC_LINK}" ]; then
+            printf '%s' "${CSC_LINK}" | base64 --decode > app-cert.p12
+            security import app-cert.p12 -k "${KEYCHAIN}" -P "${CSC_KEY_PASSWORD}" -T /usr/bin/codesign -T /usr/bin/productsign
+            rm app-cert.p12
+            echo "has_app_cert=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "has_app_cert=false" >> "$GITHUB_OUTPUT"
+          fi
+
+          # Import Installer cert (for signing .pkg)
+          # OpenSSL 3.x creates PKCS12 with AES — macOS security import needs legacy RC2/3DES
+          printf '%s' "${CSC_INSTALLER_LINK}" | base64 --decode > installer-cert-raw.p12
+          BREW_SSL="$(brew --prefix openssl@3 2>/dev/null)/bin/openssl"
+          [ -x "$BREW_SSL" ] || BREW_SSL=openssl
+          "$BREW_SSL" pkcs12 -in installer-cert-raw.p12 -passin "pass:${CSC_INSTALLER_PASSWORD}" -out /tmp/inst.pem -nodes -legacy
+          "$BREW_SSL" pkcs12 -export -in /tmp/inst.pem -out installer-cert.p12 -passout "pass:${CSC_INSTALLER_PASSWORD}" -certpbe PBE-SHA1-3DES -keypbe PBE-SHA1-3DES -macalg sha1
+          rm installer-cert-raw.p12 /tmp/inst.pem
+          security import installer-cert.p12 -k "${KEYCHAIN}" -P "${CSC_INSTALLER_PASSWORD}" -T /usr/bin/codesign -T /usr/bin/productsign
+          rm installer-cert.p12
+
+          # Allow codesign/productsign to use the keychain without prompt
+          security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "${KEYCHAIN_PASSWORD}" "${KEYCHAIN}"
+
+      - name: Codesign node binary
+        if: steps.certs.outputs.has_app_cert == 'true'
+        run: |
+          codesign --force --options runtime --timestamp \
+            --sign "Developer ID Application: Myroslava Bune (BYZMJXLL2N)" \
+            staging/quoroom/runtime/node
+
+      - name: Codesign native modules for notarization
+        if: steps.certs.outputs.has_app_cert == 'true'
+        run: |
+          set -euo pipefail
+          IDENTITY="Developer ID Application: Myroslava Bune (BYZMJXLL2N)"
+
+          # Do not ship test fixture binaries from better-sqlite3.
+          find staging/quoroom/lib -type f -name 'test_extension.node' -delete
+
+          # Sign all native artifacts included in the package payload.
+          while IFS= read -r -d '' f; do
+            if file "$f" | grep -q 'Mach-O'; then
+              codesign --force --timestamp --sign "${IDENTITY}" "$f"
+            fi
+          done < <(find staging/quoroom/lib -type f \( -name '*.node' -o -name '*.dylib' \) -print0)
+
+      - name: Build macOS installer (.pkg)
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+
+          pkgbuild \
+            --root staging/quoroom \
+            --identifier ai.quoroom.cli \
+            --version "${VERSION}" \
+            --install-location /usr/local/lib/quoroom \
+            --scripts installers/macos/scripts \
+            quoroom-component.pkg
+
+          productbuild \
+            --distribution installers/macos/Distribution.xml \
+            --resources installers/macos/resources \
+            --package-path . \
+            "quoroom-v${VERSION}-darwin-universal.pkg"
+
+      - name: Sign .pkg with Installer cert
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          PKG="quoroom-v${VERSION}-darwin-universal.pkg"
+          productsign --sign "Developer ID Installer: Myroslava Bune (BYZMJXLL2N)" "${PKG}" "${PKG}.signed"
+          mv "${PKG}.signed" "${PKG}"
+
+      - name: Resolve notarization credentials
+        id: notarize_creds
+        env:
+          APPLE_ID: ${{ secrets.APPLE_ID || secrets.APPLE_DEVELOPER_ID }}
+          APPLE_APP_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD || secrets.APPLE_APP_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID || secrets.APPLE_DEVELOPER_TEAM_ID }}
+        run: |
+          missing=()
+          [ -n "${APPLE_ID}" ] || missing+=("APPLE_ID (or APPLE_DEVELOPER_ID)")
+          [ -n "${APPLE_APP_PASSWORD}" ] || missing+=("APPLE_APP_SPECIFIC_PASSWORD (or APPLE_APP_PASSWORD)")
+          [ -n "${APPLE_TEAM_ID}" ] || missing+=("APPLE_TEAM_ID (or APPLE_DEVELOPER_TEAM_ID)")
+
+          if [ "${#missing[@]}" -gt 0 ]; then
+            echo "enabled=false" >> "$GITHUB_OUTPUT"
+            echo "missing=$(IFS=', '; echo "${missing[*]}")" >> "$GITHUB_OUTPUT"
+            echo "::warning::Skipping notarization because required Apple secrets are missing or empty: $(IFS=', '; echo "${missing[*]}")"
+          else
+            echo "enabled=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Notarize and staple .pkg
+        if: steps.notarize_creds.outputs.enabled == 'true'
+        id: notarize
+        env:
+          APPLE_ID: ${{ secrets.APPLE_ID || secrets.APPLE_DEVELOPER_ID }}
+          APPLE_APP_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD || secrets.APPLE_APP_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID || secrets.APPLE_DEVELOPER_TEAM_ID }}
+        run: |
+          set -euo pipefail
+          VERSION="${GITHUB_REF_NAME#v}"
+          PKG="quoroom-v${VERSION}-darwin-universal.pkg"
+
+          SUBMIT_JSON="$(xcrun notarytool submit "${PKG}" \
+            --apple-id "${APPLE_ID}" \
+            --password "${APPLE_APP_PASSWORD}" \
+            --team-id "${APPLE_TEAM_ID}" \
+            --wait \
+            --output-format json)"
+
+          echo "${SUBMIT_JSON}" > notarize-submit.json
+
+          SUBMISSION_ID="$(python3 -c 'import json;print(json.load(open("notarize-submit.json", encoding="utf-8")).get("id",""))')"
+          NOTARY_STATUS="$(python3 -c 'import json;print(json.load(open("notarize-submit.json", encoding="utf-8")).get("status",""))')"
+
+          if [ -n "${SUBMISSION_ID}" ]; then
+            echo "submission_id=${SUBMISSION_ID}" >> "$GITHUB_OUTPUT"
+            echo "Notary submission id: ${SUBMISSION_ID}"
+          fi
+
+          if [ "${NOTARY_STATUS}" != "Accepted" ]; then
+            echo "::error::Notarization status is '${NOTARY_STATUS}' (expected 'Accepted')."
+            if [ -n "${SUBMISSION_ID}" ]; then
+              echo "Fetching detailed notary log for ${SUBMISSION_ID}..."
+              xcrun notarytool log "${SUBMISSION_ID}" \
+                --apple-id "${APPLE_ID}" \
+                --password "${APPLE_APP_PASSWORD}" \
+                --team-id "${APPLE_TEAM_ID}" \
+                --output-format json || true
+            fi
+            exit 1
+          fi
+
+          xcrun stapler staple "${PKG}"
+
+      - name: Notarization skipped
+        if: steps.notarize_creds.outputs.enabled != 'true'
+        run: |
+          echo "macOS package was signed but not notarized."
+          echo "Missing secrets: ${{ steps.notarize_creds.outputs.missing }}"
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: quoroom-mac
+          path: |
+            quoroom-v*-darwin-universal.tar.gz
+            quoroom-v*-darwin-universal.pkg
+
+  build-linux:
+    needs: validate-secrets
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Rebuild better-sqlite3 for Node.js (tests only)
+        run: npx --yes node-gyp rebuild --directory=node_modules/better-sqlite3
+
+      - name: TypeScript check
+        run: npm run typecheck
+
+      - name: Run tests
+        run: npm test
+
+      - name: Build
+        run: npm run build
+
+      - name: Download Node.js runtime
+        run: |
+          curl -fsSL "https://nodejs.org/dist/v${NODE_VERSION}/node-v${NODE_VERSION}-linux-x64.tar.gz" | tar xz
+          mv "node-v${NODE_VERSION}-linux-x64" node-linux
+
+      - name: Package tarball
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          mkdir -p staging/quoroom/bin staging/quoroom/lib staging/quoroom/runtime
+
+          cp node-linux/bin/node staging/quoroom/runtime/node
+          chmod +x staging/quoroom/runtime/node
+
+          cat > staging/quoroom/bin/quoroom << 'WRAPPER'
+          #!/bin/sh
+          DIR="$(cd "$(dirname "$0")" && pwd)"
+          exec "$DIR/../runtime/node" "$DIR/../lib/cli.js" "$@"
+          WRAPPER
+          chmod +x staging/quoroom/bin/quoroom
+
+          cp -r out/mcp/* staging/quoroom/lib/
+
+          tar czf "quoroom-v${VERSION}-linux-x64.tar.gz" -C staging quoroom
+
+      - name: Build .deb package
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          sudo gem install fpm
+
+          mkdir -p deb-staging/usr/local/lib deb-staging/usr/local/bin
+          cp -r staging/quoroom deb-staging/usr/local/lib/quoroom
+          ln -sf /usr/local/lib/quoroom/bin/quoroom deb-staging/usr/local/bin/quoroom
+
+          fpm \
+            -s dir \
+            -t deb \
+            -n quoroom \
+            -v "${VERSION}" \
+            --description "Autonomous AI agent collective engine" \
+            --url "https://quoroom.ai" \
+            --license "MIT" \
+            --maintainer "Quoroom <hello@quoroom.ai>" \
+            --architecture amd64 \
+            --category devel \
+            -C deb-staging \
+            -p "quoroom_${VERSION}_amd64.deb" \
+            .
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: quoroom-linux
+          path: |
+            quoroom-v*-linux-x64.tar.gz
+            quoroom_*_amd64.deb
+
+  build-windows:
+    needs: validate-secrets
+    runs-on: windows-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Rebuild better-sqlite3 for Node.js (tests only)
+        run: npx --yes node-gyp rebuild --directory=node_modules/better-sqlite3
+
+      - name: TypeScript check
+        run: npm run typecheck
+
+      - name: Run tests
+        run: npm test
+
+      - name: Build
+        run: npm run build
+
+      - name: Download Node.js runtime
+        shell: pwsh
+        run: |
+          Invoke-WebRequest -Uri "https://nodejs.org/dist/v${{ env.NODE_VERSION }}/node-v${{ env.NODE_VERSION }}-win-x64.zip" -OutFile node-win.zip
+          Expand-Archive -Path node-win.zip -DestinationPath .
+          Rename-Item "node-v${{ env.NODE_VERSION }}-win-x64" node-win
+
+      - name: Package zip
+        shell: pwsh
+        run: |
+          $VERSION = $env:GITHUB_REF_NAME -replace '^v', ''
+
+          New-Item -ItemType Directory -Force -Path staging/quoroom/bin, staging/quoroom/lib, staging/quoroom/runtime
+
+          # Bundled Node.js runtime
+          Copy-Item node-win/node.exe staging/quoroom/runtime/node.exe
+
+          # CMD wrapper — uses bundled runtime
+          Set-Content -Path staging/quoroom/bin/quoroom.cmd -Value '@"%~dp0\..\runtime\node.exe" "%~dp0\..\lib\cli.js" %*'
+
+          # Copy built output
+          Copy-Item -Recurse -Force out/mcp/* staging/quoroom/lib/
+
+          Compress-Archive -Path staging/quoroom -DestinationPath "quoroom-v${VERSION}-win-x64.zip"
+
+      - name: Sign with SSL.com eSigner
+        uses: sslcom/esigner-codesign@develop
+        with:
+          command: sign
+          username: ${{ secrets.ES_USERNAME }}
+          password: ${{ secrets.ES_PASSWORD }}
+          credential_id: ${{ secrets.ES_CREDENTIAL_ID }}
+          totp_secret: ${{ secrets.ES_TOTP_SECRET }}
+          file_path: staging/quoroom/runtime/node.exe
+          environment_name: PROD
+          override: true
+
+      - name: Re-package signed zip
+        shell: pwsh
+        run: |
+          $VERSION = $env:GITHUB_REF_NAME -replace '^v', ''
+          Remove-Item "quoroom-v${VERSION}-win-x64.zip" -ErrorAction SilentlyContinue
+          Compress-Archive -Path staging/quoroom -DestinationPath "quoroom-v${VERSION}-win-x64.zip"
+
+      - name: Install NSIS
+        run: choco install nsis -y
+
+      - name: Build Windows installer (NSIS)
+        id: build_installer
+        shell: pwsh
+        run: |
+          $VERSION = $env:GITHUB_REF_NAME -replace '^v', ''
+          $IS_TEST_TAG = $env:GITHUB_REF_NAME -like '*-test*'
+          # VIProductVersion must be X.X.X.X — strip any non-numeric suffix
+          $VI_VERSION = ($VERSION -replace '-.*','')
+          # Ensure at least X.X.X.X format
+          $parts = $VI_VERSION.Split('.')
+          while ($parts.Count -lt 4) { $parts += '0' }
+          $VI_VERSION = ($parts[0..3] -join '.')
+          $WORKSPACE = (Get-Location).Path
+          $MAKENSIS = $null
+
+          foreach ($name in @('makensis', 'makensis.exe')) {
+            $cmd = Get-Command $name -ErrorAction SilentlyContinue
+            if ($cmd) {
+              $MAKENSIS = $cmd.Source
+              break
+            }
+          }
+
+          if (-not $MAKENSIS) {
+            $fallbacks = @(
+              "${env:ProgramFiles(x86)}\NSIS\makensis.exe",
+              "${env:ProgramFiles(x86)}\NSIS\Bin\makensis.exe",
+              "${env:ChocolateyInstall}\bin\makensis.exe",
+              "${env:ChocolateyInstall}\bin\makensis.bat",
+              "C:\ProgramData\chocolatey\lib\nsis\tools\makensis.exe",
+              "C:\ProgramData\chocolatey\lib\nsis.install\tools\makensis.exe"
+            )
+            foreach ($candidate in $fallbacks) {
+              if (-not [string]::IsNullOrWhiteSpace($candidate) -and (Test-Path $candidate)) {
+                $MAKENSIS = $candidate
+                break
+              }
+            }
+          }
+
+          if (-not $MAKENSIS) {
+            foreach ($searchRoot in @("C:\ProgramData\chocolatey\lib", "C:\ProgramData\chocolatey\bin")) {
+              if (-not (Test-Path $searchRoot)) { continue }
+              $found = Get-ChildItem -Path $searchRoot -Recurse -File -ErrorAction SilentlyContinue |
+                Where-Object { $_.Name -ieq 'makensis.exe' -or $_.Name -ieq 'makensis.bat' } |
+                Select-Object -First 1
+              if ($found) {
+                $MAKENSIS = $found.FullName
+                break
+              }
+            }
+          }
+
+          if (-not $MAKENSIS) {
+            Write-Host "makensis not found in system paths. Downloading portable NSIS..."
+            $NSIS_VERSION = "3.11"
+            $NSIS_ZIP = Join-Path $env:RUNNER_TEMP "nsis-$NSIS_VERSION.zip"
+            $NSIS_EXTRACT_DIR = Join-Path $env:RUNNER_TEMP "nsis-portable"
+            Remove-Item -Recurse -Force $NSIS_EXTRACT_DIR -ErrorAction SilentlyContinue
+            Invoke-WebRequest -Uri "https://downloads.sourceforge.net/project/nsis/NSIS%203/$NSIS_VERSION/nsis-$NSIS_VERSION.zip" -OutFile $NSIS_ZIP
+            Expand-Archive -Path $NSIS_ZIP -DestinationPath $NSIS_EXTRACT_DIR -Force
+
+            $portableMakensis = Get-ChildItem -Path $NSIS_EXTRACT_DIR -Recurse -File -ErrorAction SilentlyContinue |
+              Where-Object { $_.Name -ieq 'makensis.exe' } |
+              Select-Object -First 1
+            if ($portableMakensis) {
+              $MAKENSIS = $portableMakensis.FullName
+            }
+          }
+
+          if ($MAKENSIS) {
+            Write-Host "Using makensis from: $MAKENSIS"
+          }
+
+          if (-not $MAKENSIS) {
+            if ($IS_TEST_TAG) {
+              echo "::warning::makensis.exe not found after NSIS install; skipping Windows .exe installer build for test tag."
+              echo "built=false" >> $env:GITHUB_OUTPUT
+              exit 0
+            }
+            throw "makensis.exe not found after NSIS install."
+          }
+
+          & $MAKENSIS `
+            /DVERSION=$VERSION `
+            "/DVI_VERSION=$VI_VERSION" `
+            "/DOUT_FILE=${WORKSPACE}\quoroom-v${VERSION}-win-x64-setup.exe" `
+            "/DSTAGING_DIR=${WORKSPACE}\staging\quoroom" `
+            installers\windows\quoroom.nsi
+          echo "built=true" >> $env:GITHUB_OUTPUT
+
+      - name: Resolve installer filename
+        if: steps.build_installer.outputs.built == 'true'
+        id: installer_file
+        shell: pwsh
+        run: |
+          $VERSION = $env:GITHUB_REF_NAME -replace '^v', ''
+          echo "path=quoroom-v${VERSION}-win-x64-setup.exe" >> $env:GITHUB_OUTPUT
+
+      - name: Sign installer with SSL.com eSigner
+        if: steps.build_installer.outputs.built == 'true'
+        uses: sslcom/esigner-codesign@develop
+        with:
+          command: sign
+          username: ${{ secrets.ES_USERNAME }}
+          password: ${{ secrets.ES_PASSWORD }}
+          credential_id: ${{ secrets.ES_CREDENTIAL_ID }}
+          totp_secret: ${{ secrets.ES_TOTP_SECRET }}
+          file_path: ${{ steps.installer_file.outputs.path }}
+          environment_name: PROD
+          override: true
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: quoroom-windows
+          path: |
+            quoroom-v*-win-x64.zip
+            quoroom-v*-win-x64-setup.exe
+
+  release:
+    needs: [build-mac, build-linux, build-windows]
+    if: startsWith(github.ref, 'refs/tags/')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          registry-url: https://registry.npmjs.org
+
+      - name: Download macOS artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: quoroom-mac
+          path: dist/
+
+      - name: Download Linux artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: quoroom-linux
+          path: dist/
+
+      - name: Download Windows artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: quoroom-windows
+          path: dist/
+
+      - name: Set version
+        id: version
+        run: echo "version=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            dist/*.tar.gz
+            dist/*.zip
+            dist/*.pkg
+            dist/*.deb
+            dist/*-setup.exe
+          body: |
+            ## Install
+
+            ```
+            npm install -g quoroom
+            ```
+
+            ### macOS (Homebrew)
+            ```
+            brew install quoroom-ai/quoroom/quoroom
+            ```
+
+            ### Download
+
+            Installers add `quoroom` to your PATH automatically. No dependencies needed.
+
+            | Platform | Installer | Archive |
+            |----------|-----------|---------|
+            | macOS (Apple Silicon + Intel) | [.pkg installer](https://github.com/quoroom-ai/room/releases/download/${{ github.ref_name }}/quoroom-v${{ steps.version.outputs.version }}-darwin-universal.pkg) | [.tar.gz](https://github.com/quoroom-ai/room/releases/download/${{ github.ref_name }}/quoroom-v${{ steps.version.outputs.version }}-darwin-universal.tar.gz) |
+            | Linux x64 | [.deb package](https://github.com/quoroom-ai/room/releases/download/${{ github.ref_name }}/quoroom_${{ steps.version.outputs.version }}_amd64.deb) | [.tar.gz](https://github.com/quoroom-ai/room/releases/download/${{ github.ref_name }}/quoroom-v${{ steps.version.outputs.version }}-linux-x64.tar.gz) |
+            | Windows x64 (signed) | [.exe installer](https://github.com/quoroom-ai/room/releases/download/${{ github.ref_name }}/quoroom-v${{ steps.version.outputs.version }}-win-x64-setup.exe) | [.zip](https://github.com/quoroom-ai/room/releases/download/${{ github.ref_name }}/quoroom-v${{ steps.version.outputs.version }}-win-x64.zip) |
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Publish to npm
+        if: "!contains(github.ref_name, '-test')"
+        run: |
+          npm ci
+          npm run build:mcp
+          npm publish --access public
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+  update-homebrew:
+    needs: release
+    if: startsWith(github.ref, 'refs/tags/') && !contains(github.ref_name, '-test')
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Download macOS artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: quoroom-mac
+          path: dist/
+
+      - name: Compute SHA256 and update formula
+        env:
+          HOMEBREW_TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          TARBALL=$(ls dist/*.tar.gz | head -1)
+          SHA=$(shasum -a 256 "$TARBALL" | awk '{print $1}')
+
+          git clone "https://x-access-token:${HOMEBREW_TAP_TOKEN}@github.com/quoroom-ai/homebrew-quoroom.git" tap
+          mkdir -p tap/Formula
+
+          cat > tap/Formula/quoroom.rb << FORMULA_EOF
+          class Quoroom < Formula
+            desc "Autonomous AI agent collective engine"
+            homepage "https://quoroom.ai"
+            url "https://github.com/quoroom-ai/room/releases/download/v#{version}/quoroom-v#{version}-darwin-universal.tar.gz"
+            sha256 "${SHA}"
+            license "MIT"
+
+            def install
+              libexec.install Dir["*"]
+              (bin/"quoroom").write_env_script libexec/"bin/quoroom"
+            end
+
+            test do
+              assert_match "Quoroom", shell_output("#{bin}/quoroom help")
+            end
+          end
+          FORMULA_EOF
+
+          cd tap
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add Formula/quoroom.rb
+          git diff --cached --quiet || git commit -m "Update quoroom to ${VERSION}" && git push

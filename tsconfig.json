@@ -1,0 +1,21 @@
+{
+  "extends": "@electron-toolkit/tsconfig/tsconfig.node.json",
+  "include": [
+    "src/shared/**/*",
+    "src/mcp/**/*",
+    "src/cli/**/*",
+    "src/server/**/*"
+  ],
+  "exclude": [
+    "node_modules",
+    "out",
+    "src/**/__tests__/**"
+  ],
+  "compilerOptions": {
+    "composite": true,
+    "strict": true,
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
+    "noFallthroughCasesInSwitch": true
+  }
+}

@@ -1,0 +1,7 @@
+#!/bin/bash
+# Create symlink so 'quoroom' is on PATH
+ln -sf /usr/local/lib/quoroom/bin/quoroom /usr/local/bin/quoroom
+
+# Open browser (runs as the installing user)
+sudo -u "$USER" open "http://localhost:3700" 2>/dev/null || true
+exit 0

@@ -1,0 +1,368 @@
+/**
+ * Quoroom HTTP API Server
+ *
+ * Serves REST API + WebSocket on localhost for the browser PWA.
+ * Uses raw node:http with a minimal custom router.
+ */
+
+import http from 'node:http'
+import { URL } from 'node:url'
+import fs from 'node:fs'
+import path from 'node:path'
+import { homedir } from 'node:os'
+import { exec, execSync } from 'node:child_process'
+import type Database from 'better-sqlite3'
+import { Router, type RouteContext } from './router'
+import {
+  generateToken,
+  validateToken,
+  isAllowedOrigin,
+  setCorsHeaders,
+  writeTokenFile,
+  getUserToken,
+} from './auth'
+import { isAllowedForRole } from './access'
+import { registerAllRoutes } from './routes/index'
+import { getServerDatabase, closeServerDatabase, getDataDir } from './db'
+import { createWsServer } from './ws'
+import { stopCloudSync } from '../shared/cloud-sync'
+import { initCloudSync } from './cloud'
+import { _stopAllLoops } from '../shared/agent-loop'
+
+const DEFAULT_PORT = 3700
+
+export interface ServerOptions {
+  /** Pass a pre-initialized DB (for tests). If omitted, uses getServerDatabase(). */
+  db?: Database.Database
+  port?: number
+  /** Data directory for token/port files. Defaults to ~/.quoroom */
+  dataDir?: string
+  /** Path to React SPA build output. If omitted, no static file serving. */
+  staticDir?: string
+  /** If true, skip writing token/port files to disk */
+  skipTokenFile?: boolean
+}
+
+function parseBody(req: http.IncomingMessage): Promise<unknown> {
+  return new Promise((resolve, reject) => {
+    const chunks: Buffer[] = []
+    req.on('data', (chunk: Buffer) => chunks.push(chunk))
+    req.on('end', () => {
+      const raw = Buffer.concat(chunks).toString()
+      if (!raw) return resolve(undefined)
+      try {
+        resolve(JSON.parse(raw))
+      } catch {
+        reject(new Error('Invalid JSON body'))
+      }
+    })
+    req.on('error', reject)
+  })
+}
+
+const MIME_TYPES: Record<string, string> = {
+  '.html': 'text/html; charset=utf-8',
+  '.js': 'application/javascript; charset=utf-8',
+  '.css': 'text/css; charset=utf-8',
+  '.json': 'application/json; charset=utf-8',
+  '.png': 'image/png',
+  '.jpg': 'image/jpeg',
+  '.jpeg': 'image/jpeg',
+  '.svg': 'image/svg+xml',
+  '.ico': 'image/x-icon',
+  '.woff': 'font/woff',
+  '.woff2': 'font/woff2',
+  '.webp': 'image/webp',
+  '.webmanifest': 'application/manifest+json',
+}
+
+function serveStatic(staticDir: string, pathname: string, res: http.ServerResponse): void {
+  // Prevent directory traversal
+  const safePath = path.normalize(pathname).replace(/^(\.\.[/\\])+/, '')
+  let filePath = path.join(staticDir, safePath)
+
+  try {
+    const stat = fs.statSync(filePath)
+    if (stat.isDirectory()) {
+      filePath = path.join(filePath, 'index.html')
+    }
+  } catch {
+    // File doesn't exist — SPA fallback to index.html
+    filePath = path.join(staticDir, 'index.html')
+  }
+
+  try {
+    const data = fs.readFileSync(filePath)
+    const ext = path.extname(filePath).toLowerCase()
+    const contentType = MIME_TYPES[ext] ?? 'application/octet-stream'
+    res.writeHead(200, { 'Content-Type': contentType })
+    res.end(data)
+  } catch {
+    res.writeHead(404, { 'Content-Type': 'text/plain' })
+    res.end('Not Found')
+  }
+}
+
+export function createApiServer(options: ServerOptions = {}): {
+  server: http.Server
+  token: string
+  userToken: string
+  db: Database.Database
+} {
+  const db = options.db ?? getServerDatabase()
+  const port = options.port ?? DEFAULT_PORT
+  const dataDir = options.dataDir ?? getDataDir()
+
+  const router = new Router()
+  registerAllRoutes(router)
+
+  const token = generateToken()
+  if (!options.skipTokenFile) {
+    writeTokenFile(dataDir, token, port)
+  }
+
+  const server = http.createServer(async (req, res) => {
+    const url = new URL(req.url!, `http://${req.headers.host || 'localhost'}`)
+    const pathname = url.pathname
+    const origin = req.headers.origin as string | undefined
+
+    // CORS preflight
+    if (req.method === 'OPTIONS') {
+      const headers: Record<string, string> = {}
+      setCorsHeaders(origin, headers)
+      res.writeHead(204, headers)
+      res.end()
+      return
+    }
+
+    const responseHeaders: Record<string, string> = {
+      'Content-Type': 'application/json'
+    }
+    setCorsHeaders(origin, responseHeaders)
+
+    // Origin validation for all /api/ requests
+    if (pathname.startsWith('/api/') && !isAllowedOrigin(origin)) {
+      res.writeHead(403, responseHeaders)
+      res.end(JSON.stringify({ error: 'Forbidden origin' }))
+      return
+    }
+
+    // Auth handshake — no token needed, Origin must be localhost
+    // Returns user token (restricted in auto mode, full in semi mode)
+    if (pathname === '/api/auth/handshake' && req.method === 'GET') {
+      res.writeHead(200, responseHeaders)
+      res.end(JSON.stringify({ token: getUserToken() }))
+      return
+    }
+
+    // Auth verify
+    if (pathname === '/api/auth/verify' && req.method === 'GET') {
+      const role = validateToken(req.headers.authorization)
+      if (!role) {
+        res.writeHead(401, responseHeaders)
+        res.end(JSON.stringify({ error: 'Unauthorized' }))
+        return
+      }
+      res.writeHead(200, responseHeaders)
+      res.end(JSON.stringify({ ok: true, role }))
+      return
+    }
+
+    // All other /api/* routes require auth
+    if (pathname.startsWith('/api/')) {
+      const role = validateToken(req.headers.authorization)
+      if (!role) {
+        res.writeHead(401, responseHeaders)
+        res.end(JSON.stringify({ error: 'Unauthorized' }))
+        return
+      }
+
+      // Role-based access control
+      if (!isAllowedForRole(role, req.method!, pathname, db)) {
+        res.writeHead(403, responseHeaders)
+        res.end(JSON.stringify({ error: 'Forbidden: auto mode restricts this action' }))
+        return
+      }
+
+      const matched = router.match(req.method!, pathname)
+      if (!matched) {
+        res.writeHead(404, responseHeaders)
+        res.end(JSON.stringify({ error: 'Not found' }))
+        return
+      }
+
+      try {
+        const body = await parseBody(req)
+        const query = Object.fromEntries(url.searchParams)
+        const ctx: RouteContext = {
+          params: matched.params,
+          query,
+          body,
+          db
+        }
+        const result = await matched.handler(ctx)
+        const status = result.error ? (result.status || 400) : (result.status || 200)
+        res.writeHead(status, responseHeaders)
+        res.end(JSON.stringify(result.error ? { error: result.error } : result.data))
+      } catch (err) {
+        const message = err instanceof Error ? err.message : 'Internal error'
+        res.writeHead(500, responseHeaders)
+        res.end(JSON.stringify({ error: message }))
+      }
+      return
+    }
+
+    // Static file serving for the SPA
+    if (options.staticDir) {
+      serveStatic(options.staticDir, pathname, res)
+    } else {
+      res.writeHead(404, { 'Content-Type': 'text/plain' })
+      res.end('Not Found')
+    }
+  })
+
+  // Attach WebSocket server for live event streaming
+  createWsServer(server)
+
+  return { server, token, userToken: getUserToken(), db }
+}
+
+/**
+ * Patch a single MCP config file with the Quoroom server entry.
+ * Only patches if the file already exists — never creates it for users who don't have the client.
+ * Returns true if the file was written.
+ */
+function patchMcpConfig(configPath: string, entry: Record<string, unknown>): boolean {
+  try {
+    if (!fs.existsSync(configPath)) return false
+    let config: Record<string, unknown> = {}
+    try {
+      config = JSON.parse(fs.readFileSync(configPath, 'utf-8'))
+    } catch { /* invalid JSON — overwrite */ }
+    const mcpServers = (config.mcpServers as Record<string, unknown>) ?? {}
+    mcpServers['quoroom'] = entry
+    config.mcpServers = mcpServers
+    fs.writeFileSync(configPath, JSON.stringify(config, null, 2) + '\n')
+    return true
+  } catch {
+    return false
+  }
+}
+
+/**
+ * Register Quoroom MCP server in all known AI client configs automatically.
+ * Runs silently on server startup so non-technical users get MCP tools without manual setup.
+ * Supported: Claude Code, Claude Desktop, Cursor, Windsurf.
+ */
+function registerMcpGlobally(dbPath: string): void {
+  try {
+    const home = homedir()
+    // server.js sits next to api-server.js in the compiled output directory
+    const mcpServerPath = path.join(__dirname, 'server.js')
+    const nodePath = process.execPath
+
+    const entry = (source: string) => ({
+      command: nodePath,
+      args: [mcpServerPath],
+      env: { QUOROOM_DB_PATH: dbPath, QUOROOM_SOURCE: source },
+    })
+
+    const isWin = process.platform === 'win32'
+    const isMac = process.platform === 'darwin'
+
+    // Claude Code (~/.claude.json)
+    patchMcpConfig(path.join(home, '.claude.json'), entry('claude-code'))
+
+    // Claude Desktop
+    const claudeDesktopPath = isWin
+      ? path.join(home, 'AppData', 'Roaming', 'Claude', 'claude_desktop_config.json')
+      : isMac
+        ? path.join(home, 'Library', 'Application Support', 'Claude', 'claude_desktop_config.json')
+        : path.join(home, '.config', 'Claude', 'claude_desktop_config.json')
+    patchMcpConfig(claudeDesktopPath, entry('claude-desktop'))
+
+    // Cursor (~/.cursor/mcp.json)
+    patchMcpConfig(path.join(home, '.cursor', 'mcp.json'), entry('cursor'))
+
+    // Windsurf (~/.codeium/windsurf/mcp_config.json)
+    patchMcpConfig(
+      path.join(home, '.codeium', 'windsurf', 'mcp_config.json'),
+      entry('windsurf')
+    )
+  } catch {
+    // Never break server startup over MCP registration
+  }
+}
+
+/** Start the server (for CLI use) */
+export function startServer(options: ServerOptions = {}): void {
+  const port = options.port ?? DEFAULT_PORT
+  // Default to built UI directory next to the compiled server output
+  if (!options.staticDir) {
+    const defaultUiDir = path.join(__dirname, '../ui')
+    if (fs.existsSync(defaultUiDir)) {
+      options.staticDir = defaultUiDir
+    }
+  }
+  const dbPath = process.env.QUOROOM_DB_PATH || path.join(options.dataDir ?? getDataDir(), 'data.db')
+  const { server, token, db: serverDb } = createApiServer(options)
+
+  // Register MCP server in ~/.claude/.mcp.json so Claude Code picks it up automatically.
+  // Skip during tests (QUOROOM_SKIP_MCP_REGISTER=1) to avoid clobbering real config.
+  if (!process.env.QUOROOM_SKIP_MCP_REGISTER) {
+    registerMcpGlobally(dbPath)
+  }
+
+  // Start cloud sync if public mode is enabled
+  initCloudSync(serverDb)
+
+  function listen(): void {
+    server.listen(port, () => {
+      const dashboardUrl = 'https://app.quoroom.ai'
+      console.error(`Quoroom API server started on http://localhost:${port}`)
+      console.error(`Dashboard: ${dashboardUrl}`)
+      console.error(`Auth token: ${token.slice(0, 8)}...`)
+
+      // Auto-open dashboard only in production builds.
+      if (process.env.NODE_ENV === 'production') {
+        const cmd = process.platform === 'darwin' ? 'open'
+          : process.platform === 'win32' ? 'start'
+          : 'xdg-open'
+        exec(`${cmd} ${dashboardUrl}`)
+      }
+    })
+  }
+
+  server.on('error', (err: NodeJS.ErrnoException) => {
+    if (err.code === 'EADDRINUSE') {
+      console.error(`Port ${port} is in use — killing existing process...`)
+      try {
+        execSync(`lsof -ti :${port} | xargs kill -9`, { stdio: 'ignore' })
+      } catch {
+        // No process found or kill failed — ignore
+      }
+      setTimeout(listen, 500)
+    } else {
+      throw err
+    }
+  })
+
+  listen()
+
+  process.on('SIGINT', () => {
+    console.error('Shutting down...')
+    _stopAllLoops()
+    stopCloudSync()
+    server.close()
+    closeServerDatabase()
+    process.exit(0)
+  })
+
+  process.on('SIGTERM', () => {
+    _stopAllLoops()
+    stopCloudSync()
+    server.close()
+    closeServerDatabase()
+    process.exit(0)
+  })
+}

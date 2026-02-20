@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="utf-8"?>
+<installer-gui-script minSpecVersion="2">
+    <title>Quoroom</title>
+    <organization>ai.quoroom</organization>
+    <domains enable_localSystem="true" />
+    <options customize="never" require-scripts="false" hostArchitectures="x86_64,arm64" />
+
+    <welcome file="welcome.html" />
+    <license file="license.html" />
+
+    <choices-outline>
+        <line choice="default">
+            <line choice="ai.quoroom.cli" />
+        </line>
+    </choices-outline>
+
+    <choice id="default" />
+    <choice id="ai.quoroom.cli"
+            visible="false"
+            title="Quoroom CLI"
+            description="Quoroom command-line tool and runtime">
+        <pkg-ref id="ai.quoroom.cli" />
+    </choice>
+
+    <pkg-ref id="ai.quoroom.cli"
+             version="0"
+             onConclusion="none">quoroom-component.pkg</pkg-ref>
+</installer-gui-script>

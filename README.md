@@ -1,0 +1,390 @@
+<p align="center">
+  <a href="https://quoroom.ai">
+    <img src="docs/banner.png" alt="Quoroom — Autonomous AI agent collective." width="100%">
+  </a>
+</p>
+
+# Quoroom
+
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+[![npm version](https://img.shields.io/npm/v/quoroom)](https://www.npmjs.com/package/quoroom)
+[![Tests](https://img.shields.io/badge/tests-804%20passing-brightgreen)](#)
+[![GitHub stars](https://img.shields.io/github/stars/quoroom-ai/room)](https://github.com/quoroom-ai/room/stargazers)
+
+**An open research project in autonomous agent collectives.**
+
+A single agent thinks. A collective decides. We're building the swarm.
+
+Queen, Workers, Quorum. Goals, skills, self-modification, wallet, stations — starting on your machine, scaling to cloud.
+
+[quoroom.ai](https://quoroom.ai)
+
+<p align="center">
+  <video src="docs/demo.mp4" autoplay loop muted playsinline width="800"></video>
+</p>
+
+---
+
+## Why Quoroom?
+
+Run a swarm of AI agents that pursue goals autonomously. The Queen strategizes, a swarm of Workers execute, and the Quorum votes on decisions. Agents learn new skills, modify their own behavior, manage a crypto wallet, and rent cloud stations for more compute — all governed by democratic consensus.
+
+Autonomous agents earning money is inevitable. It's already happening behind closed doors. We believe it should happen in the open — publicly, transparently — so everyone can learn. Quoroom is an experiment: let's see what AI can actually do.
+
+The architecture draws from swarm intelligence research: decentralized decision-making, emergent behavior from local interactions, and collective intelligence that exceeds any individual agent. The queen doesn't dictate — the swarm decides.
+
+---
+
+## What is Quoroom?
+
+Quoroom is an open research project exploring autonomous agent collectives. Each collective (a **Room**) is a self-governing swarm of agents.
+
+- **Queen** — strategic brain, uses Claude CLI
+- **Workers** — specialized agents (Ollama, free): Researcher, Coder, Marketer, Analyst — or any custom role
+- **Quorum** — agents deliberate and vote on decisions
+- **Keeper** — the human who sets goals and funds the wallet
+
+## This Repo
+
+`quoroom-ai/room` is the engine: agent loop, quorum governance, goals, skills, self-modification, wallet, stations, memory, task scheduling, file watching, MCP server, HTTP/WebSocket API, dashboard UI, and CLI.
+
+| Repo | Purpose |
+|------|---------|
+| **room** (this) | Engine + HTTP server + UI |
+| [cloud](https://github.com/quoroom-ai/cloud) | Landing page, public rooms, PostgreSQL, station infrastructure |
+
+---
+
+## Features
+
+**Rooms** — Create autonomous agent collectives with a Queen and Workers. Pause, restart, monitor activity.
+
+**Activity Controls** — Throttle the queen per room: configurable cycle gap (sleep between runs), max turns per cycle, and quiet hours (time window where the queen rests). Plan-aware defaults (Pro/Max/API/None) apply automatically when you create a new room based on your Claude subscription tier.
+
+**Quorum Voting** — Agents propose and vote on decisions. Majority, supermajority, or unanimous — you choose the threshold.
+
+**Goals** — Hierarchical goal decomposition with progress tracking. Set a top-level objective and let agents break it down.
+
+**Skills** — Reusable agent capabilities with activation contexts and versioning. Agents learn and improve over time.
+
+**Self-Modification** — Agents edit their own skills and files with full audit trail and one-click revert.
+
+**Memory** — Entities, observations, and relations with semantic vector search (384-dim embeddings). Knowledge persists across sessions.
+
+**Wallet** — EVM wallet for USDC on Base L2. Encrypted keys (AES-256-GCM). Agents can send and receive funds.
+
+**On-Chain Identity** — ERC-8004 agent identity on Base. Rooms register as on-chain agents with discoverable metadata. Reputation-ready.
+
+**Stations** — Workers rent cloud servers when they need more compute. Deploy to Fly.io, E2B, or Modal with exec, logs, and domain management.
+
+**Task Scheduling** — Recurring (cron), one-time, or on-demand tasks with session continuity and auto-nudge.
+
+**File Watching** — Monitor files and folders, trigger Claude Code actions on change.
+
+**Auto / Semi Mode** — Two autonomy modes. Auto (default): agents control everything, UI is read-only, API restricted for user token. Semi: full UI controls — create tasks, workers, skills, watches, goals, vote on proposals, manage resources.
+
+**Public Rooms** — Toggle your room public on [quoroom.ai/rooms](https://quoroom.ai/rooms). Stats, earnings leaderboard, auto/semi mode badges. Room registers with cloud and sends heartbeats every 5 minutes. No account needed to browse.
+
+**HTTP Server + REST API** — Full REST API with dual-token auth (agent + user) and WebSocket real-time events. Role-based access control per autonomy mode. Run `quoroom serve` to start.
+
+**Dashboard** — React SPA at [app.quoroom.ai](https://app.quoroom.ai). Manage rooms, agents, goals, memory, wallet — all from the browser. The UI loads from CDN but connects to your local server — all data stays on your machine.
+
+---
+
+## Architecture
+
+```
+┌─────────────────────────────────────────────────┐
+│                    Room                          │
+│  ┌───────┐  ┌─────────┐  ┌──────────────────┐  │
+│  │ Queen │  │ Workers │  │     Quorum       │  │
+│  │(Claude)│  │(Ollama) │  │ propose → vote   │  │
+│  └───┬───┘  └────┬────┘  └──────────────────┘  │
+│      │           │                               │
+│  ┌───┴───────────┴───────────────────────────┐  │
+│  │              Agent Loop                    │  │
+│  │  goals · skills · self-mod · memory        │  │
+│  └───────────────────────────────────────────┘  │
+│                                                  │
+│  ┌────────┐  ┌──────────┐  ┌────────────────┐  │
+│  │ Wallet │  │ Stations │  │ Task Scheduler │  │
+│  │(Base L2)│  │(Fly/E2B) │  │ (cron/once)    │  │
+│  └────────┘  └──────────┘  └────────────────┘  │
+│                                                  │
+│  ┌──────────────────────────────────────────┐   │
+│  │  Auth: agent token (full) + user token   │   │
+│  │  Access: auto mode (restricted) / semi   │   │
+│  └──────────────────────────────────────────┘   │
+└────────────────────┬────────────────────────────┘
+                     │
+        ┌────────────┼────────────┐
+        │            │            │
+   MCP Server   HTTP/REST    WebSocket
+    (stdio)    (port 3700)   (real-time)
+                     │
+        ┌────────────┼────────────┐
+        │                         │
+ ┌──────┴──────┐         ┌───────┴───────┐
+ │  Dashboard  │         │  Cloud Sync   │
+ │ app.quoroom │         │ quoroom.ai    │
+ └─────────────┘         │  /rooms page  │
+                          └───────────────┘
+```
+
+---
+
+## Install
+
+### npm (recommended)
+
+```bash
+npm install -g quoroom
+```
+
+### Homebrew (macOS)
+
+```bash
+brew install quoroom-ai/quoroom/quoroom
+```
+
+### Download
+
+Download from [GitHub Releases](https://github.com/quoroom-ai/room/releases). Installers add `quoroom` to your PATH automatically. No dependencies needed.
+
+| Platform | Installer | Archive |
+|----------|-----------|---------|
+| macOS (Apple Silicon + Intel) | `.pkg` | `.tar.gz` |
+| Linux x64 | `.deb` | `.tar.gz` |
+| Windows x64 (signed) | `.exe` setup | `.zip` |
+
+---
+
+## Quick Start
+
+```bash
+# Start the HTTP/WebSocket API server + dashboard
+quoroom serve
+```
+
+On first run, `quoroom serve` automatically registers the Quoroom MCP server in every AI coding tool you have installed (Claude Code, Claude Desktop, Cursor, Windsurf). Just **restart your AI client once** — after that, all `mcp__quoroom__*` tools are available automatically in every session.
+
+Open **[app.quoroom.ai](https://app.quoroom.ai)** — the dashboard loads from CDN but all API calls go to `localhost`. Your data never leaves your machine.
+
+> **MCP-only mode** (no HTTP server): `quoroom mcp` starts just the stdio MCP transport, useful for scripting or testing. For normal use, `quoroom serve` is all you need.
+
+---
+
+## All Tools
+
+The room engine exposes an MCP server over stdio. All tools use the `quoroom_` prefix.
+
+<details>
+<summary>Full tool reference (click to expand)</summary>
+
+### Room
+
+| Tool | Description |
+|------|-------------|
+| `quoroom_create_room` | Create a new autonomous agent collective |
+| `quoroom_list_rooms` | List rooms by status |
+| `quoroom_room_status` | Get room status and summary |
+| `quoroom_room_activity` | Get recent room activity |
+| `quoroom_pause_room` | Pause a running room |
+| `quoroom_restart_room` | Restart a paused room |
+| `quoroom_delete_room` | Delete a room |
+
+### Quorum
+
+| Tool | Description |
+|------|-------------|
+| `quoroom_propose` | Create a proposal for the quorum to vote on |
+| `quoroom_vote` | Cast a vote on a proposal |
+| `quoroom_list_decisions` | List quorum decisions |
+| `quoroom_decision_detail` | Get details of a specific decision |
+
+### Goals
+
+| Tool | Description |
+|------|-------------|
+| `quoroom_set_goal` | Set a room's primary objective |
+| `quoroom_create_subgoal` | Decompose a goal into sub-goals |
+| `quoroom_update_progress` | Log a progress observation |
+| `quoroom_complete_goal` | Mark a goal as completed |
+| `quoroom_abandon_goal` | Abandon a goal |
+| `quoroom_list_goals` | List goals for a room |
+
+### Skills
+
+| Tool | Description |
+|------|-------------|
+| `quoroom_create_skill` | Create a reusable agent skill |
+| `quoroom_edit_skill` | Update a skill (increments version) |
+| `quoroom_list_skills` | List available skills |
+| `quoroom_activate_skill` | Activate a skill |
+| `quoroom_deactivate_skill` | Deactivate a skill |
+| `quoroom_delete_skill` | Delete a skill |
+
+### Self-Modification
+
+| Tool | Description |
+|------|-------------|
+| `quoroom_self_mod_edit` | Edit a skill or file with audit logging |
+| `quoroom_self_mod_revert` | Revert a modification by audit ID |
+| `quoroom_self_mod_history` | View modification audit history |
+
+### Workers
+
+| Tool | Description |
+|------|-------------|
+| `quoroom_create_worker` | Create a named agent with system prompt |
+| `quoroom_list_workers` | List all workers |
+| `quoroom_update_worker` | Update a worker's configuration |
+| `quoroom_delete_worker` | Delete a worker |
+
+### Task Scheduling
+
+| Tool | Description |
+|------|-------------|
+| `quoroom_schedule` | Create a recurring (cron), one-time, or on-demand task |
+| `quoroom_list_tasks` | List tasks by status |
+| `quoroom_run_task` | Execute a task immediately |
+| `quoroom_task_progress` | Check running task progress |
+| `quoroom_task_history` | View task run history |
+| `quoroom_pause_task` | Pause a scheduled task |
+| `quoroom_resume_task` | Resume a paused task |
+| `quoroom_delete_task` | Delete a task |
+| `quoroom_reset_session` | Clear session continuity for a task |
+
+### File Watching
+
+| Tool | Description |
+|------|-------------|
+| `quoroom_watch` | Watch a file/folder for changes |
+| `quoroom_unwatch` | Stop watching |
+| `quoroom_pause_watch` | Pause a watch |
+| `quoroom_resume_watch` | Resume a paused watch |
+| `quoroom_list_watches` | List active watches |
+
+### Memory
+
+| Tool | Description |
+|------|-------------|
+| `quoroom_remember` | Store facts, preferences, people, events |
+| `quoroom_recall` | Semantic + full-text search of memories |
+| `quoroom_forget` | Delete a memory |
+| `quoroom_memory_list` | List all memories |
+
+### Wallet
+
+| Tool | Description |
+|------|-------------|
+| `quoroom_wallet_create` | Create an EVM wallet (USDC on Base) |
+| `quoroom_wallet_address` | Get wallet address |
+| `quoroom_wallet_balance` | Check USDC balance |
+| `quoroom_wallet_send` | Send USDC |
+| `quoroom_wallet_history` | View transaction history |
+
+### Identity
+
+| Tool | Description |
+|------|-------------|
+| `quoroom_identity_register` | Register room as ERC-8004 on-chain agent |
+| `quoroom_identity_get` | Get on-chain identity (agentId, registry, URI) |
+| `quoroom_identity_update` | Update on-chain registration metadata |
+
+### Stations
+
+| Tool | Description |
+|------|-------------|
+| `quoroom_station_create` | Provision a cloud server (Fly.io, E2B, Modal) |
+| `quoroom_station_list` | List stations |
+| `quoroom_station_status` | Get station status |
+| `quoroom_station_start` | Start a stopped station |
+| `quoroom_station_stop` | Stop a running station |
+| `quoroom_station_exec` | Execute a command on a station |
+| `quoroom_station_logs` | View station logs |
+| `quoroom_station_deploy` | Deploy to a station |
+| `quoroom_station_domain` | Manage station domain |
+| `quoroom_station_delete` | Delete a station |
+
+### Settings
+
+| Tool | Description |
+|------|-------------|
+| `quoroom_get_setting` | Get a setting value |
+| `quoroom_set_setting` | Update a setting |
+
+</details>
+
+## Development
+
+```bash
+npm install              # Install dependencies
+npm run build            # Typecheck + bundle MCP server + build UI
+npm run build:mcp        # Bundle MCP server only (esbuild)
+npm run build:ui         # Build UI SPA only (Vite)
+npm run dev:ui           # UI dev server with hot reload
+npm run typecheck        # Type-check only (tsc --noEmit)
+npm test                 # Run all tests (vitest, fork pool)
+npm run test:watch       # Watch mode
+npm run test:e2e         # End-to-end tests (Playwright)
+```
+
+<details>
+<summary>Project structure</summary>
+
+```
+room/
+├── src/
+│   ├── cli/               # CLI entry point (quoroom command)
+│   ├── mcp/               # MCP server (stdio)
+│   │   ├── server.ts      # Tool registration
+│   │   ├── db.ts          # Database initialization
+│   │   └── tools/         # 13 tool modules
+│   ├── server/            # HTTP/WebSocket API server
+│   │   ├── index.ts       # Server bootstrap
+│   │   ├── router.ts      # Request router
+│   │   ├── auth.ts        # Dual-token auth + CORS
+│   │   ├── access.ts      # Role-based access control
+│   │   ├── ws.ts          # WebSocket real-time events
+│   │   └── routes/        # REST API routes
+│   ├── ui/                # React SPA dashboard
+│   │   ├── App.tsx        # Root component
+│   │   ├── components/    # UI components
+│   │   ├── hooks/         # React hooks
+│   │   └── lib/           # API client, auth, WebSocket
+│   └── shared/            # Core engine
+│       ├── agent-loop.ts       # Worker agent loop with rate limiting
+│       ├── agent-executor.ts   # Claude Code CLI execution
+│       ├── room.ts             # Room lifecycle
+│       ├── quorum.ts           # Voting & decisions
+│       ├── goals.ts            # Goal decomposition
+│       ├── skills.ts           # Skill management
+│       ├── wallet.ts           # EVM wallet (Base L2, USDC)
+│       ├── identity.ts         # ERC-8004 on-chain identity
+│       ├── station.ts          # Cloud provisioning
+│       ├── task-runner.ts      # Task execution engine
+│       ├── db-queries.ts       # Database query layer
+│       ├── schema.ts           # SQLite schema (WAL mode)
+│       ├── embeddings.ts       # Vector embeddings (all-MiniLM-L6-v2)
+│       ├── cloud-sync.ts      # Cloud registration + heartbeat
+│       └── __tests__/          # Test suite
+├── e2e/                    # Playwright end-to-end tests
+├── scripts/
+│   └── build-mcp.js       # esbuild bundling
+└── docs/                   # Media assets
+```
+
+**Tech stack**: TypeScript (strict), React, Tailwind CSS, better-sqlite3, sqlite-vec, viem, MCP SDK, HuggingFace Transformers, node-cron, zod, esbuild, Vite, Vitest
+
+</details>
+
+## No API keys needed
+
+No ChatGPT API. No Claude API. The queen uses your [Claude Code](https://docs.anthropic.com/en/docs/claude-code) subscription. Workers use [Ollama](https://ollama.com) — free, open-source LLMs. Scale up with stations.
+
+Quoroom is not affiliated with Anthropic or OpenAI.
+
+## License
+
+MIT License. See [LICENSE](LICENSE) for details.

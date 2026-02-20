@@ -1,0 +1,5 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Questions & Discussion
+    url: https://github.com/quoroom-ai/room/discussions
+    about: Ask questions and discuss ideas

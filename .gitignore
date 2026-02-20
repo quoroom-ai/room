@@ -1,0 +1,20 @@
+node_modules/
+out/
+dist/
+build/
+*.db
+*.db-journal
+*.db-wal
+*.tsbuildinfo
+.DS_Store
+*.log
+.env
+.env.*
+
+# User-specific MCP config (contains absolute paths)
+.mcp.json
+
+# Internal project docs (not for public repo)
+CLAUDE.md
+PROGRESS.md
+PLAN.md
