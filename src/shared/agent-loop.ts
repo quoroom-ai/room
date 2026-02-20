@@ -222,6 +222,9 @@ export async function runCycle(
     progress: g.progress,
     status: g.status
   }))
+  const roomWorkers = queries.listRoomWorkers(db, roomId)
+  const roomTasks = queries.listTasks(db, roomId, 'active').slice(0, 10)
+  const unreadMessages = queries.listRoomMessages(db, roomId, 'unread').slice(0, 5)
 
   // 2. BUILD PROMPT
   const skillContent = loadSkillsForAgent(db, roomId, status.room.goal ?? '')
@@ -232,6 +235,11 @@ export async function runCycle(
   ].join('')
 
   const contextParts: string[] = []
+
+  // Identity — always first so agents know their roomId and workerId for MCP tool calls
+  contextParts.push(
+    `## Your Identity\n- Room ID: ${roomId}\n- Your Worker ID: ${worker.id}\n- Your Name: ${worker.name}`
+  )
 
   if (status.room.goal) {
     contextParts.push(`## Room Objective\n${status.room.goal}`)
@@ -259,6 +267,24 @@ export async function runCycle(
   if (recentActivity.length > 0) {
     contextParts.push(`## Recent Activity\n${recentActivity.map(a =>
       `- [${a.eventType}] ${a.summary}`
+    ).join('\n')}`)
+  }
+
+  if (roomWorkers.length > 0) {
+    contextParts.push(`## Room Workers\n${roomWorkers.map(w =>
+      `- #${w.id} ${w.name}${w.role ? ` (${w.role})` : ''} — ${w.agentState}`
+    ).join('\n')}`)
+  }
+
+  if (roomTasks.length > 0) {
+    contextParts.push(`## Room Tasks\n${roomTasks.map(t =>
+      `- #${t.id} "${t.name}" [${t.triggerType}] — ${t.status}`
+    ).join('\n')}`)
+  }
+
+  if (unreadMessages.length > 0) {
+    contextParts.push(`## Unread Messages\n${unreadMessages.map(m =>
+      `- #${m.id} from ${m.fromRoomId ?? 'unknown'}: ${m.subject}`
     ).join('\n')}`)
   }
 
