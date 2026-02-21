@@ -38,3 +38,25 @@ jobs:
           tags: |
             ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest
             ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ github.sha }}
+
+      - name: Update active cloud instances
+        if: success()
+        env:
+          CLOUD_API_URL: ${{ secrets.CLOUD_API_URL }}
+          CLOUD_ADMIN_TOKEN: ${{ secrets.CLOUD_ADMIN_TOKEN }}
+        run: |
+          if [ -z "$CLOUD_API_URL" ] || [ -z "$CLOUD_ADMIN_TOKEN" ]; then
+            echo "CLOUD_API_URL or CLOUD_ADMIN_TOKEN not set, skipping instance update"
+            exit 0
+          fi
+          echo "Updating active cloud instances..."
+          response=$(curl -s -w "\n%{http_code}" -X POST \
+            "$CLOUD_API_URL/api/cloud/ops/update-machines" \
+            -H "Authorization: Bearer $CLOUD_ADMIN_TOKEN" \
+            -H "Content-Type: application/json")
+          http_code=$(echo "$response" | tail -1)
+          body=$(echo "$response" | head -n -1)
+          echo "HTTP $http_code: $body"
+          if [ "$http_code" -ge 400 ]; then
+            echo "::warning::Failed to update cloud instances (HTTP $http_code)"
+          fi
