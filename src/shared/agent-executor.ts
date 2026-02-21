@@ -1,6 +1,7 @@
 import http from 'http'
 import { executeClaudeCode } from './claude-code'
 import type { ExecutionOptions, ExecutionResult, ConsoleLogCallback, ProgressCallback } from './claude-code'
+import { execOnCloudStation } from './cloud-sync'
 
 export interface AgentExecutionOptions {
   model: string // 'claude' | 'ollama:llama3' | 'ollama:mistral' | etc.
@@ -91,6 +92,78 @@ async function executeOllama(options: AgentExecutionOptions): Promise<AgentExecu
       durationMs: Date.now() - startTime,
       sessionId: null,
       timedOut: isTimeout
+    }
+  }
+}
+
+/**
+ * Execute Ollama inference on a cloud station.
+ * Sends the prompt to the station's local Ollama API via exec.
+ */
+export async function executeOllamaOnStation(
+  cloudRoomId: string,
+  stationId: number,
+  options: AgentExecutionOptions
+): Promise<AgentExecutionResult> {
+  const modelName = options.model.replace(/^ollama:/, '')
+  const startTime = Date.now()
+
+  const messages: Array<{ role: string; content: string }> = []
+  if (options.systemPrompt) {
+    messages.push({ role: 'system', content: options.systemPrompt })
+  }
+  messages.push({ role: 'user', content: options.prompt })
+
+  const payload = JSON.stringify({
+    model: modelName,
+    messages,
+    stream: false
+  })
+
+  // Base64-encode to avoid shell escaping issues with long prompts
+  const b64 = Buffer.from(payload).toString('base64')
+  const command = `echo '${b64}' | base64 -d | curl -s --max-time 300 http://localhost:11434/api/chat -d @-`
+
+  // 360s timeout (300s curl + 60s buffer for network/overhead)
+  const result = await execOnCloudStation(cloudRoomId, stationId, command, 360000)
+
+  if (!result) {
+    return {
+      output: 'Error: station execution failed (station unreachable or Ollama not running)',
+      exitCode: 1,
+      durationMs: Date.now() - startTime,
+      sessionId: null,
+      timedOut: false
+    }
+  }
+
+  if (result.exitCode !== 0) {
+    return {
+      output: result.stderr || result.stdout || `Station exec failed with exit code ${result.exitCode}`,
+      exitCode: result.exitCode,
+      durationMs: Date.now() - startTime,
+      sessionId: null,
+      timedOut: false
+    }
+  }
+
+  try {
+    const parsed = JSON.parse(result.stdout)
+    return {
+      output: parsed?.message?.content ?? '',
+      exitCode: 0,
+      durationMs: Date.now() - startTime,
+      sessionId: null,
+      timedOut: false
+    }
+  } catch {
+    // Response wasn't valid JSON — return raw output
+    return {
+      output: result.stdout || '(no output from Ollama)',
+      exitCode: 1,
+      durationMs: Date.now() - startTime,
+      sessionId: null,
+      timedOut: false
     }
   }
 }

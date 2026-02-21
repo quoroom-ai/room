@@ -247,7 +247,8 @@ export async function listCloudStations(cloudRoomId: string): Promise<CloudStati
 export async function execOnCloudStation(
   cloudRoomId: string,
   subId: number,
-  command: string
+  command: string,
+  timeoutMs: number = 90000
 ): Promise<{ stdout: string; stderr: string; exitCode: number } | null> {
   try {
     const res = await fetch(
@@ -256,7 +257,7 @@ export async function execOnCloudStation(
         method: 'POST',
         headers: cloudHeaders(cloudRoomId, { 'Content-Type': 'application/json' }),
         body: JSON.stringify({ command }),
-        signal: AbortSignal.timeout(90000)
+        signal: AbortSignal.timeout(timeoutMs)
       }
     )
     if (!res.ok) return null

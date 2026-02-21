@@ -24,6 +24,28 @@ When reporting, include:
 - Affected version(s) and environment details
 - Any suggested mitigation (if known)
 
+## Anti-Scam and Impersonation
+
+If you find scam campaigns, impersonation, or fake token promotions using Quoroom branding, report privately:
+
+- hello@quoroom.ai
+
+When reporting, include:
+
+- Links to websites, repos, social profiles, or token pages
+- Screenshots and timestamps
+- Wallet addresses, contract addresses, and chain/network details (if relevant)
+
+### Official Sources
+
+Only trust:
+
+- `https://quoroom.ai`
+- `https://app.quoroom.ai`
+- `https://github.com/quoroom-ai`
+
+Quoroom will never ask for your seed phrase or private key.
+
 ## Disclosure Timeline
 
 Our target response and disclosure expectations:

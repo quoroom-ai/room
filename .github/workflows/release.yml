@@ -664,8 +664,17 @@ jobs:
       - name: Publish to npm
         if: "!contains(github.ref_name, '-test')"
         run: |
+          set -euo pipefail
+          VERSION="${{ steps.version.outputs.version }}"
           npm ci
+          npm version "${VERSION}" --no-git-tag-version --allow-same-version
           npm run build:mcp
+
+          if npm view "quoroom@${VERSION}" version >/dev/null 2>&1; then
+            echo "::warning::quoroom@${VERSION} is already published on npm; skipping publish."
+            exit 0
+          fi
+
           npm publish --access public
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}

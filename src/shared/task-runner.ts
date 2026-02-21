@@ -2,7 +2,8 @@ import { join } from 'path'
 import { writeFileSync, mkdirSync, existsSync } from 'fs'
 import { executeClaudeCode } from './claude-code'
 import type { ConsoleLogCallback, ExecutionOptions, ExecutionResult } from './claude-code'
-import { executeAgent } from './agent-executor'
+import { executeAgent, executeOllamaOnStation } from './agent-executor'
+import { getRoomCloudId, listCloudStations } from './cloud-sync'
 import * as queries from './db-queries'
 import { DEFAULTS } from './constants'
 import { shouldDistill, distillLearnedContext } from './learned-context'
@@ -197,44 +198,98 @@ export async function executeTask(
     return { success: false, output: '', errorMessage: `Task ${taskId} is ${task.status}, not active`, durationMs: 0 }
   }
 
-  // Wait for a concurrency slot before spawning a Claude process
+  const startTime = Date.now()
+
+  // ─── Resolve worker model EARLY to decide execution path ──────
+  // worker.model > room.workerModel > 'claude' (default)
+  let systemPrompt: string | undefined
+  let model: string | undefined
+  try {
+    if (task.workerId) {
+      const worker = queries.getWorker(db, task.workerId)
+      if (worker) {
+        systemPrompt = worker.systemPrompt
+        model = worker.model ?? undefined
+      }
+    }
+    if (!systemPrompt) {
+      const defaultWorker = queries.getDefaultWorker(db)
+      if (defaultWorker) {
+        systemPrompt = defaultWorker.systemPrompt
+        if (!model) model = defaultWorker.model ?? undefined
+      }
+    }
+    // Fall back to room-level workerModel if worker has no explicit model
+    if (!model && task.roomId) {
+      const room = queries.getRoom(db, task.roomId)
+      if (room?.workerModel && room.workerModel !== 'claude') {
+        model = room.workerModel
+      }
+    }
+  } catch (err) {
+    console.warn('Non-fatal: worker resolution failed:', err)
+  }
+
+  // ─── Station path: Ollama in a room → bypass local concurrency limiter ──────
+  // Station tasks are remote API calls, not local processes — no slot needed.
+  if (model?.startsWith('ollama:') && task.roomId) {
+    runningTasks.add(taskId)
+    const run = queries.createTaskRun(db, taskId)
+    try {
+      const cloudRoomId = getRoomCloudId(task.roomId)
+      const stations = await listCloudStations(cloudRoomId)
+      const activeStations = stations.filter(s => s.status === 'active')
+
+      if (activeStations.length === 0) {
+        const errorMsg = 'No active station available. Ollama workers require a station. Rent one with quoroom_station_create (minimum tier: small).'
+        queries.completeTaskRun(db, run.id, '', undefined, errorMsg)
+        onFailed?.(task, errorMsg)
+        return { success: false, output: '', errorMessage: errorMsg, durationMs: Date.now() - startTime }
+      }
+
+      // Round-robin: distribute across active stations
+      const station = activeStations[run.id % activeStations.length]
+
+      // Augment prompt with learned context + memory
+      let augmentedPrompt = task.prompt
+      try {
+        if (task.learnedContext) {
+          augmentedPrompt = `## Approach (learned from previous runs):\n${task.learnedContext}\n\n---\n\n${augmentedPrompt}`
+        }
+      } catch (err) { console.warn('Non-fatal: learned context injection failed:', err) }
+      try {
+        const memoryContext = queries.getTaskMemoryContext(db, taskId)
+        if (memoryContext) {
+          augmentedPrompt = `${memoryContext}\n\n---\n\n${augmentedPrompt}`
+        }
+      } catch (err) { console.warn('Non-fatal: memory injection failed:', err) }
+
+      const timeoutMs = task.timeoutMinutes != null ? task.timeoutMinutes * 60 * 1000 : undefined
+      const agentResult = await executeOllamaOnStation(cloudRoomId, station.id, {
+        model,
+        prompt: augmentedPrompt,
+        systemPrompt,
+        timeoutMs,
+      })
+      const result = ollamaResultToExecutionResult(agentResult)
+      return finishRun(db, run.id, taskId, task, result, resultsDir, onComplete, onFailed)
+    } catch (err) {
+      const errorMsg = err instanceof Error ? err.message : String(err)
+      queries.completeTaskRun(db, run.id, '', undefined, errorMsg)
+      onFailed?.(task, errorMsg)
+      return { success: false, output: '', errorMessage: errorMsg, durationMs: Date.now() - startTime }
+    } finally {
+      runningTasks.delete(taskId)
+    }
+  }
+
+  // ─── Local path: Claude CLI or standalone Ollama → use concurrency slot ──────
   await acquireSlot(getMaxConcurrentTasks(db, task.roomId))
 
   runningTasks.add(taskId)
-  const startTime = Date.now()
   const run = queries.createTaskRun(db, taskId)
 
   try {
-    // Resolve worker system prompt and model:
-    // worker.model > room.workerModel > 'claude' (default)
-    let systemPrompt: string | undefined
-    let model: string | undefined
-    try {
-      if (task.workerId) {
-        const worker = queries.getWorker(db, task.workerId)
-        if (worker) {
-          systemPrompt = worker.systemPrompt
-          model = worker.model ?? undefined
-        }
-      }
-      if (!systemPrompt) {
-        const defaultWorker = queries.getDefaultWorker(db)
-        if (defaultWorker) {
-          systemPrompt = defaultWorker.systemPrompt
-          if (!model) model = defaultWorker.model ?? undefined
-        }
-      }
-      // Fall back to room-level workerModel if worker has no explicit model
-      if (!model && task.roomId) {
-        const room = queries.getRoom(db, task.roomId)
-        if (room?.workerModel && room.workerModel !== 'claude') {
-          model = room.workerModel
-        }
-      }
-    } catch (err) {
-      console.warn('Non-fatal: worker resolution failed:', err)
-    }
-
     // Determine session resume ID
     let resumeSessionId: string | undefined
     if (task.sessionContinuity && task.sessionId) {
@@ -289,7 +344,7 @@ export async function executeTask(
     const consoleLog = createConsoleLogBuffer(db, run.id)
     let lastProgressUpdate = 0
 
-    // Ollama models: route through executeAgent() — no tool use, no session continuity
+    // Local Ollama (standalone tasks without a room — room tasks use stations above)
     if (model?.startsWith('ollama:')) {
       const agentResult = await executeAgent({
         model,

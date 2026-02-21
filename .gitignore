@@ -23,3 +23,16 @@ PLAN.md
 e2e/report/
 e2e/results/
 e2e/screenshots/
+test-results/
+coverage/
+
+# Private QA / tests (not published)
+e2e/
+src/**/__tests__/
+**/*.test.ts
+**/*.spec.ts
+playwright.config.ts
+vitest.config.ts
+
+# Internal ops docs
+docs/RELEASE_RUNBOOK.md

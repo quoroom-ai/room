@@ -28,6 +28,23 @@ Queen, Workers, Quorum. Goals, skills, self-modification, wallet, stations — s
 
 ---
 
+## Trademark and Anti-Scam Notice
+
+- Code in this repository is MIT-licensed, but **Quoroom name/logo/branding are not licensed** under MIT.
+- Quoroom does **not** endorse third-party tokens using our name.
+- Quoroom will never ask for wallet seed phrases or private keys.
+
+Official channels only:
+
+- `https://quoroom.ai`
+- `https://app.quoroom.ai`
+- `https://github.com/quoroom-ai`
+
+If you see impersonation or scam activity, report it to `hello@quoroom.ai`.
+See `TRADEMARKS.md` for full trademark usage terms.
+
+---
+
 ## Why Quoroom?
 
 Run a swarm of AI agents that pursue goals autonomously. The Queen strategizes, a swarm of Workers execute, and the Quorum votes on decisions. Agents learn new skills, modify their own behavior, manage a crypto wallet, and rent cloud stations for more compute — all governed by democratic consensus.

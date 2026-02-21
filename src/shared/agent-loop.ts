@@ -8,7 +8,7 @@ import { loadSkillsForAgent } from './skills'
 import { checkExpiredDecisions } from './quorum'
 import { getRoomStatus } from './room'
 import { detectRateLimit, sleep } from './rate-limit'
-import { fetchPublicRooms, type PublicRoom } from './cloud-sync'
+import { fetchPublicRooms, getRoomCloudId, listCloudStations, type PublicRoom, type CloudStation } from './cloud-sync'
 
 interface LoopState {
   running: boolean
@@ -227,6 +227,15 @@ export async function runCycle(
   const roomTasks = queries.listTasks(db, roomId, 'active').slice(0, 10)
   const unreadMessages = queries.listRoomMessages(db, roomId, 'unread').slice(0, 5)
 
+  // Fetch room's cloud stations (fail silently)
+  let cloudStations: CloudStation[] = []
+  try {
+    const cloudRoomId = getRoomCloudId(roomId)
+    cloudStations = await listCloudStations(cloudRoomId)
+  } catch {
+    // Cloud unavailability never affects local operation
+  }
+
   // Cross-room learning — fetch other public rooms from cloud (fail silently)
   let publicRooms: PublicRoom[] = []
   try {
@@ -295,6 +304,16 @@ export async function runCycle(
     contextParts.push(`## Unread Messages\n${unreadMessages.map(m =>
       `- #${m.id} from ${m.fromRoomId ?? 'unknown'}: ${m.subject}`
     ).join('\n')}`)
+  }
+
+  // Station awareness — so queen knows available compute resources
+  if (cloudStations.length > 0) {
+    const activeCount = cloudStations.filter(s => s.status === 'active').length
+    contextParts.push(`## Stations (${activeCount} active)\n${cloudStations.map(s =>
+      `- #${s.id} "${s.stationName}" (${s.tier}) — ${s.status} — $${s.monthlyCost}/mo`
+    ).join('\n')}`)
+  } else if (status.room.workerModel?.startsWith('ollama:')) {
+    contextParts.push(`## Stations\n⚠ NO ACTIVE STATIONS. Worker model is ${status.room.workerModel} — workers CANNOT run without a station.\nRent a station with quoroom_station_create (minimum tier: small at $15/mo) as your FIRST action before creating any tasks or workers.`)
   }
 
   if (publicRooms.length > 0) {

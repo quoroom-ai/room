@@ -44,7 +44,7 @@ CREATE TABLE IF NOT EXISTS rooms (
     visibility TEXT NOT NULL DEFAULT 'private',
     autonomy_mode TEXT NOT NULL DEFAULT 'auto',
     max_concurrent_tasks INTEGER NOT NULL DEFAULT 3,
-    worker_model TEXT NOT NULL DEFAULT 'claude',
+    worker_model TEXT NOT NULL DEFAULT 'ollama:llama3',
     queen_cycle_gap_ms INTEGER NOT NULL DEFAULT 1800000,
     queen_max_turns INTEGER NOT NULL DEFAULT 3,
     queen_quiet_from TEXT,
