@@ -1,5 +1,6 @@
 import type { Router } from '../router'
 import * as queries from '../../shared/db-queries'
+import { revertModification } from '../../shared/self-mod'
 
 export function registerSelfModRoutes(router: Router): void {
   router.get('/api/rooms/:roomId/self-mod', (ctx) => {
@@ -19,7 +20,7 @@ export function registerSelfModRoutes(router: Router): void {
 
   router.post('/api/self-mod/audit/:id/revert', (ctx) => {
     const id = Number(ctx.params.id)
-    queries.markReverted(ctx.db, id)
+    revertModification(ctx.db, id)
     return { data: { ok: true } }
   })
 }

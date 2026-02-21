@@ -470,7 +470,7 @@ export function SettingsPanel({ advancedMode, onAdvancedModeChange, installPromp
                     a.click()
                     document.body.removeChild(a)
                   }}
-                  className="px-3 py-1 bg-interactive text-white rounded-lg hover:bg-interactive-hover transition-colors"
+                  className="px-3 py-1 bg-interactive text-text-invert rounded-lg hover:bg-interactive-hover transition-colors"
                 >
                   Download
                 </button>

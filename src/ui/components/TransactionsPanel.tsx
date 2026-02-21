@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { usePolling } from '../hooks/usePolling'
 import { api } from '../lib/client'
 import { formatRelativeTime } from '../utils/time'
+import { CopyAddressButton } from './CopyAddressButton'
 import type { WalletTransaction, RevenueSummary, Wallet, OnChainBalance } from '@shared/types'
 
 const TYPE_COLORS: Record<string, string> = {
@@ -60,7 +61,7 @@ export function TransactionsPanel({ roomId }: TransactionsPanelProps): React.JSX
   )
 
   const { data: transactions } = usePolling<WalletTransaction[]>(
-    () => roomId ? api.wallet.transactions(roomId).catch(() => []) : Promise.resolve([]),
+    () => roomId && wallet ? api.wallet.transactions(roomId).catch(() => []) : Promise.resolve([]),
     10000
   )
 
@@ -70,7 +71,7 @@ export function TransactionsPanel({ roomId }: TransactionsPanelProps): React.JSX
   )
 
   const { data: onChainBalance } = usePolling<OnChainBalance | null>(
-    () => roomId ? api.wallet.balance(roomId).catch(() => null) : Promise.resolve(null),
+    () => roomId && wallet ? api.wallet.balance(roomId).catch(() => null) : Promise.resolve(null),
     30000
   )
 
@@ -112,7 +113,10 @@ export function TransactionsPanel({ roomId }: TransactionsPanelProps): React.JSX
           {wallet && (
             <div className="bg-surface-secondary rounded-lg p-3 shadow-sm text-sm">
               <div className="text-text-muted">Wallet</div>
-              <div className="font-mono text-xs text-text-secondary truncate">{wallet.address}</div>
+              <div className="flex items-center gap-1">
+                <div className="font-mono text-xs text-text-secondary truncate">{wallet.address}</div>
+                <CopyAddressButton address={wallet.address} />
+              </div>
               <div className="text-xs text-text-muted mt-0.5">EVM</div>
             </div>
           )}

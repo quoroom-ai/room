@@ -1,6 +1,7 @@
 import { useState, useMemo, useCallback, useRef } from 'react'
 import { usePolling } from '../hooks/usePolling'
 import { useContainerWidth } from '../hooks/useContainerWidth'
+import { useSwarmEvents, type SwarmEventKind } from '../hooks/useSwarmEvents'
 import { api } from '../lib/client'
 import type { Room, Worker, Station, RevenueSummary, OnChainBalance } from '@shared/types'
 
@@ -105,6 +106,73 @@ function stationColor(status: string): string {
     case 'pending': return 'var(--status-warning-bg)'
     case 'error': return 'var(--status-error-bg)'
     default: return 'var(--surface-tertiary)'
+  }
+}
+
+// ─── Event bubble visuals ─────────────────────────────────
+
+function eventIcon(kind: SwarmEventKind): React.JSX.Element {
+  const s = 14 // icon viewBox size
+  const common = { width: s, height: s, viewBox: `0 0 ${s} ${s}`, xmlns: 'http://www.w3.org/2000/svg' }
+  switch (kind) {
+    case 'worker_thinking':
+      return <svg {...common}><path d="M7 2C4.2 2 2 4 2 6.4c0 1.4.7 2.6 1.8 3.4L3.5 12l2-1.2c.5.1 1 .2 1.5.2 2.8 0 5-2 5-4.4S9.8 2 7 2z" fill="var(--status-info)" fillOpacity="0.7"/></svg>
+    case 'worker_acting':
+      return <svg {...common}><path d="M8.5 1L4 7.5h3.5L6 13l5.5-7H8L8.5 1z" fill="var(--status-success)" fillOpacity="0.7"/></svg>
+    case 'worker_voting':
+      return <svg {...common}><rect x="2" y="1.5" width="10" height="11" rx="1.5" fill="none" stroke="var(--interactive)" strokeWidth="1.2"/><path d="M5 7l1.5 1.5L9 5.5" stroke="var(--interactive)" strokeWidth="1.2" fill="none" strokeLinecap="round" strokeLinejoin="round"/></svg>
+    case 'worker_rate_limited':
+      return <svg {...common}><circle cx="7" cy="7" r="5" fill="none" stroke="var(--status-warning)" strokeWidth="1.2"/><path d="M7 4v3.5l2.5 1.5" stroke="var(--status-warning)" strokeWidth="1.2" strokeLinecap="round"/></svg>
+    case 'worker_blocked':
+      return <svg {...common}><circle cx="7" cy="7" r="5" fill="none" stroke="var(--status-error)" strokeWidth="1.2"/><path d="M5 5l4 4M9 5l-4 4" stroke="var(--status-error)" strokeWidth="1.2" strokeLinecap="round"/></svg>
+    case 'vote_cast':
+      return <svg {...common}><rect x="2" y="1.5" width="10" height="11" rx="1.5" fill="none" stroke="var(--interactive)" strokeWidth="1.2"/><path d="M5 7l1.5 1.5L9 5.5" stroke="var(--interactive)" strokeWidth="1.2" fill="none" strokeLinecap="round" strokeLinejoin="round"/></svg>
+    case 'decision_approved':
+      return <svg {...common}><circle cx="7" cy="7" r="5" fill="var(--status-success)" fillOpacity="0.2" stroke="var(--status-success)" strokeWidth="1.2"/><path d="M4.5 7l2 2 3.5-4" stroke="var(--status-success)" strokeWidth="1.3" fill="none" strokeLinecap="round" strokeLinejoin="round"/></svg>
+    case 'decision_rejected':
+      return <svg {...common}><circle cx="7" cy="7" r="5" fill="var(--status-error)" fillOpacity="0.2" stroke="var(--status-error)" strokeWidth="1.2"/><path d="M5 5l4 4M9 5l-4 4" stroke="var(--status-error)" strokeWidth="1.3" strokeLinecap="round"/></svg>
+    case 'goal_progress':
+      return <svg {...common}><circle cx="7" cy="7" r="5" fill="none" stroke="var(--status-info)" strokeWidth="1.2"/><circle cx="7" cy="7" r="2" fill="var(--status-info)" fillOpacity="0.6"/></svg>
+    case 'goal_completed':
+      return <svg {...common}><circle cx="7" cy="7" r="5" fill="var(--status-success)" fillOpacity="0.2" stroke="var(--status-success)" strokeWidth="1.2"/><circle cx="7" cy="7" r="2" fill="var(--status-success)"/></svg>
+    case 'task_started':
+      return <svg {...common}><path d="M4.5 2.5v9l7-4.5z" fill="var(--status-info)" fillOpacity="0.7"/></svg>
+    case 'task_completed':
+      return <svg {...common}><path d="M7 1l1.5 3.5H12l-3 2.5 1 3.5L7 8.5 3.5 10.5l1-3.5-3-2.5h3.5z" fill="var(--status-success)" fillOpacity="0.6"/></svg>
+    case 'task_failed':
+      return <svg {...common}><path d="M7 1.5L1.5 12h11L7 1.5z" fill="none" stroke="var(--status-error)" strokeWidth="1.2" strokeLinejoin="round"/><path d="M7 5v3M7 9.5v1" stroke="var(--status-error)" strokeWidth="1.2" strokeLinecap="round"/></svg>
+    case 'money_received':
+      return <svg {...common}><circle cx="7" cy="7" r="5" fill="var(--status-success)" fillOpacity="0.15" stroke="var(--status-success)" strokeWidth="1.2"/><path d="M7 4v6M5 7l2 3 2-3" stroke="var(--status-success)" strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round"/></svg>
+    case 'money_sent':
+      return <svg {...common}><circle cx="7" cy="7" r="5" fill="var(--status-error)" fillOpacity="0.15" stroke="var(--status-error)" strokeWidth="1.2"/><path d="M7 10V4M5 7l2-3 2 3" stroke="var(--status-error)" strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round"/></svg>
+    case 'escalation':
+      return <svg {...common}><path d="M7 1.5L1.5 12h11L7 1.5z" fill="var(--status-warning)" fillOpacity="0.2" stroke="var(--status-warning)" strokeWidth="1.2" strokeLinejoin="round"/><path d="M7 5v3M7 9.5v1" stroke="var(--status-warning)" strokeWidth="1.2" strokeLinecap="round"/></svg>
+    case 'skill_created':
+      return <svg {...common}><path d="M7 1C4.5 1 2.5 3 2.5 5.5c0 1.5.7 2.8 1.8 3.6V11.5h5.4V9.1c1.1-.8 1.8-2.1 1.8-3.6C11.5 3 9.5 1 7 1z" fill="var(--interactive)" fillOpacity="0.2" stroke="var(--interactive)" strokeWidth="1"/><path d="M5 12.5h4" stroke="var(--interactive)" strokeWidth="1" strokeLinecap="round"/></svg>
+    case 'station_created':
+    case 'station_started':
+      return <svg {...common}><rect x="2" y="3" width="10" height="8" rx="1.5" fill="var(--status-success)" fillOpacity="0.15" stroke="var(--status-success)" strokeWidth="1.2"/><circle cx="5" cy="7" r="1" fill="var(--status-success)"/><path d="M8 5.5h2M8 7h2M8 8.5h2" stroke="var(--status-success)" strokeWidth="0.8" strokeLinecap="round"/></svg>
+    case 'station_stopped':
+      return <svg {...common}><rect x="2" y="3" width="10" height="8" rx="1.5" fill="var(--status-warning)" fillOpacity="0.15" stroke="var(--status-warning)" strokeWidth="1.2"/><path d="M5.5 5.5v3M8.5 5.5v3" stroke="var(--status-warning)" strokeWidth="1.3" strokeLinecap="round"/></svg>
+    default:
+      return <svg {...common}><circle cx="7" cy="7" r="4" fill="var(--text-muted)" fillOpacity="0.3"/></svg>
+  }
+}
+
+function eventBgColor(kind: SwarmEventKind): string {
+  switch (kind) {
+    case 'worker_thinking': case 'goal_progress': case 'task_started': case 'station_created':
+      return 'var(--status-info-bg)'
+    case 'worker_acting': case 'decision_approved': case 'goal_completed': case 'task_completed': case 'money_received': case 'station_started':
+      return 'var(--status-success-bg)'
+    case 'worker_voting': case 'vote_cast': case 'skill_created':
+      return 'var(--interactive-bg)'
+    case 'worker_rate_limited': case 'escalation': case 'station_stopped':
+      return 'var(--status-warning-bg)'
+    case 'worker_blocked': case 'decision_rejected': case 'task_failed': case 'money_sent':
+      return 'var(--status-error-bg)'
+    default:
+      return 'var(--surface-tertiary)'
   }
 }
 
@@ -366,8 +434,13 @@ export function SwarmPanel({ rooms, queenRunning, onNavigateToRoom }: SwarmPanel
   const { data: balanceMap } = usePolling<Record<number, OnChainBalance>>(
     async () => {
       if (rooms.length === 0) return {}
+      const wallets = await Promise.all(
+        rooms.map(r => api.wallet.get(r.id).catch(() => null))
+      )
+      const roomsWithWallets = rooms.filter((_, i) => wallets[i] !== null)
+      if (roomsWithWallets.length === 0) return {}
       const entries = await Promise.all(
-        rooms.map(async r => {
+        roomsWithWallets.map(async r => {
           const bal = await api.wallet.balance(r.id).catch(() => null)
           return [r.id, bal] as const
         })
@@ -390,6 +463,8 @@ export function SwarmPanel({ rooms, queenRunning, onNavigateToRoom }: SwarmPanel
   const totalIncome = useMemo(() => Object.values(revenueMap ?? {}).reduce((s, r) => s + r.totalIncome, 0), [revenueMap])
   const totalExpenses = useMemo(() => Object.values(revenueMap ?? {}).reduce((s, r) => s + r.totalExpenses, 0), [revenueMap])
   const totalOnChainBalance = useMemo(() => Object.values(balanceMap ?? {}).reduce((s, b) => s + b.totalBalance, 0), [balanceMap])
+
+  const { events: swarmEvents, ripples: swarmRipples } = useSwarmEvents(rooms, allWorkers)
 
   const showSatellites = containerWidth >= 400
 
@@ -421,6 +496,23 @@ export function SwarmPanel({ rooms, queenRunning, onNavigateToRoom }: SwarmPanel
     if (positions.length === 0) return 200
     return Math.max(...positions.map(p => p.cy)) + margin + 30
   }, [positions, margin])
+
+  // Event bubble positioning
+  const roomPositionMap = useMemo(() => {
+    const map = new Map<number, { cx: number; cy: number }>()
+    for (const p of positions) map.set(p.room.id, { cx: p.cx, cy: p.cy })
+    return map
+  }, [positions])
+
+  const eventsByRoom = useMemo(() => {
+    const map = new Map<number, typeof swarmEvents>()
+    for (const e of swarmEvents) {
+      const list = map.get(e.roomId) ?? []
+      list.push(e)
+      map.set(e.roomId, list)
+    }
+    return map
+  }, [swarmEvents])
 
   const hoveredRoom = rooms.find(r => r.id === hoveredRoomId) ?? null
 
@@ -501,7 +593,7 @@ export function SwarmPanel({ rooms, queenRunning, onNavigateToRoom }: SwarmPanel
           <div className="relative">
             <button
               onClick={() => setShareOpen(!shareOpen)}
-              className="px-4 py-2 text-sm font-medium rounded-lg bg-interactive text-white hover:bg-interactive-hover transition-colors flex items-center gap-1.5 shadow-sm"
+              className="px-4 py-2 text-sm font-medium rounded-lg bg-interactive text-text-invert hover:bg-interactive-hover transition-colors flex items-center gap-1.5 shadow-sm"
             >
               <svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" className="shrink-0">
                 <path d="M4 8h8M8 4l4 4-4 4" strokeLinecap="round" strokeLinejoin="round"/>
@@ -564,7 +656,7 @@ export function SwarmPanel({ rooms, queenRunning, onNavigateToRoom }: SwarmPanel
 
             // Goal text wrapped into lines
             const goalText = room.goal || 'No objective set'
-            const goalLines = wrapText(goalText, 22).slice(0, 4) // max 4 lines
+            const goalLines = wrapText(goalText, 28).slice(0, 6) // max 6 lines
 
             // Life indicators
             const busyWorkers = workers.filter(w => w.agentState === 'thinking' || w.agentState === 'acting').length
@@ -706,6 +798,61 @@ export function SwarmPanel({ rooms, queenRunning, onNavigateToRoom }: SwarmPanel
                     </g>
                   )
                 })}
+              </g>
+            )
+          })}
+
+          {/* ─── Ripple effects ─── */}
+          {swarmRipples.map(r => {
+            const pos = roomPositionMap.get(r.roomId)
+            if (!pos) return null
+            return (
+              <circle
+                key={r.id}
+                cx={pos.cx}
+                cy={pos.cy}
+                r={80}
+                fill="none"
+                stroke={r.color}
+                className="hex-ripple"
+              />
+            )
+          })}
+
+          {/* ─── Event bubbles ─── */}
+          {swarmEvents.map(event => {
+            const pos = roomPositionMap.get(event.roomId)
+            if (!pos) return null
+            const siblings = eventsByRoom.get(event.roomId) ?? []
+            const stackIdx = siblings.indexOf(event)
+            const BUBBLE_W = 130
+            const BUBBLE_H = 24
+            const STACK_GAP = 30
+            const bx = pos.cx - BUBBLE_W / 2
+            const by = pos.cy - ROOM_R - 28 - stackIdx * STACK_GAP
+            return (
+              <g key={event.id} className="event-bubble">
+                <rect
+                  x={bx} y={by}
+                  width={BUBBLE_W} height={BUBBLE_H}
+                  rx={BUBBLE_H / 2}
+                  fill={eventBgColor(event.kind)}
+                  fillOpacity={0.7}
+                />
+                <foreignObject x={bx + 6} y={by + (BUBBLE_H - 14) / 2} width={14} height={14}>
+                  {eventIcon(event.kind)}
+                </foreignObject>
+                <text
+                  x={bx + 24}
+                  y={by + BUBBLE_H / 2 + 1}
+                  dominantBaseline="middle"
+                  fontSize="11"
+                  fontWeight="400"
+                  fill="var(--text-secondary)"
+                  style={{ pointerEvents: 'none' }}
+                >
+                  {event.label}
+                </text>
               </g>
             )
           })}

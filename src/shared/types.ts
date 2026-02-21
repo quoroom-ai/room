@@ -235,6 +235,7 @@ export interface QuorumDecision {
   result: string | null
   threshold: string
   timeoutAt: string | null
+  keeperVote: VoteValue | null
   createdAt: string
   resolvedAt: string | null
 }
@@ -300,6 +301,14 @@ export interface SelfModAuditEntry {
   reversible: boolean
   reverted: boolean
   createdAt: string
+}
+
+export interface SelfModSnapshot {
+  auditId: number
+  targetType: string
+  targetId: number | null
+  oldContent: string | null
+  newContent: string | null
 }
 
 // ─── Escalation Types ───────────────────────────────────────
@@ -416,4 +425,19 @@ export interface RevenueSummary {
   netProfit: number
   stationCosts: number
   transactionCount: number
+}
+
+export interface OnChainBalance {
+  totalBalance: number
+  byChain: Record<string, { usdc: number; usdt: number; total: number }>
+  address: string
+  fetchedAt: string
+}
+
+export interface CryptoPricing {
+  treasuryAddress: string
+  chains: string[]
+  tokens: string[]
+  multiplier: number
+  tiers: Array<{ tier: string; stripePrice: number; cryptoPrice: number }>
 }

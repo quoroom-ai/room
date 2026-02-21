@@ -234,6 +234,7 @@ CREATE TABLE IF NOT EXISTS quorum_decisions (
     result TEXT,
     threshold TEXT NOT NULL DEFAULT 'majority',
     timeout_at DATETIME,
+    keeper_vote TEXT,
     created_at DATETIME DEFAULT (datetime('now','localtime')),
     resolved_at DATETIME
 );
@@ -310,6 +311,16 @@ CREATE TABLE IF NOT EXISTS self_mod_audit (
     created_at DATETIME DEFAULT (datetime('now','localtime'))
 );
 CREATE INDEX IF NOT EXISTS idx_self_mod_audit_room ON self_mod_audit(room_id);
+
+-- Self-modification snapshots (for true revert of reversible edits)
+CREATE TABLE IF NOT EXISTS self_mod_snapshots (
+    audit_id INTEGER PRIMARY KEY REFERENCES self_mod_audit(id) ON DELETE CASCADE,
+    target_type TEXT NOT NULL,
+    target_id INTEGER,
+    old_content TEXT,
+    new_content TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_self_mod_snapshots_target ON self_mod_snapshots(target_type, target_id);
 
 -- Escalations
 CREATE TABLE IF NOT EXISTS escalations (

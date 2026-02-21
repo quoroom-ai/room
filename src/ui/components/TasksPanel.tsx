@@ -23,7 +23,7 @@ function FilterPill({
   colorClass?: string
 }): React.JSX.Element {
   const base = 'px-2.5 py-1.5 rounded-lg text-sm cursor-pointer transition-colors'
-  const activeStyle = colorClass ?? 'bg-surface-invert text-white'
+  const activeStyle = colorClass ?? 'bg-surface-invert text-text-invert'
   const inactiveStyle = 'bg-surface-tertiary text-text-muted hover:bg-surface-hover'
   return (
     <button
@@ -292,7 +292,7 @@ function CreateTaskForm({ workers, onCreated, roomId }: { workers: Worker[] | nu
   }
 
   return (
-    <div className="p-4 border-b-2 border-interactive bg-interactive-bg/50 space-y-2">
+    <div className="p-4 border-b-2 border-border-primary bg-surface-secondary space-y-2">
       <textarea
         value={prompt}
         onChange={(e) => { setPrompt(e.target.value); setCreateError(null) }}
@@ -316,7 +316,7 @@ function CreateTaskForm({ workers, onCreated, roomId }: { workers: Worker[] | nu
               onClick={() => setScheduleMode(mode)}
               className={`text-xs font-medium px-2.5 py-1.5 rounded-lg cursor-pointer transition-colors ${
                 scheduleMode === mode
-                  ? 'bg-surface-invert text-white'
+                  ? 'bg-surface-invert text-text-invert'
                   : 'bg-surface-tertiary text-text-muted hover:bg-surface-hover'
               }`}
             >
@@ -375,7 +375,7 @@ function CreateTaskForm({ workers, onCreated, roomId }: { workers: Worker[] | nu
         <button
           onClick={handleCreate}
           disabled={!prompt.trim()}
-          className="text-sm bg-interactive text-white px-4 py-2 rounded-lg hover:bg-interactive-hover disabled:opacity-50 disabled:cursor-not-allowed"
+          className="text-sm bg-interactive text-text-invert px-4 py-2 rounded-lg hover:bg-interactive-hover disabled:opacity-50 disabled:cursor-not-allowed"
         >
           Create Task
         </button>
@@ -395,7 +395,7 @@ export function TasksPanel({ roomId, autonomyMode }: { roomId?: number | null; a
   const [showCreateForm, setShowCreateForm] = useState(false)
   const { data: tasks, refresh, error: tasksError, isLoading } = usePolling(() => api.tasks.list(roomId ?? undefined), 10000)
   const { data: runningRuns } = usePolling(
-    async () => (await api.runs.list(20)).filter(r => r.status === 'running'),
+    () => api.runs.list(20, { status: 'running' }),
     5000
   )
   const { data: workers } = usePolling(() => api.workers.list(), 30000)

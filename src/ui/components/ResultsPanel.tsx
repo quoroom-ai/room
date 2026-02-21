@@ -141,7 +141,7 @@ export function ResultsPanel({ roomId, autonomyMode }: ResultsPanelProps): React
   const wide = containerWidth >= 600
   const [expandedId, setExpandedId] = useState<number | null>(null)
   const [taskNames, setTaskNames] = useState<Record<number, string>>({})
-  const { data: runs, error, isLoading } = usePolling(() => api.runs.list(30), 5000)
+  const { data: runs, error, isLoading } = usePolling(() => api.runs.list(30, { includeResult: true }), 5000)
 
   useEffect(() => {
     api.tasks.list().then((tasks: Task[]) => {

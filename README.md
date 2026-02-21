@@ -37,7 +37,6 @@ Queen, Workers, Quorum. Goals, skills, self-modification, wallet, stations — s
 Official channels only:
 
 - `https://quoroom.ai`
-- `https://app.quoroom.ai`
 - `https://github.com/quoroom-ai`
 
 If you see impersonation or scam activity, report it to `hello@quoroom.ai`.
@@ -91,7 +90,7 @@ Quoroom is an open research project exploring autonomous agent collectives. Each
 
 **Memory** — Entities, observations, and relations with semantic vector search (384-dim embeddings). Knowledge persists across sessions.
 
-**Wallet** — EVM wallet for USDC on Base L2. Encrypted keys (AES-256-GCM). Agents can send and receive funds.
+**Wallet** — EVM wallet with multi-chain support. USDC and USDT on Base, Ethereum, Arbitrum, Optimism, and Polygon. Encrypted keys (AES-256-GCM). Same address works on all chains — balance is aggregated across all networks.
 
 **On-Chain Identity** — ERC-8004 agent identity on Base. Rooms register as on-chain agents with discoverable metadata. Reputation-ready.
 
@@ -107,7 +106,7 @@ Quoroom is an open research project exploring autonomous agent collectives. Each
 
 **HTTP Server + REST API** — Full REST API with dual-token auth (agent + user) and WebSocket real-time events. Role-based access control per autonomy mode. Run `quoroom serve` to start.
 
-**Dashboard** — React SPA at [app.quoroom.ai](https://app.quoroom.ai). Manage rooms, agents, goals, memory, wallet — all from the browser. The UI loads from CDN but connects to your local server — all data stays on your machine.
+**Dashboard** — React SPA served directly by your local Quoroom server at `http://localhost:3700` (or your configured port). Manage rooms, agents, goals, memory, wallet — all from the browser, with local-first data storage.
 
 **Auto-updates** — The server polls GitHub for new releases every 4 hours. When a new version is available, the dashboard shows a notification popup and a download row in Settings. One click downloads the installer for your platform directly — no browser redirect.
 
@@ -130,7 +129,7 @@ Quoroom is an open research project exploring autonomous agent collectives. Each
 │                                                  │
 │  ┌────────┐  ┌──────────┐  ┌────────────────┐  │
 │  │ Wallet │  │ Stations │  │ Task Scheduler │  │
-│  │(Base L2)│  │(Fly/E2B) │  │ (cron/once)    │  │
+│  │(EVM)   │  │(Fly/E2B) │  │ (cron/once)    │  │
 │  └────────┘  └──────────┘  └────────────────┘  │
 │                                                  │
 │  ┌──────────────────────────────────────────┐   │
@@ -148,7 +147,7 @@ Quoroom is an open research project exploring autonomous agent collectives. Each
         │                         │
  ┌──────┴──────┐         ┌───────┴───────┐
  │  Dashboard  │         │  Cloud Sync   │
- │ app.quoroom │         │ quoroom.ai    │
+ │ localhost   │         │ quoroom.ai    │
  └─────────────┘         │  /rooms page  │
                           └───────────────┘
 ```
@@ -190,7 +189,7 @@ quoroom serve
 
 On first run, `quoroom serve` automatically registers the Quoroom MCP server in every AI coding tool you have installed (Claude Code, Claude Desktop, Cursor, Windsurf). Just **restart your AI client once** — after that, all `mcp__quoroom__*` tools are available automatically in every session.
 
-Open **[app.quoroom.ai](https://app.quoroom.ai)** — the dashboard loads from CDN but all API calls go to `localhost`. Your data never leaves your machine.
+Open **http://localhost:3700** (or the port shown in your terminal). The dashboard and API run locally, and your room data stays on your machine by default.
 
 > **MCP-only mode** (no HTTP server): `quoroom mcp` starts just the stdio MCP transport, useful for scripting or testing. For normal use, `quoroom serve` is all you need.
 
@@ -300,10 +299,10 @@ The room engine exposes an MCP server over stdio. All tools use the `quoroom_` p
 
 | Tool | Description |
 |------|-------------|
-| `quoroom_wallet_create` | Create an EVM wallet (USDC on Base) |
+| `quoroom_wallet_create` | Create an EVM wallet (multi-chain) |
 | `quoroom_wallet_address` | Get wallet address |
-| `quoroom_wallet_balance` | Check USDC balance |
-| `quoroom_wallet_send` | Send USDC |
+| `quoroom_wallet_balance` | Check on-chain balance (USDC/USDT, all chains) |
+| `quoroom_wallet_send` | Send USDC or USDT on any supported chain |
 | `quoroom_wallet_history` | View transaction history |
 
 ### Identity
@@ -386,7 +385,7 @@ room/
 │       ├── quorum.ts           # Voting & decisions
 │       ├── goals.ts            # Goal decomposition
 │       ├── skills.ts           # Skill management
-│       ├── wallet.ts           # EVM wallet (Base L2, USDC)
+│       ├── wallet.ts           # EVM wallet (multi-chain, USDC/USDT)
 │       ├── identity.ts         # ERC-8004 on-chain identity
 │       ├── station.ts          # Cloud provisioning
 │       ├── task-runner.ts      # Task execution engine

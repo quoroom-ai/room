@@ -24,21 +24,30 @@ export function registerSelfModTools(server: McpServer): void {
     async ({ roomId, workerId, skillId, filePath, newContent, reason }) => {
       const db = getMcpDatabase()
       try {
+        const worker = queries.getWorker(db, workerId)
+        if (!worker || worker.roomId !== roomId) {
+          return { content: [{ type: 'text' as const, text: `Worker ${workerId} not found in room ${roomId}.` }], isError: true }
+        }
+
         // If editing a skill, update it via the skills system
         if (skillId != null) {
           const skill = queries.getSkill(db, skillId)
           if (!skill) {
             return { content: [{ type: 'text' as const, text: `Skill ${skillId} not found.` }], isError: true }
           }
+          if (skill.roomId !== roomId) {
+            return { content: [{ type: 'text' as const, text: `Skill ${skillId} does not belong to room ${roomId}.` }], isError: true }
+          }
           const oldHash = simpleHash(skill.content)
           const newHash = simpleHash(newContent)
+          const entry = performModification(db, roomId, workerId, filePath, oldHash, newHash, reason)
+          queries.saveSelfModSnapshot(db, entry.id, 'skill', skillId, skill.content, newContent)
           queries.updateSkill(db, skillId, { content: newContent })
           incrementSkillVersion(db, skillId)
-          performModification(db, roomId, workerId, filePath, oldHash, newHash, reason)
           return { content: [{ type: 'text' as const, text: `Skill "${skill.name}" updated (v${skill.version + 1}).` }] }
         }
 
-        // General file modification audit
+        // General file modification audit (no file write is performed here).
         performModification(db, roomId, workerId, filePath, null, simpleHash(newContent), reason)
         return { content: [{ type: 'text' as const, text: `Modification logged: ${reason}` }] }
       } catch (e) {

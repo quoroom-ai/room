@@ -3,6 +3,7 @@ import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
 import { getMcpDatabase } from '../db'
 import * as queries from '../../shared/db-queries'
 import { createAgentSkill, incrementSkillVersion } from '../../shared/skills'
+import { performModification } from '../../shared/self-mod'
 
 export function registerSkillTools(server: McpServer): void {
   server.registerTool(
@@ -50,25 +51,62 @@ export function registerSkillTools(server: McpServer): void {
         + 'RESPONSE STYLE: Confirm briefly in 1 sentence.',
       inputSchema: {
         skillId: z.number().describe('The skill ID'),
+        roomId: z.number().optional().describe('Optional room scope guard (recommended for queen flows)'),
+        workerId: z.number().optional().describe('Worker performing this change (for self-mod rate limiting/audit attribution)'),
+        filePath: z.string().optional().describe('Optional skill file path label for audit trail'),
+        reason: z.string().max(1000).optional().describe('Optional reason for audit trail'),
         content: z.string().min(1).max(50000).optional().describe('New skill content'),
         name: z.string().min(1).max(200).optional().describe('New skill name'),
         activationContext: z.array(z.string()).optional().describe('New activation keywords')
       }
     },
-    async ({ skillId, content, name, activationContext }) => {
+    async ({ skillId, roomId, workerId, filePath, reason, content, name, activationContext }) => {
       const db = getMcpDatabase()
       try {
         const skill = queries.getSkill(db, skillId)
         if (!skill) {
           return { content: [{ type: 'text' as const, text: `Skill ${skillId} not found.` }], isError: true }
         }
+        if (roomId != null && skill.roomId !== roomId) {
+          return { content: [{ type: 'text' as const, text: `Skill ${skillId} does not belong to room ${roomId}.` }], isError: true }
+        }
+        if (workerId != null) {
+          const worker = queries.getWorker(db, workerId)
+          const effectiveRoomId = roomId ?? skill.roomId
+          if (!worker || (effectiveRoomId != null && worker.roomId !== effectiveRoomId)) {
+            return {
+              content: [{
+                type: 'text' as const,
+                text: `Worker ${workerId} is not allowed to edit skill ${skillId} in this room.`
+              }],
+              isError: true
+            }
+          }
+        }
+
         const updates: Record<string, unknown> = {}
         if (content != null) updates.content = content
         if (name != null) updates.name = name
         if (activationContext != null) updates.activationContext = activationContext
         if (Object.keys(updates).length > 0) {
+          const oldHash = content != null ? simpleHash(skill.content) : null
+          const newHash = content != null ? simpleHash(content) : null
+          const auditFilePath = filePath ?? `/skills/${skillId}`
+          const auditReason = reason ?? 'Skill updated via quoroom_edit_skill'
+          const audit = performModification(
+            db,
+            skill.roomId ?? roomId ?? null,
+            workerId ?? null,
+            auditFilePath,
+            oldHash,
+            newHash,
+            auditReason
+          )
           queries.updateSkill(db, skillId, updates)
           incrementSkillVersion(db, skillId)
+          if (content != null) {
+            queries.saveSelfModSnapshot(db, audit.id, 'skill', skillId, skill.content, content)
+          }
         }
         return { content: [{ type: 'text' as const, text: `Skill "${skill.name}" updated (v${skill.version + 1}).` }] }
       } catch (e) {
@@ -163,4 +201,14 @@ export function registerSkillTools(server: McpServer): void {
       return { content: [{ type: 'text' as const, text: `Skill "${skill.name}" deleted.` }] }
     }
   )
+}
+
+function simpleHash(text: string): string {
+  let hash = 0
+  for (let i = 0; i < text.length; i++) {
+    const char = text.charCodeAt(i)
+    hash = ((hash << 5) - hash) + char
+    hash = hash & hash // Convert to 32-bit int
+  }
+  return Math.abs(hash).toString(16)
 }

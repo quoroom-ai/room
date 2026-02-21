@@ -8,7 +8,7 @@ import type { Escalation, Worker, RoomMessage } from '@shared/types'
 
 const STATUS_COLORS: Record<string, string> = {
   pending: 'bg-status-warning-bg border-amber-200',
-  in_progress: 'bg-interactive-bg border-blue-200',
+  in_progress: 'bg-interactive-bg border-interactive',
   resolved: 'bg-surface-tertiary border-transparent',
 }
 
@@ -154,7 +154,7 @@ export function MessagesPanel({ roomId, autonomyMode }: MessagesPanelProps): Rea
 
       {/* Create message form (semi-mode only) */}
       {semi && showCreateForm && roomId && (
-        <div className="p-4 border-b-2 border-blue-300 bg-interactive-bg/50 space-y-2">
+        <div className="p-4 border-b-2 border-border-primary bg-surface-secondary space-y-2">
           <div className="flex gap-2">
             <Select
               value={String(fromAgentId)}
@@ -183,7 +183,7 @@ export function MessagesPanel({ roomId, autonomyMode }: MessagesPanelProps): Rea
             onKeyDown={(e) => { if (e.key === 'Enter' && e.metaKey) { e.preventDefault(); handleCreateMessage() } }}
             rows={3}
             placeholder="Message body..."
-            className="w-full px-2.5 py-1.5 text-sm border border-border-primary rounded-lg focus:outline-none focus:border-gray-500 bg-surface-primary resize-y"
+            className="w-full px-2.5 py-1.5 text-sm border border-border-primary rounded-lg focus:outline-none focus:border-text-muted bg-surface-primary resize-y"
             autoFocus
           />
           <div className="flex items-center justify-between">
@@ -192,7 +192,7 @@ export function MessagesPanel({ roomId, autonomyMode }: MessagesPanelProps): Rea
             <button
               onClick={handleCreateMessage}
               disabled={fromAgentId === '' || !messageBody.trim()}
-              className="text-sm bg-interactive text-white px-4 py-2 rounded-lg hover:bg-interactive-hover disabled:opacity-50 disabled:cursor-not-allowed"
+              className="text-sm bg-interactive text-text-invert px-4 py-2 rounded-lg hover:bg-interactive-hover disabled:opacity-50 disabled:cursor-not-allowed"
             >
               Send
             </button>
@@ -243,7 +243,7 @@ export function MessagesPanel({ roomId, autonomyMode }: MessagesPanelProps): Rea
                   key={msg.id}
                   className={`rounded-lg p-3 border shadow-sm ${
                     msg.status === 'unread'
-                      ? 'bg-interactive-bg border-blue-200'
+                      ? 'bg-interactive-bg border-interactive'
                       : msg.status === 'replied'
                       ? 'bg-surface-secondary border-border-primary'
                       : 'bg-surface-tertiary border-transparent'
@@ -356,13 +356,13 @@ function MessageBubble({
             onChange={(e) => onReplyTextChange(e.target.value)}
             onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); onReplySubmit() } }}
             placeholder="Type your reply..."
-            className="flex-1 px-2.5 py-1.5 text-sm border border-border-primary rounded-lg focus:outline-none focus:border-blue-400 bg-surface-primary"
+            className="flex-1 px-2.5 py-1.5 text-sm border border-border-primary rounded-lg focus:outline-none focus:border-interactive bg-surface-primary"
             autoFocus
           />
           <button
             onClick={onReplySubmit}
             disabled={!replyText.trim()}
-            className="text-sm bg-interactive text-white px-2.5 py-1.5 rounded-lg hover:bg-interactive-hover disabled:opacity-50"
+            className="text-sm bg-interactive text-text-invert px-2.5 py-1.5 rounded-lg hover:bg-interactive-hover disabled:opacity-50"
           >
             Send
           </button>

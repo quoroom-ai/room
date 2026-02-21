@@ -41,7 +41,6 @@ When reporting, include:
 Only trust:
 
 - `https://quoroom.ai`
-- `https://app.quoroom.ai`
 - `https://github.com/quoroom-ai`
 
 Quoroom will never ask for your seed phrase or private key.

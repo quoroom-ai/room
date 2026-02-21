@@ -35,7 +35,7 @@ Without separate written permission, you may not:
 Treat only the following as official:
 
 - Website: `https://quoroom.ai`
-- App: `https://app.quoroom.ai`
+- Local app UI: `http://localhost:3700` after `quoroom serve`
 - GitHub org: `https://github.com/quoroom-ai`
 
 If a source is not listed above, verify before trusting it.

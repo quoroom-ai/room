@@ -124,7 +124,7 @@ export function CredentialsPanel({ roomId }: CredentialsPanelProps): React.JSX.E
               </div>
               {confirmDelete === cred.id ? (
                 <div className="flex gap-1">
-                  <button onClick={() => handleDelete(cred.id)} className="text-xs px-2.5 py-1.5 bg-status-error text-white rounded-lg">Delete</button>
+                  <button onClick={() => handleDelete(cred.id)} className="text-xs px-2.5 py-1.5 bg-status-error text-text-invert rounded-lg">Delete</button>
                   <button onClick={() => setConfirmDelete(null)} className="text-xs px-2.5 py-1.5 bg-surface-tertiary rounded-lg">Cancel</button>
                 </div>
               ) : (

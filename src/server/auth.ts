@@ -10,7 +10,7 @@
  * Agent token always has full access.
  *
  * Flow:
- * 1. Server generates two 256-bit random tokens on startup
+ * 1. Server loads persisted tokens from disk, or generates them on first startup
  * 2. Agent token written to {dataDir}/api.token (mode 0o600)
  * 3. Browser calls GET /api/auth/handshake (Origin must be localhost) → receives user token
  * 4. All /api/* requests require Authorization: Bearer <token>
@@ -18,7 +18,7 @@
  */
 
 import crypto from 'node:crypto'
-import { writeFileSync, mkdirSync } from 'node:fs'
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 
 export type TokenRole = 'agent' | 'user'
@@ -26,9 +26,58 @@ export type TokenRole = 'agent' | 'user'
 let agentToken: string | null = null
 let userToken: string | null = null
 
-export function generateToken(): string {
-  agentToken = crypto.randomBytes(32).toString('hex')
+const AUTH_TOKENS_FILE = 'auth.tokens.json'
+
+function isValidToken(value: unknown): value is string {
+  return typeof value === 'string' && /^[a-f0-9]{64}$/i.test(value)
+}
+
+function readPersistedTokens(dataDir: string): { agent: string; user: string } | null {
+  const file = join(dataDir, AUTH_TOKENS_FILE)
+  if (!existsSync(file)) return null
+  try {
+    const raw = readFileSync(file, 'utf-8')
+    const parsed = JSON.parse(raw) as { agent?: unknown; user?: unknown }
+    if (!isValidToken(parsed.agent) || !isValidToken(parsed.user)) return null
+    return { agent: parsed.agent, user: parsed.user }
+  } catch {
+    return null
+  }
+}
+
+function readLegacyAgentToken(dataDir: string): string | null {
+  const file = join(dataDir, 'api.token')
+  if (!existsSync(file)) return null
+  try {
+    const value = readFileSync(file, 'utf-8').trim()
+    return isValidToken(value) ? value : null
+  } catch {
+    return null
+  }
+}
+
+function writePersistedTokens(dataDir: string, agent: string, user: string): void {
+  mkdirSync(dataDir, { recursive: true })
+  writeFileSync(join(dataDir, AUTH_TOKENS_FILE), JSON.stringify({ agent, user }), { mode: 0o600 })
+}
+
+export function generateToken(dataDir?: string): string {
+  if (agentToken && userToken) return agentToken
+
+  if (dataDir) {
+    const persisted = readPersistedTokens(dataDir)
+    if (persisted) {
+      agentToken = persisted.agent
+      userToken = persisted.user
+      return agentToken
+    }
+  }
+
+  agentToken = dataDir ? (readLegacyAgentToken(dataDir) ?? crypto.randomBytes(32).toString('hex')) : crypto.randomBytes(32).toString('hex')
   userToken = crypto.randomBytes(32).toString('hex')
+
+  if (dataDir) writePersistedTokens(dataDir, agentToken, userToken)
+
   return agentToken
 }
 
@@ -49,6 +98,12 @@ export function setToken(token: string): void {
 
 export function setUserToken(token: string): void {
   userToken = token
+}
+
+/** For tests — clear all tokens so generateToken starts fresh */
+export function resetTokens(): void {
+  agentToken = null
+  userToken = null
 }
 
 /**
@@ -78,18 +133,20 @@ export function writeTokenFile(dataDir: string, token: string, port: number): vo
   writeFileSync(join(dataDir, 'api.port'), String(port))
 }
 
-const ALLOWED_REMOTE_ORIGINS = [
-  'https://app.quoroom.ai',
-  'https://quoroom-ai.github.io',
-]
+function isLoopbackHostname(hostname: string): boolean {
+  return hostname === 'localhost'
+    || hostname === '127.0.0.1'
+    || hostname === '::1'
+    || hostname === '[::1]'
+    || hostname === '::ffff:127.0.0.1'
+}
 
 export function isAllowedOrigin(origin: string | undefined): boolean {
   // Same-origin requests have no Origin header
   if (!origin) return true
   try {
     const url = new URL(origin)
-    if (url.hostname === 'localhost' || url.hostname === '127.0.0.1') return true
-    return ALLOWED_REMOTE_ORIGINS.includes(origin)
+    return isLoopbackHostname(url.hostname)
   } catch {
     return false
   }
@@ -101,7 +158,7 @@ export function isLocalOrigin(origin: string | undefined): boolean {
   if (!origin) return true
   try {
     const url = new URL(origin)
-    return url.hostname === 'localhost' || url.hostname === '127.0.0.1'
+    return isLoopbackHostname(url.hostname)
   } catch {
     return false
   }

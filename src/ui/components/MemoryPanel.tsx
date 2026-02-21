@@ -85,7 +85,7 @@ export function MemoryPanel({ roomId }: MemoryPanelProps): React.JSX.Element {
           placeholder="Search entities..."
           value={search}
           onChange={(e) => setSearch(e.target.value)}
-          className="w-full px-2.5 py-1.5 text-sm border border-border-primary rounded-lg focus:outline-none focus:border-gray-500 bg-surface-primary"
+          className="w-full px-2.5 py-1.5 text-sm border border-border-primary rounded-lg focus:outline-none focus:border-text-muted bg-surface-primary text-text-primary"
         />
       </div>
 

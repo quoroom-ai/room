@@ -1,15 +1,17 @@
 import { z } from 'zod'
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
 import { getMcpDatabase } from '../db'
-import { createRoomWallet, getWalletAddress, getOnChainBalance, sendUSDC, getTransactionHistory } from '../../shared/wallet'
+import { createRoomWallet, getWalletAddress, getOnChainBalance, sendToken, getTransactionHistory } from '../../shared/wallet'
+import { CHAIN_CONFIGS } from '../../shared/constants'
+import { recordPaymentAudit, formatPaymentAuditSuffix } from './payment-audit'
 
 export function registerWalletTools(server: McpServer): void {
   server.registerTool(
     'quoroom_wallet_create',
     {
       title: 'Create Wallet',
-      description: 'Create an EVM wallet (USDC on Base L2) for a room. Each room can have one wallet. '
-        + 'RESPONSE STYLE: Confirm briefly in 1 sentence.',
+      description: 'Create an EVM wallet for a room. Works on all supported chains (Base, Ethereum, Arbitrum, Optimism, Polygon). '
+        + 'Each room can have one wallet. RESPONSE STYLE: Confirm briefly in 1 sentence.',
       inputSchema: {
         roomId: z.number().describe('The room ID to create a wallet for'),
         encryptionKey: z.string().min(1).describe('Encryption key to protect the private key. Keep this safe — needed for sending.')
@@ -32,7 +34,7 @@ export function registerWalletTools(server: McpServer): void {
     'quoroom_wallet_address',
     {
       title: 'Wallet Address',
-      description: 'Get the wallet address for a room. Use this to receive USDC.',
+      description: 'Get the wallet address for a room. Use this to receive stablecoins (USDC/USDT) on any EVM chain.',
       inputSchema: {
         roomId: z.number().describe('The room ID')
       }
@@ -52,24 +54,29 @@ export function registerWalletTools(server: McpServer): void {
     'quoroom_wallet_balance',
     {
       title: 'Wallet Balance',
-      description: 'Get the on-chain USDC balance for a room\'s wallet on Base L2.',
+      description: 'Get the on-chain token balance for a room\'s wallet. '
+        + 'Supports USDC and USDT on Base, Ethereum, Arbitrum, Optimism, Polygon.',
       inputSchema: {
         roomId: z.number().describe('The room ID'),
-        network: z.enum(['base', 'base-sepolia']).optional().describe('Network (default: base)')
+        network: z.enum(['base', 'ethereum', 'arbitrum', 'optimism', 'polygon', 'base-sepolia']).optional()
+          .describe('Network (default: base)'),
+        token: z.enum(['usdc', 'usdt']).optional().describe('Token (default: usdc)')
       }
     },
-    async ({ roomId, network }) => {
+    async ({ roomId, network, token }) => {
       const db = getMcpDatabase()
       try {
         const address = getWalletAddress(db, roomId)
-        const result = await getOnChainBalance(address, network as 'base' | 'base-sepolia' | undefined)
+        const selectedNetwork = (network ?? 'base') as Parameters<typeof getOnChainBalance>[1]
+        const selectedToken = token ?? 'usdc'
+        const result = await getOnChainBalance(address, selectedNetwork, selectedToken)
         if (!result.ok) {
           return { content: [{ type: 'text' as const, text: `Balance check failed: ${result.error}` }], isError: true }
         }
         return {
           content: [{
             type: 'text' as const,
-            text: JSON.stringify({ address, balance: result.balance, network: result.network }, null, 2)
+            text: JSON.stringify({ address, balance: result.balance, token: selectedToken, network: result.network }, null, 2)
           }]
         }
       } catch (e) {
@@ -81,23 +88,44 @@ export function registerWalletTools(server: McpServer): void {
   server.registerTool(
     'quoroom_wallet_send',
     {
-      title: 'Send USDC',
-      description: 'Send USDC from the room\'s wallet to an address on Base L2. '
+      title: 'Send Token',
+      description: 'Send USDC or USDT from the room\'s wallet to an address. '
+        + 'Supports Base, Ethereum, Arbitrum, Optimism, Polygon. '
         + 'RESPONSE STYLE: Confirm briefly in 1 sentence.',
       inputSchema: {
         roomId: z.number().describe('The room ID'),
         to: z.string().min(1).describe('Recipient address (0x...)'),
-        amount: z.string().min(1).describe('Amount in USDC (e.g., "10.50")'),
+        amount: z.string().min(1).describe('Amount (e.g., "10.50")'),
         encryptionKey: z.string().min(1).describe('Encryption key used when creating the wallet'),
-        network: z.enum(['base', 'base-sepolia']).optional().describe('Network (default: base)')
+        network: z.enum(['base', 'ethereum', 'arbitrum', 'optimism', 'polygon', 'base-sepolia']).optional()
+          .describe('Network (default: base)'),
+        token: z.enum(['usdc', 'usdt']).optional().describe('Token to send (default: usdc)')
       }
     },
-    async ({ roomId, to, amount, encryptionKey, network }) => {
+    async ({ roomId, to, amount, encryptionKey, network, token }) => {
       const db = getMcpDatabase()
+      const selectedNetwork = network ?? 'base'
+      const selectedToken = token ?? 'usdc'
       try {
-        const txHash = await sendUSDC(db, roomId, to, amount, encryptionKey, network as 'base' | 'base-sepolia' | undefined)
+        const chainConfig = CHAIN_CONFIGS[selectedNetwork]
+        if (!chainConfig) {
+          return { content: [{ type: 'text' as const, text: `Unsupported network: ${selectedNetwork}` }], isError: true }
+        }
+        const tokenConfig = chainConfig.tokens[selectedToken]
+        if (!tokenConfig) {
+          return { content: [{ type: 'text' as const, text: `Token ${selectedToken} not available on ${selectedNetwork}` }], isError: true }
+        }
+        const txHash = await sendToken(db, roomId, to, amount, encryptionKey, selectedNetwork, tokenConfig.address, tokenConfig.decimals)
+        const audit = recordPaymentAudit(
+          db,
+          roomId,
+          `Wallet payment: sent ${amount} ${selectedToken.toUpperCase()} on ${selectedNetwork} to ${to}, tx: ${txHash}`
+        )
         return {
-          content: [{ type: 'text' as const, text: `Sent ${amount} USDC to ${to}. TX: ${txHash}` }]
+          content: [{
+            type: 'text' as const,
+            text: `Sent ${amount} ${selectedToken.toUpperCase()} to ${to} on ${selectedNetwork}. TX: ${txHash}${formatPaymentAuditSuffix(audit)}`
+          }]
         }
       } catch (e) {
         return { content: [{ type: 'text' as const, text: (e as Error).message }], isError: true }

@@ -6,6 +6,7 @@ import { formatRelativeTime } from '../utils/time'
 import { Select } from './Select'
 import type { Room, Wallet } from '@shared/types'
 import { ROOM_TEMPLATES } from '@shared/room-templates'
+import { CopyAddressButton } from './CopyAddressButton'
 
 const STATUS_COLORS: Record<string, string> = {
   active: 'bg-status-success-bg text-status-success',
@@ -167,7 +168,7 @@ export function RoomsPanel({ selectedRoomId, onSelectRoom }: RoomsPanelProps): R
           <button
             onClick={handleCreate}
             disabled={!createName.trim()}
-            className="text-sm px-4 py-2 bg-interactive text-white rounded-lg hover:bg-interactive-hover disabled:opacity-40"
+            className="text-sm px-4 py-2 bg-interactive text-text-invert rounded-lg hover:bg-interactive-hover disabled:opacity-40"
           >
             Create
           </button>
@@ -186,7 +187,7 @@ export function RoomsPanel({ selectedRoomId, onSelectRoom }: RoomsPanelProps): R
                 key={room.id}
                 className={`rounded-lg p-4 border transition-colors cursor-pointer ${
                   isSelected
-                    ? 'border-blue-300 bg-interactive-bg'
+                    ? 'border-interactive bg-interactive-bg'
                     : 'border-border-primary bg-surface-secondary shadow-sm hover:border-border-primary'
                 }`}
                 onClick={() => onSelectRoom(isSelected ? null : room.id)}
@@ -238,9 +239,12 @@ export function RoomsPanel({ selectedRoomId, onSelectRoom }: RoomsPanelProps): R
                 <div className="text-xs text-text-muted mb-2">
                   Created {formatRelativeTime(room.createdAt)}
                   {wallets?.[room.id] && (
-                    <span className="ml-2 font-mono text-text-muted" title={wallets[room.id].address}>
-                      {wallets[room.id].address.slice(0, 6)}...{wallets[room.id].address.slice(-4)}
-                    </span>
+                    <>
+                      <span className="ml-2 font-mono text-text-muted" title={wallets[room.id].address}>
+                        {wallets[room.id].address.slice(0, 6)}...{wallets[room.id].address.slice(-4)}
+                      </span>
+                      <CopyAddressButton address={wallets[room.id].address} />
+                    </>
                   )}
                 </div>
 
@@ -277,7 +281,7 @@ export function RoomsPanel({ selectedRoomId, onSelectRoom }: RoomsPanelProps): R
                   ) : room.status === 'paused' ? (
                     <button
                       onClick={() => handleRestart(room.id)}
-                      className="text-sm px-2.5 py-1.5 rounded-lg border text-blue-600 border-blue-200 hover:border-blue-300 transition-colors"
+                      className="text-sm px-2.5 py-1.5 rounded-lg border text-interactive border-border-primary hover:border-interactive transition-colors"
                     >
                       Restart
                     </button>

@@ -31,6 +31,7 @@ import { stopCloudSync } from '../shared/cloud-sync'
 import { initCloudSync } from './cloud'
 import { _stopAllLoops } from '../shared/agent-loop'
 import { initUpdateChecker, stopUpdateChecker, getUpdateInfo } from './updateChecker'
+import { startServerRuntime, stopServerRuntime } from './runtime'
 
 try {
   (process as unknown as { loadEnvFile?: (path?: string) => void }).loadEnvFile?.('.env')
@@ -225,7 +226,7 @@ export function createApiServer(options: ServerOptions = {}): {
   const router = new Router()
   registerAllRoutes(router)
 
-  const token = generateToken()
+  const token = generateToken(dataDir)
   if (!options.skipTokenFile) {
     writeTokenFile(dataDir, token, port)
   }
@@ -259,13 +260,19 @@ export function createApiServer(options: ServerOptions = {}): {
     // Auth handshake — no token needed, Origin must be localhost
     // Returns user token (restricted in auto mode, full in semi mode)
     if (pathname === '/api/auth/handshake' && req.method === 'GET') {
+      const handshakeHeaders: Record<string, string> = {
+        ...responseHeaders,
+        'Cache-Control': 'no-store, no-cache, must-revalidate, proxy-revalidate',
+        'Pragma': 'no-cache',
+        'Expires': '0',
+      }
       const isLocalClient = isLoopbackAddress(req.socket.remoteAddress)
       if (!isLocalClient || (origin && !isLocalOrigin(origin))) {
-        res.writeHead(403, responseHeaders)
+        res.writeHead(403, handshakeHeaders)
         res.end(JSON.stringify({ error: 'Handshake allowed only from localhost clients' }))
         return
       }
-      res.writeHead(200, responseHeaders)
+      res.writeHead(200, handshakeHeaders)
       res.end(JSON.stringify({ token: getUserToken() }))
       return
     }
@@ -296,15 +303,13 @@ export function createApiServer(options: ServerOptions = {}): {
         return
       }
 
-      // Role-based access control
-      if (!isAllowedForRole(role, req.method!, pathname, db)) {
-        res.writeHead(403, responseHeaders)
-        res.end(JSON.stringify({ error: 'Forbidden: auto mode restricts this action' }))
-        return
-      }
-
       // Binary streaming download — must be handled before router (not JSON)
       if (pathname === '/api/status/update/download' && req.method === 'GET') {
+        if (!isAllowedForRole(role, req.method, pathname, db)) {
+          res.writeHead(403, responseHeaders)
+          res.end(JSON.stringify({ error: 'Forbidden: auto mode restricts this action' }))
+          return
+        }
         const info = getUpdateInfo()
         if (!info) {
           res.writeHead(404, responseHeaders)
@@ -332,8 +337,18 @@ export function createApiServer(options: ServerOptions = {}): {
       }
 
       try {
-        const body = await parseBody(req)
         const query = Object.fromEntries(url.searchParams)
+        const body = req.method === 'GET' || req.method === 'HEAD'
+          ? undefined
+          : await parseBody(req)
+
+        // Role-based access control (context-aware for room-scoped autonomy mode)
+        if (!isAllowedForRole(role, req.method!, pathname, db, { params: matched.params, query, body })) {
+          res.writeHead(403, responseHeaders)
+          res.end(JSON.stringify({ error: 'Forbidden: auto mode restricts this action' }))
+          return
+        }
+
         const ctx: RouteContext = {
           params: matched.params,
           query,
@@ -465,10 +480,15 @@ export function startServer(options: ServerOptions = {}): void {
   // Start background update checker (polls GitHub every 4 hours)
   initUpdateChecker()
 
+  // Start local runtime loops (task scheduler, watch runner, room message sync).
+  startServerRuntime(serverDb)
+
   function listen(): void {
     server.listen(port, bindHost, () => {
-      const dashboardUrl = 'https://app.quoroom.ai'
-      console.error(`Quoroom API server started on http://localhost:${port}`)
+      const bound = server.address()
+      const boundPort = typeof bound === 'object' && bound ? bound.port : port
+      const dashboardUrl = `http://localhost:${boundPort}`
+      console.error(`Quoroom API server started on http://localhost:${boundPort}`)
       console.error(`Dashboard: ${dashboardUrl}`)
       console.error(`Auth token: ${token.slice(0, 8)}...`)
 
@@ -501,6 +521,7 @@ export function startServer(options: ServerOptions = {}): void {
   process.on('SIGINT', () => {
     console.error('Shutting down...')
     _stopAllLoops()
+    stopServerRuntime()
     stopCloudSync()
     stopUpdateChecker()
     server.close()
@@ -510,6 +531,7 @@ export function startServer(options: ServerOptions = {}): void {
 
   process.on('SIGTERM', () => {
     _stopAllLoops()
+    stopServerRuntime()
     stopCloudSync()
     stopUpdateChecker()
     server.close()

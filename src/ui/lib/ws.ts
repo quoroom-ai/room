@@ -1,4 +1,4 @@
-import { getToken, API_BASE } from './auth'
+import { clearToken, getToken, API_BASE } from './auth'
 
 export type WsMessage = {
   type: string
@@ -16,13 +16,15 @@ class WsClient {
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null
   private reconnectDelay = 1000
   private disposed = false
+  private refreshTokenOnReconnect = false
 
   async connect(): Promise<void> {
     // Clean up any previous socket before creating a new one
     this.cleanupSocket()
     this.disposed = false
 
-    const token = await getToken()
+    const token = await getToken({ forceRefresh: this.refreshTokenOnReconnect })
+    this.refreshTokenOnReconnect = false
     let wsUrl: string
     if (API_BASE) {
       const url = new URL(API_BASE)
@@ -70,7 +72,12 @@ class WsClient {
       this.ws = null
 
       if (!this.disposed) {
-        this.reconnectTimer = setTimeout(() => this.connect(), this.reconnectDelay)
+        // Token may have rotated after a server restart. Refresh before reconnect.
+        clearToken()
+        this.refreshTokenOnReconnect = true
+        this.reconnectTimer = setTimeout(() => {
+          void this.connect()
+        }, this.reconnectDelay)
         this.reconnectDelay = Math.min(this.reconnectDelay * 2, 30000)
       }
     }

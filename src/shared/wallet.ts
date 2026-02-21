@@ -8,11 +8,11 @@
 import crypto from 'crypto'
 import type Database from 'better-sqlite3'
 import { generatePrivateKey, privateKeyToAccount } from 'viem/accounts'
-import { createPublicClient, createWalletClient, http, type Address } from 'viem'
-import { base, baseSepolia } from 'viem/chains'
+import { createPublicClient, createWalletClient, http, type Address, type Chain } from 'viem'
+import { base, baseSepolia, mainnet, arbitrum, optimism, polygon } from 'viem/chains'
 import type { Wallet, WalletTransaction } from './types'
 import * as queries from './db-queries'
-import { BASE_CHAIN_CONFIG, BASE_SEPOLIA_CONFIG } from './constants'
+import { CHAIN_CONFIGS } from './constants'
 
 // ─── USDC ABI (minimal — balanceOf + transfer) ─────────────
 
@@ -38,12 +38,11 @@ const USDC_ABI = [
 
 // ─── Chain Config ───────────────────────────────────────────
 
-const CHAINS = {
-  base: { chain: base, config: BASE_CHAIN_CONFIG },
-  'base-sepolia': { chain: baseSepolia, config: BASE_SEPOLIA_CONFIG }
-} as const
+const VIEM_CHAINS: Record<string, Chain> = {
+  base, ethereum: mainnet, arbitrum, optimism, polygon, 'base-sepolia': baseSepolia
+}
 
-type NetworkName = keyof typeof CHAINS
+export type NetworkName = 'base' | 'ethereum' | 'arbitrum' | 'optimism' | 'polygon' | 'base-sepolia'
 
 // ─── Encryption (AES-256-GCM) ──────────────────────────────
 
@@ -134,33 +133,40 @@ export interface UsdcBalanceResult {
 }
 
 /**
- * Get on-chain USDC balance for an address.
- * Adapted from Automaton's x402.ts getUsdcBalanceDetailed()
+ * Get on-chain token balance for an address.
+ * Supports any chain/token in CHAIN_CONFIGS.
  */
 export async function getOnChainBalance(
   address: string,
-  network: NetworkName = 'base'
+  network: NetworkName = 'base',
+  token: string = 'usdc'
 ): Promise<UsdcBalanceResult> {
-  const chainInfo = CHAINS[network]
-  if (!chainInfo) {
+  const chainConfig = CHAIN_CONFIGS[network]
+  const viemChain = VIEM_CHAINS[network]
+  if (!chainConfig || !viemChain) {
     return { balance: 0, balanceRaw: '0', network, ok: false, error: `Unsupported network: ${network}` }
+  }
+
+  const tokenConfig = chainConfig.tokens[token]
+  if (!tokenConfig) {
+    return { balance: 0, balanceRaw: '0', network, ok: false, error: `Token ${token} not available on ${network}` }
   }
 
   try {
     const client = createPublicClient({
-      chain: chainInfo.chain,
-      transport: http(chainInfo.config.rpcUrl)
+      chain: viemChain,
+      transport: http(chainConfig.rpcUrl)
     })
 
     const balance = await client.readContract({
-      address: chainInfo.config.usdcAddress as Address,
+      address: tokenConfig.address as Address,
       abi: USDC_ABI,
       functionName: 'balanceOf',
       args: [address as Address]
     })
 
     return {
-      balance: Number(balance) / 10 ** chainInfo.config.usdcDecimals,
+      balance: Number(balance) / 10 ** tokenConfig.decimals,
       balanceRaw: balance.toString(),
       network,
       ok: true
@@ -177,22 +183,24 @@ export async function getOnChainBalance(
 }
 
 /**
- * Send USDC from room wallet to an address.
- * Decrypts the private key, creates a wallet client, and sends the transfer.
+ * Send an ERC-20 token from room wallet to an address on any supported chain.
  */
-export async function sendUSDC(
+export async function sendToken(
   db: Database.Database,
   roomId: number,
   to: string,
   amount: string,
   encryptionKey: string,
-  network: NetworkName = 'base'
+  network: NetworkName = 'base',
+  tokenAddress: string,
+  decimals: number
 ): Promise<string> {
   const wallet = queries.getWalletByRoom(db, roomId)
   if (!wallet) throw new Error(`Room ${roomId} has no wallet`)
 
-  const chainInfo = CHAINS[network]
-  if (!chainInfo) throw new Error(`Unsupported network: ${network}`)
+  const chainConfig = CHAIN_CONFIGS[network]
+  const viemChain = VIEM_CHAINS[network]
+  if (!chainConfig || !viemChain) throw new Error(`Unsupported network: ${network}`)
 
   // Decrypt private key
   const privateKey = decryptPrivateKey(wallet.privateKeyEncrypted, encryptionKey)
@@ -201,16 +209,16 @@ export async function sendUSDC(
   // Create wallet client
   const walletClient = createWalletClient({
     account,
-    chain: chainInfo.chain,
-    transport: http(chainInfo.config.rpcUrl)
+    chain: viemChain,
+    transport: http(chainConfig.rpcUrl)
   })
 
-  // Convert amount to smallest unit (6 decimals for USDC)
-  const amountRaw = BigInt(Math.round(parseFloat(amount) * 10 ** chainInfo.config.usdcDecimals))
+  // Convert amount to smallest unit
+  const amountRaw = BigInt(Math.round(parseFloat(amount) * 10 ** decimals))
 
-  // Send USDC transfer
+  // Send ERC-20 transfer
   const txHash = await walletClient.writeContract({
-    address: chainInfo.config.usdcAddress as Address,
+    address: tokenAddress as Address,
     abi: USDC_ABI,
     functionName: 'transfer',
     args: [to as Address, amountRaw]
@@ -220,15 +228,34 @@ export async function sendUSDC(
   queries.logWalletTransaction(db, wallet.id, 'send', amount, {
     counterparty: to,
     txHash,
-    description: `Send ${amount} USDC to ${to}`
+    description: `Send ${amount} tokens to ${to}`
   })
 
   // Log room activity
   queries.logRoomActivity(db, roomId, 'financial',
-    `Sent ${amount} USDC to ${to.slice(0, 8)}...${to.slice(-4)}`,
-    JSON.stringify({ to, amount, txHash, network }))
+    `Sent ${amount} tokens to ${to.slice(0, 8)}...${to.slice(-4)}`,
+    JSON.stringify({ to, amount, txHash, network, tokenAddress }))
 
   return txHash
+}
+
+/**
+ * Send USDC from room wallet to an address.
+ * Convenience wrapper around sendToken for backward compatibility.
+ */
+export async function sendUSDC(
+  db: Database.Database,
+  roomId: number,
+  to: string,
+  amount: string,
+  encryptionKey: string,
+  network: NetworkName = 'base'
+): Promise<string> {
+  const chainConfig = CHAIN_CONFIGS[network]
+  if (!chainConfig) throw new Error(`Unsupported network: ${network}`)
+  const usdc = chainConfig.tokens.usdc
+  if (!usdc) throw new Error(`USDC not available on ${network}`)
+  return sendToken(db, roomId, to, amount, encryptionKey, network, usdc.address, usdc.decimals)
 }
 
 /**

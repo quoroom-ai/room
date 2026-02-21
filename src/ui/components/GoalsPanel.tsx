@@ -151,13 +151,13 @@ export function GoalsPanel({ roomId, autonomyMode }: GoalsPanelProps): React.JSX
       </div>
 
       {semi && showCreate && (
-        <div className="p-4 border-b-2 border-blue-300 bg-interactive-bg/50 space-y-2">
+        <div className="p-4 border-b-2 border-border-primary bg-surface-secondary space-y-2">
           <textarea
             placeholder="Goal description..."
             value={createDesc}
             onChange={(e) => setCreateDesc(e.target.value)}
             rows={2}
-            className="w-full px-2.5 py-1.5 text-sm border border-border-primary rounded-lg focus:outline-none focus:border-gray-500 bg-surface-primary resize-y"
+            className="w-full px-2.5 py-1.5 text-sm border border-border-primary rounded-lg focus:outline-none focus:border-text-muted bg-surface-primary resize-y"
           />
           <div className="flex gap-2">
             <Select
@@ -184,7 +184,7 @@ export function GoalsPanel({ roomId, autonomyMode }: GoalsPanelProps): React.JSX
           <button
             onClick={handleCreate}
             disabled={!createDesc.trim()}
-            className="text-sm bg-interactive text-white px-4 py-2 rounded-lg hover:bg-interactive-hover disabled:opacity-50 disabled:cursor-not-allowed"
+            className="text-sm bg-interactive text-text-invert px-4 py-2 rounded-lg hover:bg-interactive-hover disabled:opacity-50 disabled:cursor-not-allowed"
           >
             Create Goal
           </button>
@@ -243,7 +243,7 @@ export function GoalsPanel({ roomId, autonomyMode }: GoalsPanelProps): React.JSX
                             </button>
                           )}
                           {goal.status !== 'in_progress' && goal.status !== 'completed' && (
-                            <button onClick={() => handleStatusChange(goal.id, 'in_progress')} className="text-xs px-3 py-2 md:px-2.5 md:py-1.5 rounded-lg border border-blue-200 text-interactive hover:bg-interactive-bg">
+                            <button onClick={() => handleStatusChange(goal.id, 'in_progress')} className="text-xs px-3 py-2 md:px-2.5 md:py-1.5 rounded-lg border border-interactive text-interactive hover:bg-interactive-bg">
                               Start
                             </button>
                           )}
@@ -274,18 +274,18 @@ export function GoalsPanel({ roomId, autonomyMode }: GoalsPanelProps): React.JSX
                             value={updateObs}
                             onChange={(e) => setUpdateObs(e.target.value)}
                             placeholder="Log an update..."
-                            className="flex-1 px-2.5 py-1.5 text-sm border border-border-primary rounded-lg focus:outline-none focus:border-gray-500 bg-surface-primary"
+                            className="flex-1 px-2.5 py-1.5 text-sm border border-border-primary rounded-lg focus:outline-none focus:border-text-muted bg-surface-primary"
                           />
                           <input
                             value={updateMetric}
                             onChange={(e) => setUpdateMetric(e.target.value)}
                             placeholder="%"
-                            className="w-12 px-2.5 py-1.5 text-sm border border-border-primary rounded-lg focus:outline-none focus:border-gray-500 bg-surface-primary text-center"
+                            className="w-12 px-2.5 py-1.5 text-sm border border-border-primary rounded-lg focus:outline-none focus:border-text-muted bg-surface-primary text-center"
                           />
                           <button
                             onClick={() => handleAddUpdate(goal.id)}
                             disabled={!updateObs.trim()}
-                            className="text-sm bg-interactive text-white px-2.5 py-1.5 rounded-lg hover:bg-interactive-hover disabled:opacity-50"
+                            className="text-sm bg-interactive text-text-invert px-2.5 py-1.5 rounded-lg hover:bg-interactive-hover disabled:opacity-50"
                           >
                             Log
                           </button>

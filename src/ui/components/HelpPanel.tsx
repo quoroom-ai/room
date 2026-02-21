@@ -133,7 +133,7 @@ export function HelpPanel({ installPrompt, onStartWalkthrough }: HelpPanelProps)
                 {installPrompt.canInstall && (
                   <button
                     onClick={installPrompt.install}
-                    className="w-full py-1.5 text-sm font-medium text-white bg-interactive hover:bg-interactive-hover rounded-lg transition-colors"
+                    className="w-full py-1.5 text-sm font-medium text-text-invert bg-interactive hover:bg-interactive-hover rounded-lg transition-colors"
                   >
                     Install Quoroom
                   </button>
@@ -155,7 +155,7 @@ export function HelpPanel({ installPrompt, onStartWalkthrough }: HelpPanelProps)
       <div className="grid grid-cols-3 gap-2">
         <button
           onClick={() => window.open('https://github.com/quoroom-ai/room/issues/new')}
-          className="w-full py-2 text-sm text-interactive hover:text-interactive-hover border border-blue-200 hover:border-blue-300 rounded-lg transition-colors"
+          className="w-full py-2 text-sm text-interactive hover:text-interactive-hover border border-border-primary hover:border-interactive rounded-lg transition-colors"
         >
           Report Bug
         </button>

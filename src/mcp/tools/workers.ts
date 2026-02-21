@@ -13,6 +13,7 @@ export function registerWorkerTools(server: McpServer): void {
         + 'Tasks can be assigned to workers. The worker\'s system prompt is passed to Claude CLI via --system-prompt on every task run. '
         + 'RESPONSE STYLE: Confirm briefly in 1 sentence. No notes, tips, or implementation details.',
       inputSchema: {
+        roomId: z.number().optional().describe('Optional room to scope this worker to'),
         name: z.string().min(1).max(200).describe('Name for the worker — can be a personal name (e.g., "John", "Ada") or a role title (e.g., "Research Assistant")'),
         role: z.string().min(1).max(200).optional().describe('Optional role/function title (e.g., "Chief of Staff", "Code Reviewer"). Shown as subtitle under the name.'),
         systemPrompt: z.string().min(1).max(50000).describe(
@@ -25,9 +26,12 @@ export function registerWorkerTools(server: McpServer): void {
         )
       }
     },
-    async ({ name, role, systemPrompt, description, isDefault }) => {
+    async ({ roomId, name, role, systemPrompt, description, isDefault }) => {
       const db = getMcpDatabase()
-      queries.createWorker(db, { name, role, systemPrompt, description, isDefault })
+      if (roomId != null && !queries.getRoom(db, roomId)) {
+        return { content: [{ type: 'text' as const, text: `No room found with id ${roomId}.` }], isError: true }
+      }
+      queries.createWorker(db, { name, role, systemPrompt, description, isDefault, roomId: roomId ?? undefined })
       const label = role ? `"${name}" (${role})` : `"${name}"`
       return {
         content: [{
@@ -43,11 +47,13 @@ export function registerWorkerTools(server: McpServer): void {
     {
       title: 'List Workers',
       description: 'List all worker configurations.',
-      inputSchema: {}
+      inputSchema: {
+        roomId: z.number().optional().describe('Optional room scope filter')
+      }
     },
-    async () => {
+    async ({ roomId }: { roomId?: number }) => {
       const db = getMcpDatabase()
-      const workers = queries.listWorkers(db)
+      const workers = roomId != null ? queries.listRoomWorkers(db, roomId) : queries.listWorkers(db)
       if (workers.length === 0) {
         return { content: [{ type: 'text' as const, text: 'No workers configured.' }] }
       }
@@ -72,6 +78,7 @@ export function registerWorkerTools(server: McpServer): void {
       description: 'Update a worker\'s name, role, system prompt, description, or default status. '
         + 'RESPONSE STYLE: Confirm briefly in 1 sentence. No notes, tips, or implementation details.',
       inputSchema: {
+        roomId: z.number().optional().describe('Optional room scope guard (recommended for queen flows)'),
         id: z.number().describe('The worker ID to update'),
         name: z.string().optional().describe('New name'),
         role: z.string().optional().describe('New role/function title'),
@@ -80,11 +87,14 @@ export function registerWorkerTools(server: McpServer): void {
         isDefault: z.boolean().optional().describe('Set or unset as default worker')
       }
     },
-    async ({ id, name, role, systemPrompt, description, isDefault }) => {
+    async ({ roomId, id, name, role, systemPrompt, description, isDefault }) => {
       const db = getMcpDatabase()
       const worker = queries.getWorker(db, id)
       if (!worker) {
         return { content: [{ type: 'text' as const, text: `No worker found with id ${id}.` }] }
+      }
+      if (roomId != null && worker.roomId !== roomId) {
+        return { content: [{ type: 'text' as const, text: `Worker ${id} does not belong to room ${roomId}.` }], isError: true }
       }
       const updates: Record<string, unknown> = {}
       if (name !== undefined) updates.name = name
@@ -104,14 +114,18 @@ export function registerWorkerTools(server: McpServer): void {
       description: 'Delete a worker configuration. Tasks assigned to this worker will have their worker unset. '
         + 'RESPONSE STYLE: Confirm briefly in 1 sentence. No notes, tips, or implementation details.',
       inputSchema: {
+        roomId: z.number().optional().describe('Optional room scope guard (recommended for queen flows)'),
         id: z.number().describe('The worker ID to delete')
       }
     },
-    async ({ id }) => {
+    async ({ roomId, id }) => {
       const db = getMcpDatabase()
       const worker = queries.getWorker(db, id)
       if (!worker) {
         return { content: [{ type: 'text' as const, text: `No worker found with id ${id}.` }] }
+      }
+      if (roomId != null && worker.roomId !== roomId) {
+        return { content: [{ type: 'text' as const, text: `Worker ${id} does not belong to room ${roomId}.` }], isError: true }
       }
       queries.deleteWorker(db, id)
       return { content: [{ type: 'text' as const, text: `Deleted worker "${worker.name}".` }] }

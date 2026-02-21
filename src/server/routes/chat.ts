@@ -56,6 +56,11 @@ export function registerChatRoutes(router: Router): void {
       timeoutMs: 3 * 60 * 1000, // 3 minutes
     })
 
+    if (result.exitCode !== 0 || result.timedOut) {
+      const reason = result.output?.trim() || (result.timedOut ? 'Chat request timed out' : 'Chat execution failed')
+      return { status: result.timedOut ? 504 : 502, error: reason.slice(0, 500) }
+    }
+
     // Extract response text
     const response = result.output || 'No response'
 

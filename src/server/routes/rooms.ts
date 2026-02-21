@@ -5,7 +5,7 @@ import { eventBus } from '../event-bus'
 import { triggerAgent, pauseAgent, isAgentRunning } from '../../shared/agent-loop'
 import { initCloudSync } from '../cloud'
 import { getRoomCloudId } from '../../shared/cloud-sync'
-import { QUEEN_DEFAULTS_BY_PLAN, type ClaudePlan } from '../../shared/constants'
+import { QUEEN_DEFAULTS_BY_PLAN, CHATGPT_DEFAULTS_BY_PLAN, type ClaudePlan, type ChatGptPlan } from '../../shared/constants'
 import type { ActivityEventType } from '../../shared/types'
 import { getModelAuthStatus } from '../../shared/model-provider'
 
@@ -28,13 +28,20 @@ export function registerRoomRoutes(router: Router): void {
     })
 
     // Apply plan-aware defaults for queen activity limits
-    const raw = queries.getSetting(ctx.db, 'claude_plan') ?? ''
-    const plan = (raw in QUEEN_DEFAULTS_BY_PLAN ? raw : 'none') as ClaudePlan
-    const planDefaults = QUEEN_DEFAULTS_BY_PLAN[plan]
+    const globalQueenModel = queries.getSetting(ctx.db, 'queen_model')
+    let planDefaults: { queenCycleGapMs: number; queenMaxTurns: number }
+    if (globalQueenModel === 'codex') {
+      const raw = queries.getSetting(ctx.db, 'chatgpt_plan') ?? ''
+      const plan = (raw in CHATGPT_DEFAULTS_BY_PLAN ? raw : 'none') as ChatGptPlan
+      planDefaults = CHATGPT_DEFAULTS_BY_PLAN[plan]
+    } else {
+      const raw = queries.getSetting(ctx.db, 'claude_plan') ?? ''
+      const plan = (raw in QUEEN_DEFAULTS_BY_PLAN ? raw : 'none') as ClaudePlan
+      planDefaults = QUEEN_DEFAULTS_BY_PLAN[plan]
+    }
     queries.updateRoom(ctx.db, result.room.id, planDefaults)
 
     // Apply global queen model default
-    const globalQueenModel = queries.getSetting(ctx.db, 'queen_model')
     if (globalQueenModel && result.queen) {
       queries.updateWorker(ctx.db, result.queen.id, { model: globalQueenModel })
     }

@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { getToken, clearToken, API_BASE } from './lib/auth'
-import { TabBar, mainTabs, type Tab } from './components/TabBar'
+import { TabBar, mainTabs, tabIcons, type Tab } from './components/TabBar'
 import { StatusPanel } from './components/StatusPanel'
 import { MemoryPanel } from './components/MemoryPanel'
 import { WorkersPanel } from './components/WorkersPanel'
@@ -18,6 +18,7 @@ import { TransactionsPanel } from './components/TransactionsPanel'
 import { StationsPanel } from './components/StationsPanel'
 import { RoomSettingsPanel } from './components/RoomSettingsPanel'
 import { SwarmPanel } from './components/SwarmPanel'
+import { ChatPanel } from './components/ChatPanel'
 import { ConnectPage } from './components/ConnectPage'
 import { WalkthroughModal } from './components/WalkthroughModal'
 import { UpdateModal } from './components/UpdateModal'
@@ -31,7 +32,7 @@ const ADVANCED_TABS = new Set<Tab>(
   mainTabs.filter((tab) => tab.advanced).map((tab) => tab.id)
 )
 
-const ALL_TAB_IDS: Tab[] = ['swarm', 'status', 'goals', 'votes', 'messages', 'workers', 'tasks', 'skills', 'credentials', 'transactions', 'stations', 'room-settings', 'memory', 'watches', 'results', 'settings', 'help']
+const ALL_TAB_IDS: Tab[] = ['swarm', 'status', 'chat', 'goals', 'votes', 'messages', 'workers', 'tasks', 'skills', 'credentials', 'transactions', 'stations', 'room-settings', 'memory', 'watches', 'results', 'settings', 'help']
 
 const DEFAULT_PORT = '3700'
 const isRemoteOrigin = location.hostname !== 'localhost' && location.hostname !== '127.0.0.1'
@@ -97,6 +98,7 @@ function App(): React.JSX.Element {
 
   const [messagesUnread, setMessagesUnread] = useState(0)
   const [votesActive, setVotesActive] = useState(0)
+  const [totalBalance, setTotalBalance] = useState<number | null>(null)
 
   useNotifications()
   const installPrompt = useInstallPrompt()
@@ -130,17 +132,21 @@ function App(): React.JSX.Element {
   useEffect(() => {
     if (!ready || expandedRoomId === null) { setMessagesUnread(0); return }
     async function fetchUnread(): Promise<void> {
-      const [esc, msgs] = await Promise.all([
-        api.escalations.list(expandedRoomId!).catch(() => [] as Escalation[]),
-        api.roomMessages.list(expandedRoomId!).catch(() => [] as RoomMessage[]),
-      ])
-      setMessagesUnread(
-        esc.filter(e => e.status === 'pending').length +
-        msgs.filter(m => m.status === 'unread').length
-      )
+      try {
+        const [esc, msgs] = await Promise.all([
+          api.escalations.list(expandedRoomId!).catch(() => [] as Escalation[]),
+          api.roomMessages.list(expandedRoomId!).catch(() => [] as RoomMessage[]),
+        ])
+        setMessagesUnread(
+          esc.filter(e => e.status === 'pending').length +
+          msgs.filter(m => m.status === 'unread').length
+        )
+      } catch {
+        // ignore polling noise
+      }
     }
-    void fetchUnread()
-    const interval = setInterval(fetchUnread, 10000)
+    void fetchUnread().catch(() => {})
+    const interval = setInterval(() => { void fetchUnread().catch(() => {}) }, 10000)
     return () => clearInterval(interval)
   }, [expandedRoomId, ready])
 
@@ -148,13 +154,41 @@ function App(): React.JSX.Element {
   useEffect(() => {
     if (!ready || expandedRoomId === null) { setVotesActive(0); return }
     async function fetchActive(): Promise<void> {
-      const decisions = await api.decisions.list(expandedRoomId!, 'voting').catch(() => [] as QuorumDecision[])
-      setVotesActive(decisions.length)
+      try {
+        const decisions = await api.decisions.list(expandedRoomId!, 'voting').catch(() => [] as QuorumDecision[])
+        setVotesActive(decisions.length)
+      } catch {
+        // ignore polling noise
+      }
     }
-    void fetchActive()
-    const interval = setInterval(fetchActive, 10000)
+    void fetchActive().catch(() => {})
+    const interval = setInterval(() => { void fetchActive().catch(() => {}) }, 10000)
     return () => clearInterval(interval)
   }, [expandedRoomId, ready])
+
+  // Poll total on-chain balance across all rooms (only those with wallets)
+  useEffect(() => {
+    if (!ready || rooms.length === 0) { setTotalBalance(null); return }
+    async function fetchTotalBalance(): Promise<void> {
+      try {
+        const wallets = await Promise.all(
+          rooms.map(r => api.wallet.get(r.id).catch(() => null))
+        )
+        const roomsWithWallets = rooms.filter((_, i) => wallets[i] !== null)
+        if (roomsWithWallets.length === 0) { setTotalBalance(null); return }
+        const results = await Promise.all(
+          roomsWithWallets.map(r => api.wallet.balance(r.id).catch(() => null))
+        )
+        const sum = results.reduce((acc, b) => acc + (b?.totalBalance ?? 0), 0)
+        setTotalBalance(sum > 0 ? sum : null)
+      } catch {
+        // ignore polling noise
+      }
+    }
+    void fetchTotalBalance().catch(() => {})
+    const interval = setInterval(() => { void fetchTotalBalance().catch(() => {}) }, 60000)
+    return () => clearInterval(interval)
+  }, [ready, rooms])
 
   // Local origin: normal auth flow
   useEffect(() => {
@@ -324,6 +358,8 @@ function App(): React.JSX.Element {
         }} />
       case 'status':
         return <StatusPanel onNavigate={(t) => handleTabChange(t as Tab)} advancedMode={advancedMode} roomId={selectedRoomId} />
+      case 'chat':
+        return <ChatPanel roomId={selectedRoomId} />
       case 'goals':
         return <GoalsPanel roomId={selectedRoomId} autonomyMode={autonomyMode} />
       case 'votes':
@@ -524,14 +560,15 @@ function App(): React.JSX.Element {
                         }`}
                       >
                         <span className="flex items-center gap-1.5">
+                          {tabIcons[t.id]}
                           {t.label}
                           {t.id === 'votes' && votesActive > 0 && (
-                            <span className="inline-flex items-center justify-center min-w-[16px] h-4 px-1 rounded-full bg-interactive text-white text-[10px] font-bold leading-none">
+                            <span className="inline-flex items-center justify-center min-w-[16px] h-4 px-1 rounded-full bg-interactive text-text-invert text-[10px] font-bold leading-none">
                               {votesActive}
                             </span>
                           )}
                           {t.id === 'messages' && messagesUnread > 0 && (
-                            <span className="inline-flex items-center justify-center min-w-[16px] h-4 px-1 rounded-full bg-status-error text-white text-[10px] font-bold leading-none">
+                            <span className="inline-flex items-center justify-center min-w-[16px] h-4 px-1 rounded-full bg-status-error text-text-invert text-[10px] font-bold leading-none">
                               {messagesUnread}
                             </span>
                           )}
@@ -545,6 +582,12 @@ function App(): React.JSX.Element {
           })}
         </div>
 
+        {totalBalance !== null && (
+          <div className="mx-2 mb-1.5 px-3 py-2 rounded-lg bg-status-success-bg">
+            <div className="text-xs text-text-muted">Total Balance</div>
+            <div className="text-sm font-semibold text-status-success">${totalBalance.toFixed(2)}</div>
+          </div>
+        )}
         <TabBar active={tab} onChange={handleTabChange} />
       </div>
 

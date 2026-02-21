@@ -1,4 +1,4 @@
-import { getToken, API_BASE } from './auth'
+import { getToken, clearToken, API_BASE } from './auth'
 import type {
   Task, CreateTaskInput, TaskRun, ConsoleLogEntry,
   Worker, CreateWorkerInput,
@@ -11,22 +11,64 @@ import type {
   Escalation,
   ChatMessage,
   SelfModAuditEntry,
-  Wallet, WalletTransaction, RevenueSummary,
+  Wallet, WalletTransaction, RevenueSummary, OnChainBalance, CryptoPricing,
   Credential,
   Station,
   RoomMessage,
 } from '@shared/types'
 
-async function request<T>(method: string, path: string, body?: unknown): Promise<T> {
-  const token = await getToken()
-  const res = await fetch(`${API_BASE}${path}`, {
+async function makeRequest(method: string, path: string, token: string, payload?: string): Promise<Response> {
+  return fetch(`${API_BASE}${path}`, {
     method,
     headers: {
       'Content-Type': 'application/json',
       'Authorization': `Bearer ${token}`
     },
-    body: body ? JSON.stringify(body) : undefined
+    body: payload
   })
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms))
+}
+
+async function request<T>(method: string, path: string, body?: unknown): Promise<T> {
+  const payload = body === undefined ? undefined : JSON.stringify(body)
+  const retryDelays = [150, 450, 1000]
+  let token = await getToken()
+  let res: Response | null = null
+  let networkErr: unknown = null
+
+  for (let attempt = 0; attempt < retryDelays.length; attempt++) {
+    try {
+      res = await makeRequest(method, path, token, payload)
+    } catch (err) {
+      networkErr = err
+      clearToken()
+      if (attempt < retryDelays.length - 1) {
+        await sleep(retryDelays[attempt])
+        token = await getToken({ forceRefresh: true })
+        continue
+      }
+      throw err
+    }
+
+    if (res.status !== 401) break
+
+    clearToken()
+    if (attempt < retryDelays.length - 1) {
+      await sleep(retryDelays[attempt])
+      token = await getToken({ forceRefresh: true })
+      res = null
+      continue
+    }
+    break
+  }
+
+  if (!res) {
+    throw networkErr instanceof Error ? networkErr : new Error('Failed to fetch')
+  }
+
   if (!res.ok) {
     const err = await res.json().catch(() => ({ error: res.statusText }))
     throw new Error(err.error || `HTTP ${res.status}`)
@@ -67,8 +109,8 @@ export const api = {
 
   // ─── Runs ────────────────────────────────────────────────
   runs: {
-    list: (limit?: number) =>
-      request<TaskRun[]>('GET', `/api/runs${qs({ limit })}`),
+    list: (limit?: number, opts?: { status?: string; includeResult?: boolean }) =>
+      request<TaskRun[]>('GET', `/api/runs${qs({ limit, status: opts?.status, includeResult: opts?.includeResult ? 1 : undefined })}`),
     get: (id: number) =>
       request<TaskRun>('GET', `/api/runs/${id}`),
     getLogs: (runId: number, afterSeq?: number, limit?: number) =>
@@ -227,6 +269,8 @@ export const api = {
       request<QuorumVote>('POST', `/api/decisions/${id}/vote`, { workerId, vote, reasoning }),
     getVotes: (id: number) =>
       request<QuorumVote[]>('GET', `/api/decisions/${id}/votes`),
+    keeperVote: (id: number, vote: string) =>
+      request<QuorumDecision>('POST', `/api/decisions/${id}/keeper-vote`, { vote }),
   },
 
   // ─── Skills ──────────────────────────────────────────────
@@ -295,6 +339,8 @@ export const api = {
       request<WalletTransaction[]>('GET', `/api/rooms/${roomId}/wallet/transactions${qs({ limit })}`),
     summary: (roomId: number) =>
       request<RevenueSummary>('GET', `/api/rooms/${roomId}/wallet/summary`),
+    balance: (roomId: number) =>
+      request<OnChainBalance>('GET', `/api/rooms/${roomId}/wallet/balance`),
   },
 
   // ─── Credentials ──────────────────────────────────────
@@ -303,6 +349,8 @@ export const api = {
       request<Credential[]>('GET', `/api/rooms/${roomId}/credentials`),
     get: (id: number) =>
       request<Credential>('GET', `/api/credentials/${id}`),
+    validate: (roomId: number, name: string, value: string) =>
+      request<{ ok: true }>('POST', `/api/rooms/${roomId}/credentials/validate`, { name, value }),
     create: (roomId: number, name: string, value: string, type?: string) =>
       request<Credential>('POST', `/api/rooms/${roomId}/credentials`, { name, value, type }),
     delete: (id: number) =>
@@ -335,6 +383,15 @@ export const api = {
       request<{ ok: true }>('POST', `/api/rooms/${roomId}/cloud-stations/${id}/cancel`),
     delete: (roomId: number, id: number) =>
       request<{ ok: true }>('DELETE', `/api/rooms/${roomId}/cloud-stations/${id}`),
+    cryptoPrices: (roomId: number) =>
+      request<CryptoPricing>('GET', `/api/rooms/${roomId}/cloud-stations/crypto-prices`),
+    cryptoCheckout: (roomId: number, body: {
+      tier: string; name: string
+      chain?: string; token?: string
+    }) =>
+      request<{ ok: boolean; txHash: string; subscriptionId?: number; currentPeriodEnd?: string }>(
+        'POST', `/api/rooms/${roomId}/cloud-stations/crypto-checkout`, body
+      ),
   },
 
   // ─── Room Messages (inter-room) ───────────────────────
@@ -343,5 +400,7 @@ export const api = {
       request<RoomMessage[]>('GET', `/api/rooms/${roomId}/messages${qs({ status })}`),
     markRead: (roomId: number, messageId: number) =>
       request<{ ok: true }>('POST', `/api/rooms/${roomId}/messages/${messageId}/read`),
+    reply: (messageId: number, body: string, subject?: string, toRoomId?: string) =>
+      request<RoomMessage>('POST', `/api/messages/${messageId}/reply`, { body, subject, toRoomId }),
   },
 }

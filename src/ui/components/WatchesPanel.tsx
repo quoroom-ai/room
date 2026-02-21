@@ -95,27 +95,27 @@ export function WatchesPanel({ roomId, autonomyMode }: WatchesPanelProps): React
       </div>
 
       {semi && showCreateForm && (
-        <div className="p-4 border-b-2 border-blue-300 bg-interactive-bg/50 space-y-2">
+        <div className="p-4 border-b-2 border-border-primary bg-surface-secondary space-y-2">
           <input
             type="text"
             value={path}
             onChange={(e) => { setPath(e.target.value); setCreateError(null) }}
             placeholder="Absolute path (e.g. /Users/me/Downloads)"
-            className="w-full px-2.5 py-1.5 text-sm border border-border-primary rounded-lg focus:outline-none focus:border-gray-500 bg-surface-primary"
+            className="w-full px-2.5 py-1.5 text-sm border border-border-primary rounded-lg focus:outline-none focus:border-text-muted bg-surface-primary"
           />
           <input
             type="text"
             value={description}
             onChange={(e) => setDescription(e.target.value)}
             placeholder="Description (optional)"
-            className="w-full px-2.5 py-1.5 text-sm border border-border-primary rounded-lg focus:outline-none focus:border-gray-500 bg-surface-primary"
+            className="w-full px-2.5 py-1.5 text-sm border border-border-primary rounded-lg focus:outline-none focus:border-text-muted bg-surface-primary"
           />
           <textarea
             value={actionPrompt}
             onChange={(e) => setActionPrompt(e.target.value)}
             rows={3}
             placeholder="Action prompt (optional)"
-            className="w-full px-2.5 py-1.5 text-sm border border-border-primary rounded-lg focus:outline-none focus:border-gray-500 bg-surface-primary resize-y"
+            className="w-full px-2.5 py-1.5 text-sm border border-border-primary rounded-lg focus:outline-none focus:border-text-muted bg-surface-primary resize-y"
           />
           <div className="flex items-center justify-between">
             {createError && <span className="text-sm text-status-error truncate">{createError}</span>}
@@ -123,7 +123,7 @@ export function WatchesPanel({ roomId, autonomyMode }: WatchesPanelProps): React
             <button
               onClick={createWatch}
               disabled={!path.trim()}
-              className="text-sm bg-interactive text-white px-4 py-2 rounded-lg hover:bg-interactive-hover disabled:opacity-50 disabled:cursor-not-allowed"
+              className="text-sm bg-interactive text-text-invert px-4 py-2 rounded-lg hover:bg-interactive-hover disabled:opacity-50 disabled:cursor-not-allowed"
             >
               Add Watch
             </button>

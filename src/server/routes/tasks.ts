@@ -1,7 +1,18 @@
 import type { Router } from '../router'
-import type { TriggerType } from '../../shared/types'
+import type { Task, TriggerType } from '../../shared/types'
 import * as queries from '../../shared/db-queries'
 import { eventBus } from '../event-bus'
+import { runTaskNow } from '../runtime'
+
+function toTaskListItem(task: Task): Task {
+  const prompt = task.prompt.length > 500 ? `${task.prompt.slice(0, 500)}...` : task.prompt
+  return {
+    ...task,
+    prompt,
+    lastResult: null,
+    learnedContext: null,
+  }
+}
 
 export function registerTaskRoutes(router: Router): void {
   router.post('/api/tasks', (ctx) => {
@@ -9,6 +20,10 @@ export function registerTaskRoutes(router: Router): void {
     if (!body.prompt || typeof body.prompt !== 'string') {
       return { status: 400, error: 'prompt is required' }
     }
+    const timeoutMinutesRaw = body.timeoutMinutes ?? body.timeout
+    const timeoutMinutes = typeof timeoutMinutesRaw === 'number'
+      ? timeoutMinutesRaw
+      : (typeof timeoutMinutesRaw === 'string' ? Number.parseInt(timeoutMinutesRaw, 10) : undefined)
 
     const task = queries.createTask(ctx.db, {
       name: (body.name as string | undefined) || body.prompt.slice(0, 50),
@@ -20,7 +35,7 @@ export function registerTaskRoutes(router: Router): void {
       workerId: body.workerId as number | undefined,
       maxRuns: body.maxRuns as number | undefined,
       maxTurns: body.maxTurns as number | undefined,
-      timeoutMinutes: body.timeout as number | undefined,
+      timeoutMinutes: Number.isFinite(timeoutMinutes) ? timeoutMinutes : undefined,
       allowedTools: body.allowedTools as string | undefined,
       disallowedTools: body.disallowedTools as string | undefined,
       sessionContinuity: body.sessionContinuity as boolean | undefined,
@@ -33,7 +48,7 @@ export function registerTaskRoutes(router: Router): void {
   router.get('/api/tasks', (ctx) => {
     const roomId = ctx.query.roomId ? Number(ctx.query.roomId) : undefined
     const tasks = queries.listTasks(ctx.db, roomId, ctx.query.status)
-    return { data: tasks }
+    return { data: tasks.map(toTaskListItem) }
   })
 
   router.get('/api/tasks/:id', (ctx) => {
@@ -91,9 +106,12 @@ export function registerTaskRoutes(router: Router): void {
     const task = queries.getTask(ctx.db, id)
     if (!task) return { status: 404, error: 'Task not found' }
 
-    const run = queries.createTaskRun(ctx.db, id)
-    eventBus.emit('runs', 'run:created', { taskId: id, runId: run.id })
-    return { status: 201, data: { ok: true, runId: run.id } }
+    const result = runTaskNow(ctx.db, id)
+    if (!result.started) {
+      return { status: 409, error: result.reason ?? 'Task is already running' }
+    }
+
+    return { status: 202, data: { ok: true } }
   })
 
   router.post('/api/tasks/:id/reset-session', (ctx) => {

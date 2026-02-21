@@ -53,6 +53,8 @@ export function VotesPanel({ roomId, autonomyMode }: VotesPanelProps): React.JSX
   const [expandedId, setExpandedId] = useState<number | null>(null)
   const [votesCache, setVotesCache] = useState<Record<number, QuorumVote[]>>({})
   const [showCreate, setShowCreate] = useState(false)
+  const [statusFilter, setStatusFilter] = useState<string | null>(null)
+  const [typeFilter, setTypeFilter] = useState<string | null>(null)
 
   // Create form
   const [createProposal, setCreateProposal] = useState('')
@@ -61,6 +63,7 @@ export function VotesPanel({ roomId, autonomyMode }: VotesPanelProps): React.JSX
   // Vote form
   const [voteWorkerId, setVoteWorkerId] = useState<number | ''>('')
   const [voteReasoning, setVoteReasoning] = useState('')
+  const [voteError, setVoteError] = useState<string | null>(null)
 
   useEffect(() => {
     refresh()
@@ -92,16 +95,26 @@ export function VotesPanel({ roomId, autonomyMode }: VotesPanelProps): React.JSX
 
   async function handleVote(decisionId: number, vote: string): Promise<void> {
     if (!voteWorkerId) return
-    await api.decisions.vote(decisionId, Number(voteWorkerId), vote, voteReasoning || undefined)
-    setVoteReasoning('')
-    const votes = await api.decisions.getVotes(decisionId)
-    setVotesCache(prev => ({ ...prev, [decisionId]: votes }))
-    refresh()
+    setVoteError(null)
+    try {
+      await api.decisions.vote(decisionId, Number(voteWorkerId), vote, voteReasoning || undefined)
+      setVoteReasoning('')
+      const votes = await api.decisions.getVotes(decisionId)
+      setVotesCache(prev => ({ ...prev, [decisionId]: votes }))
+      refresh()
+    } catch (e) {
+      setVoteError((e as Error).message)
+    }
   }
 
   async function handleKeeperVote(decisionId: number, vote: string): Promise<void> {
-    await api.decisions.keeperVote(decisionId, vote)
-    refresh()
+    setVoteError(null)
+    try {
+      await api.decisions.keeperVote(decisionId, vote)
+      refresh()
+    } catch (e) {
+      setVoteError((e as Error).message)
+    }
   }
 
   async function handleResolve(decisionId: number, status: string): Promise<void> {
@@ -110,8 +123,16 @@ export function VotesPanel({ roomId, autonomyMode }: VotesPanelProps): React.JSX
   }
 
   const workerMap = new Map((workers ?? []).map(w => [w.id, w]))
-  const active = (decisions ?? []).filter(d => d.status === 'voting')
-  const resolved = (decisions ?? []).filter(d => d.status !== 'voting')
+  const allDecisions = decisions ?? []
+  const filtered = allDecisions.filter(d => {
+    if (statusFilter && d.status !== statusFilter) return false
+    if (typeFilter && d.decisionType !== typeFilter) return false
+    return true
+  })
+  const active = filtered.filter(d => d.status === 'voting')
+  const resolved = filtered.filter(d => d.status !== 'voting')
+  const presentStatuses = [...new Set(allDecisions.map(d => d.status))]
+  const presentTypes = [...new Set(allDecisions.map(d => d.decisionType))]
 
   return (
     <div className="flex flex-col h-full">
@@ -134,14 +155,52 @@ export function VotesPanel({ roomId, autonomyMode }: VotesPanelProps): React.JSX
         )}
       </div>
 
+      {allDecisions.length > 0 && (presentStatuses.length > 1 || presentTypes.length > 1) && (
+        <div className="px-4 py-2 flex flex-wrap gap-2 border-b border-border-primary">
+          {presentStatuses.length > 1 && presentStatuses.map(s => (
+            <button
+              key={s}
+              onClick={() => setStatusFilter(statusFilter === s ? null : s)}
+              className={`px-2.5 py-1 rounded-lg text-xs font-medium transition-colors ${
+                statusFilter === s
+                  ? STATUS_COLORS[s] ?? 'bg-surface-tertiary text-text-muted'
+                  : statusFilter === null
+                    ? STATUS_COLORS[s] ?? 'bg-surface-tertiary text-text-muted'
+                    : 'bg-surface-tertiary text-text-muted'
+              }`}
+            >
+              {s}
+            </button>
+          ))}
+          {presentStatuses.length > 1 && presentTypes.length > 1 && (
+            <span className="text-text-muted text-xs leading-6">|</span>
+          )}
+          {presentTypes.length > 1 && presentTypes.map(t => (
+            <button
+              key={t}
+              onClick={() => setTypeFilter(typeFilter === t ? null : t)}
+              className={`px-2.5 py-1 rounded-lg text-xs font-medium transition-colors ${
+                typeFilter === t
+                  ? 'bg-interactive-bg text-interactive'
+                  : typeFilter === null
+                    ? 'bg-surface-tertiary text-text-secondary'
+                    : 'bg-surface-tertiary text-text-muted'
+              }`}
+            >
+              {TYPE_LABELS[t] ?? t}
+            </button>
+          ))}
+        </div>
+      )}
+
       {semi && showCreate && (
-        <div className="p-4 border-b-2 border-blue-300 bg-interactive-bg/50 space-y-2">
+        <div className="p-4 border-b border-border-primary bg-surface-secondary space-y-2">
           <textarea
             placeholder="What should the group decide on?"
             value={createProposal}
             onChange={(e) => setCreateProposal(e.target.value)}
             rows={2}
-            className="w-full px-2.5 py-1.5 text-sm border border-border-primary rounded-lg focus:outline-none focus:border-gray-500 bg-surface-primary resize-y"
+            className="w-full px-2.5 py-1.5 text-sm border border-border-primary rounded-lg focus:outline-none focus:border-interactive bg-surface-primary text-text-primary placeholder:text-text-muted resize-y"
           />
           <div className="flex gap-2 items-center">
             <Select
@@ -153,7 +212,7 @@ export function VotesPanel({ roomId, autonomyMode }: VotesPanelProps): React.JSX
             <button
               onClick={handleCreate}
               disabled={!createProposal.trim()}
-              className="text-sm bg-interactive text-white px-4 py-2 rounded-lg hover:bg-interactive-hover disabled:opacity-50 disabled:cursor-not-allowed"
+              className="text-sm bg-interactive text-text-invert px-4 py-2 rounded-lg hover:bg-interactive-hover disabled:opacity-50 disabled:cursor-not-allowed"
             >
               Submit
             </button>
@@ -187,6 +246,7 @@ export function VotesPanel({ roomId, autonomyMode }: VotesPanelProps): React.JSX
                       votes={votesCache[d.id]}
                       voteWorkerId={voteWorkerId}
                       voteReasoning={voteReasoning}
+                      voteError={voteError}
                       semi={semi}
                       onToggle={() => toggleExpand(d.id)}
                       onVote={(vote) => handleVote(d.id, vote)}
@@ -217,6 +277,7 @@ export function VotesPanel({ roomId, autonomyMode }: VotesPanelProps): React.JSX
                       votes={votesCache[d.id]}
                       voteWorkerId={voteWorkerId}
                       voteReasoning={voteReasoning}
+                      voteError={voteError}
                       semi={semi}
                       onToggle={() => toggleExpand(d.id)}
                       onVote={(vote) => handleVote(d.id, vote)}
@@ -244,6 +305,7 @@ interface DecisionRowProps {
   votes?: QuorumVote[]
   voteWorkerId: number | ''
   voteReasoning: string
+  voteError: string | null
   semi: boolean
   onToggle: () => void
   onVote: (vote: string) => void
@@ -255,7 +317,7 @@ interface DecisionRowProps {
 
 function DecisionRow({
   decision: d, workerMap, workers, expanded, votes,
-  voteWorkerId, voteReasoning, semi,
+  voteWorkerId, voteReasoning, voteError, semi,
   onToggle, onVote, onKeeperVote, onResolve, onVoteWorkerChange, onVoteReasoningChange
 }: DecisionRowProps): React.JSX.Element {
   const isVoting = d.status === 'voting'
@@ -281,9 +343,9 @@ function DecisionRow({
             {isVoting && d.timeoutAt && (
               <span className="text-xs text-orange-500">{formatTimeout(d.timeoutAt)}</span>
             )}
-            {d.proposerId && workerMap.has(d.proposerId) && (
-              <span className="text-xs text-text-muted">by {workerMap.get(d.proposerId)!.name}</span>
-            )}
+            <span className="text-xs text-text-muted">
+              by {d.proposerId && workerMap.has(d.proposerId) ? workerMap.get(d.proposerId)!.name : 'Keeper'}
+            </span>
             {d.result && (
               <span className="text-xs text-text-muted truncate">{d.result}</span>
             )}
@@ -294,8 +356,8 @@ function DecisionRow({
 
       {expanded && (
         <div className="px-3 pb-3 bg-surface-secondary space-y-2">
-          {/* Keeper vote (semi-auto mode) */}
-          {isVoting && semi && (
+          {/* Keeper vote */}
+          {isVoting && (
             <div className="flex items-center gap-2 py-1">
               <span className="text-xs font-medium text-text-secondary shrink-0">Keeper vote:</span>
               {d.keeperVote ? (
@@ -347,7 +409,7 @@ function DecisionRow({
                   value={voteReasoning}
                   onChange={(e) => onVoteReasoningChange(e.target.value)}
                   placeholder="Reasoning (optional)"
-                  className="flex-1 px-2.5 py-1.5 text-sm border border-border-primary rounded-lg focus:outline-none focus:border-gray-500 bg-surface-primary"
+                  className="flex-1 px-2.5 py-1.5 text-sm border border-border-primary rounded-lg focus:outline-none focus:border-text-muted bg-surface-primary text-text-primary"
                 />
               </div>
               <div className="flex gap-2">
@@ -391,6 +453,10 @@ function DecisionRow({
                 )}
               </div>
             </div>
+          )}
+
+          {voteError && (
+            <div className="text-xs text-status-error">{voteError}</div>
           )}
 
           {/* Vote breakdown */}

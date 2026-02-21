@@ -1,7 +1,9 @@
-import { useState } from 'react'
+import { useState, useRef, useEffect } from 'react'
 import { usePolling } from '../hooks/usePolling'
 import { api } from '../lib/client'
 import { Select } from './Select'
+import { CopyAddressButton } from './CopyAddressButton'
+import { PromptDialog } from './PromptDialog'
 import type { Room, Wallet, RevenueSummary, OnChainBalance } from '@shared/types'
 
 interface RoomSettingsPanelProps {
@@ -22,6 +24,13 @@ interface QueenStatus {
   }
 }
 
+type ApiKeyFeedback = {
+  kind: 'info' | 'success' | 'error'
+  text: string
+}
+
+type ApiKeyPromptMode = 'validate' | 'save'
+
 export function RoomSettingsPanel({ roomId }: RoomSettingsPanelProps): React.JSX.Element {
   const { data: rooms, refresh } = usePolling<Room[]>(() => api.rooms.list(), 10000)
   const { data: wallet } = usePolling<Wallet | null>(
@@ -33,28 +42,51 @@ export function RoomSettingsPanel({ roomId }: RoomSettingsPanelProps): React.JSX
     30000
   )
   const { data: onChainBalance } = usePolling<OnChainBalance | null>(
-    () => roomId ? api.wallet.balance(roomId).catch(() => null) : Promise.resolve(null),
+    () => roomId && wallet ? api.wallet.balance(roomId).catch(() => null) : Promise.resolve(null),
     30000
   )
   const [queenRunning, setQueenRunning] = useState<Record<number, boolean>>({})
   const [queenModel, setQueenModel] = useState<Record<number, string | null>>({})
   const [queenAuth, setQueenAuth] = useState<Record<number, QueenStatus['auth'] | null>>({})
-  usePolling(async () => {
-    if (!rooms || rooms.length === 0) return {}
+  const pendingModelUpdate = useRef(false)
+  const queenStatusLoaded = useRef(false)
+
+  // Fetch queen status for all rooms
+  const fetchQueenStatusRef = useRef(async (roomList: Room[]) => {
     const entries = await Promise.all(
-      rooms.map(async r => {
+      roomList.map(async r => {
         const q = await api.rooms.queenStatus(r.id).catch(() => null)
         return [r.id, q] as const
       })
     )
     setQueenRunning(Object.fromEntries(entries.map(([id, q]) => [id, q?.running ?? false])))
-    setQueenModel(Object.fromEntries(entries.map(([id, q]) => [id, q?.model ?? null])))
-    setQueenAuth(Object.fromEntries(entries.map(([id, q]) => [id, q?.auth ?? null])))
+    if (!pendingModelUpdate.current) {
+      setQueenModel(Object.fromEntries(entries.map(([id, q]) => [id, q?.model ?? null])))
+      setQueenAuth(Object.fromEntries(entries.map(([id, q]) => [id, q?.auth ?? null])))
+    }
+  })
+
+  // Fetch queen status immediately when rooms first load (no 5s delay)
+  useEffect(() => {
+    if (!rooms || rooms.length === 0 || queenStatusLoaded.current) return
+    queenStatusLoaded.current = true
+    void fetchQueenStatusRef.current(rooms)
+  }, [rooms])
+
+  usePolling(async () => {
+    if (!rooms || rooms.length === 0) return {}
+    await fetchQueenStatusRef.current(rooms)
     return {}
   }, 5000)
 
   const [roomOverrides, setRoomOverrides] = useState<Record<number, Partial<Room>>>({})
-  const [copyState, setCopyState] = useState<'idle' | 'ok' | 'error'>('idle')
+  const [apiKeyPrompt, setApiKeyPrompt] = useState<{
+    roomId: number
+    auth: NonNullable<QueenStatus['auth']>
+    mode: ApiKeyPromptMode
+  } | null>(null)
+  const [apiKeyBusyRoomId, setApiKeyBusyRoomId] = useState<number | null>(null)
+  const [apiKeyFeedback, setApiKeyFeedback] = useState<Record<number, ApiKeyFeedback | null>>({})
 
   function optimistic(id: number, patch: Partial<Room>): void {
     setRoomOverrides(prev => ({ ...prev, [id]: { ...prev[id], ...patch } }))
@@ -129,29 +161,71 @@ export function RoomSettingsPanel({ roomId }: RoomSettingsPanelProps): React.JSX
   async function handleSetQueenModel(room: Room, model: string): Promise<void> {
     if (!room.queenWorkerId) return
     const dbModel = model === 'claude' ? null : model
+    // Save previous state for rollback on error
+    const prevModel = queenModel[room.id] ?? null
+    const prevAuth = queenAuth[room.id] ?? null
     setQueenModel(prev => ({ ...prev, [room.id]: dbModel }))
+    // Set auth optimistically so API key row appears immediately
+    if (model.startsWith('openai:')) {
+      setQueenAuth(prev => ({ ...prev, [room.id]: { provider: 'openai_api', mode: 'api', credentialName: 'openai_api_key', envVar: 'OPENAI_API_KEY', hasCredential: false, hasEnvKey: false, ready: false } }))
+    } else if (model.startsWith('anthropic:')) {
+      setQueenAuth(prev => ({ ...prev, [room.id]: { provider: 'anthropic_api', mode: 'api', credentialName: 'anthropic_api_key', envVar: 'ANTHROPIC_API_KEY', hasCredential: false, hasEnvKey: false, ready: false } }))
+    } else {
+      setQueenAuth(prev => ({ ...prev, [room.id]: { provider: 'claude_subscription', mode: 'subscription', credentialName: null, envVar: null, hasCredential: false, hasEnvKey: false, ready: true } }))
+    }
+    pendingModelUpdate.current = true
     try {
       await api.workers.update(room.queenWorkerId, { model: dbModel })
       const q = await api.rooms.queenStatus(room.id).catch(() => null)
       if (q) {
+        setQueenModel(prev => ({ ...prev, [room.id]: q.model ?? null }))
         setQueenAuth(prev => ({ ...prev, [room.id]: q.auth }))
       }
     } catch (e) {
       console.error('Failed to update queen model:', e)
+      // Revert optimistic state — update didn't persist
+      setQueenModel(prev => ({ ...prev, [room.id]: prevModel }))
+      setQueenAuth(prev => ({ ...prev, [room.id]: prevAuth }))
+    } finally {
+      pendingModelUpdate.current = false
     }
   }
 
-  async function handleSetQueenApiKey(room: Room, auth: QueenStatus['auth'] | null): Promise<void> {
+  function openApiKeyPrompt(room: Room, auth: QueenStatus['auth'] | null, mode: ApiKeyPromptMode): void {
     if (!auth || auth.mode !== 'api' || !auth.credentialName) return
+    setApiKeyPrompt({ roomId: room.id, auth, mode })
+    setApiKeyFeedback(prev => ({ ...prev, [room.id]: null }))
+  }
+
+  async function submitApiKey(value: string): Promise<void> {
+    if (!apiKeyPrompt) return
+    const { roomId: targetRoomId, auth, mode } = apiKeyPrompt
+    if (apiKeyBusyRoomId === targetRoomId) return
     const providerName = auth.credentialName === 'openai_api_key' ? 'OpenAI' : 'Anthropic'
-    const entered = window.prompt(`Enter ${providerName} API key for this room:`)
-    if (!entered) return
-    const value = entered.trim()
-    if (!value) return
-    await api.credentials.create(room.id, auth.credentialName, value, 'api_key')
-    const q = await api.rooms.queenStatus(room.id).catch(() => null)
-    if (q) {
-      setQueenAuth(prev => ({ ...prev, [room.id]: q.auth }))
+    const shouldSave = mode === 'save'
+    if (shouldSave) pendingModelUpdate.current = true
+    setApiKeyBusyRoomId(targetRoomId)
+    setApiKeyFeedback(prev => ({ ...prev, [targetRoomId]: { kind: 'info', text: `Validating ${providerName} key...` } }))
+    try {
+      await api.credentials.validate(targetRoomId, auth.credentialName!, value)
+      if (shouldSave) {
+        await api.credentials.create(targetRoomId, auth.credentialName!, value, 'api_key')
+        setQueenAuth(prev => ({ ...prev, [targetRoomId]: { ...auth, hasCredential: true, ready: true } }))
+        const q = await api.rooms.queenStatus(targetRoomId).catch(() => null)
+        if (q) {
+          setQueenAuth(prev => ({ ...prev, [targetRoomId]: q.auth }))
+        }
+        setApiKeyFeedback(prev => ({ ...prev, [targetRoomId]: { kind: 'success', text: `${providerName} API key validated and saved.` } }))
+      } else {
+        setApiKeyFeedback(prev => ({ ...prev, [targetRoomId]: { kind: 'success', text: `${providerName} API key is valid.` } }))
+      }
+      setApiKeyPrompt(null)
+    } catch (e) {
+      const message = e instanceof Error ? e.message : `Failed to validate ${providerName} API key`
+      setApiKeyFeedback(prev => ({ ...prev, [targetRoomId]: { kind: 'error', text: message } }))
+    } finally {
+      if (shouldSave) pendingModelUpdate.current = false
+      setApiKeyBusyRoomId(null)
     }
   }
 
@@ -165,28 +239,6 @@ export function RoomSettingsPanel({ roomId }: RoomSettingsPanelProps): React.JSX
     setQueenRunning(prev => ({ ...prev, [roomId]: false }))
   }
 
-  async function copyWalletAddress(address: string): Promise<void> {
-    try {
-      if (navigator.clipboard?.writeText) {
-        await navigator.clipboard.writeText(address)
-      } else {
-        const input = document.createElement('textarea')
-        input.value = address
-        input.setAttribute('readonly', '')
-        input.style.position = 'absolute'
-        input.style.left = '-9999px'
-        document.body.appendChild(input)
-        input.select()
-        document.execCommand('copy')
-        document.body.removeChild(input)
-      }
-      setCopyState('ok')
-    } catch {
-      setCopyState('error')
-    }
-
-    window.setTimeout(() => setCopyState('idle'), 1200)
-  }
 
   if (roomId === null) {
     return <p className="p-4 text-sm text-text-muted">Select a room to view its settings.</p>
@@ -245,13 +297,13 @@ export function RoomSettingsPanel({ roomId }: RoomSettingsPanelProps): React.JSX
                   <button
                     onClick={() => handleSetAutonomy(room, 'auto')}
                     className={`px-4 py-2 text-sm font-medium transition-colors ${
-                      room.autonomyMode === 'auto' ? 'bg-interactive text-white' : 'bg-surface-primary text-text-muted hover:bg-surface-hover'
+                      room.autonomyMode === 'auto' ? 'bg-interactive text-text-invert' : 'bg-surface-primary text-text-muted hover:bg-surface-hover'
                     }`}
                   >Auto</button>
                   <button
                     onClick={() => handleSetAutonomy(room, 'semi')}
                     className={`px-4 py-2 text-sm font-medium transition-colors ${
-                      room.autonomyMode === 'semi' ? 'bg-interactive text-white' : 'bg-surface-primary text-text-muted hover:bg-surface-hover'
+                      room.autonomyMode === 'semi' ? 'bg-interactive text-text-invert' : 'bg-surface-primary text-text-muted hover:bg-surface-hover'
                     }`}
                   >Semi</button>
                 </div>,
@@ -265,9 +317,9 @@ export function RoomSettingsPanel({ roomId }: RoomSettingsPanelProps): React.JSX
                   onChange={(v) => handleSetQueenModel(room, v)}
                   options={[
                     { value: 'claude', label: 'Claude Code (subscription)' },
-                    { value: 'claude-opus-4-6', label: 'Opus' },
-                    { value: 'claude-sonnet-4-6', label: 'Sonnet' },
-                    { value: 'claude-haiku-4-5-20251001', label: 'Haiku' },
+                    { value: 'claude-opus-4-6', label: 'Opus (subscription)' },
+                    { value: 'claude-sonnet-4-6', label: 'Sonnet (subscription)' },
+                    { value: 'claude-haiku-4-5-20251001', label: 'Haiku (subscription)' },
                     { value: 'codex', label: 'Codex (ChatGPT subscription)' },
                     { value: 'openai:gpt-4o-mini', label: 'OpenAI API' },
                     { value: 'anthropic:claude-3-5-sonnet-latest', label: 'Claude API' },
@@ -285,13 +337,32 @@ export function RoomSettingsPanel({ roomId }: RoomSettingsPanelProps): React.JSX
                         : 'Missing'}
                     </span>
                     <button
-                      onClick={() => handleSetQueenApiKey(room, activeQueenAuth)}
-                      className="text-xs px-2.5 py-1.5 rounded-lg border border-border-primary text-text-secondary hover:bg-surface-hover"
+                      onClick={() => openApiKeyPrompt(room, activeQueenAuth, 'validate')}
+                      disabled={apiKeyBusyRoomId === room.id}
+                      className="text-xs px-2.5 py-1.5 rounded-lg border border-border-primary text-text-secondary hover:bg-surface-hover disabled:opacity-50 disabled:cursor-not-allowed"
                     >
-                      {activeQueenAuth.hasCredential ? 'Update' : 'Set'}
+                      Test
+                    </button>
+                    <button
+                      onClick={() => openApiKeyPrompt(room, activeQueenAuth, 'save')}
+                      disabled={apiKeyBusyRoomId === room.id}
+                      className="text-xs px-2.5 py-1.5 rounded-lg border border-border-primary text-text-secondary hover:bg-surface-hover disabled:opacity-50 disabled:cursor-not-allowed"
+                    >
+                      {apiKeyBusyRoomId === room.id ? 'Validating...' : activeQueenAuth.hasCredential ? 'Update' : 'Set'}
                     </button>
                   </div>
                 )
+              )}
+              {apiKeyFeedback[room.id] && (
+                <div className={`text-xs mt-1 ${
+                  apiKeyFeedback[room.id]?.kind === 'success'
+                    ? 'text-status-success'
+                    : apiKeyFeedback[room.id]?.kind === 'error'
+                      ? 'text-status-error'
+                      : 'text-text-muted'
+                }`}>
+                  {apiKeyFeedback[room.id]?.text}
+                </div>
               )}
 
               {/* Sessions */}
@@ -406,19 +477,8 @@ export function RoomSettingsPanel({ roomId }: RoomSettingsPanelProps): React.JSX
                       <code className="text-xs text-text-muted bg-surface-primary border border-border-primary rounded-lg px-2 py-1 truncate flex-1" title={wallet.address}>
                         {wallet.address}
                       </code>
-                      <button
-                        onClick={() => copyWalletAddress(wallet.address)}
-                        className="text-xs px-2.5 py-1.5 rounded-lg border border-border-primary text-text-secondary hover:bg-surface-hover transition-colors"
-                      >
-                        Copy
-                      </button>
+                      <CopyAddressButton address={wallet.address} />
                     </div>
-                    {copyState === 'ok' && (
-                      <p className="text-xs text-status-success mt-1">Copied.</p>
-                    )}
-                    {copyState === 'error' && (
-                      <p className="text-xs text-status-error mt-1">Copy failed.</p>
-                    )}
                     {onChainBalance && onChainBalance.totalBalance > 0 && (
                       <div className="text-sm mt-1">
                         <span className="text-interactive font-medium">${onChainBalance.totalBalance.toFixed(2)}</span>
@@ -456,13 +516,13 @@ export function RoomSettingsPanel({ roomId }: RoomSettingsPanelProps): React.JSX
                   <button
                     onClick={() => handleSetWorkerModel(room, false)}
                     className={`px-4 py-2 text-sm font-medium transition-colors ${
-                      !(room.workerModel ?? 'claude').startsWith('ollama:') ? 'bg-interactive text-white' : 'bg-surface-primary text-text-muted hover:bg-surface-hover'
+                      !(room.workerModel ?? 'claude').startsWith('ollama:') ? 'bg-interactive text-text-invert' : 'bg-surface-primary text-text-muted hover:bg-surface-hover'
                     }`}
                   >Claude</button>
                   <button
                     onClick={() => handleSetWorkerModel(room, true)}
                     className={`px-4 py-2 text-sm font-medium transition-colors ${
-                      (room.workerModel ?? 'claude').startsWith('ollama:') ? 'bg-interactive text-white' : 'bg-surface-primary text-text-muted hover:bg-surface-hover'
+                      (room.workerModel ?? 'claude').startsWith('ollama:') ? 'bg-interactive text-text-invert' : 'bg-surface-primary text-text-muted hover:bg-surface-hover'
                     }`}
                   >Ollama</button>
                 </div>,
@@ -500,6 +560,20 @@ export function RoomSettingsPanel({ roomId }: RoomSettingsPanelProps): React.JSX
           </div>
         </div>
       </div>
+
+      {apiKeyPrompt && (
+        <PromptDialog
+          title={`Enter ${apiKeyPrompt.auth.credentialName === 'openai_api_key' ? 'OpenAI' : 'Anthropic'} API key ${apiKeyPrompt.mode === 'save' ? 'to save' : 'to test'}:`}
+          placeholder="sk-..."
+          type="password"
+          confirmLabel={apiKeyBusyRoomId === apiKeyPrompt.roomId ? 'Validating...' : apiKeyPrompt.mode === 'save' ? 'Validate & Save' : 'Validate'}
+          onConfirm={submitApiKey}
+          onCancel={() => {
+            if (apiKeyBusyRoomId === apiKeyPrompt.roomId) return
+            setApiKeyPrompt(null)
+          }}
+        />
+      )}
     </div>
   )
 }

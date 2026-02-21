@@ -33,8 +33,8 @@ export function registerInboxTools(server: McpServer): void {
     'quoroom_inbox_send_room',
     {
       title: 'Send Message to Another Room',
-      description: 'Send an inter-room message (outbound). Requires quorum approval — a proposal is created first. '
-        + 'If approved (or auto-approved), the message is sent. Call again after quorum votes yes. '
+      description: 'Send an inter-room message (outbound) immediately. '
+        + 'A quorum proposal is logged as non-blocking audit (best effort). '
         + 'RESPONSE STYLE: Confirm briefly in 1 sentence.',
       inputSchema: {
         roomId: z.number().describe('Your room ID'),
@@ -52,37 +52,39 @@ export function registerInboxTools(server: McpServer): void {
         const approvedDecisions = queries.listDecisions(db, roomId, 'approved')
         const alreadyApproved = approvedDecisions.find(d => d.proposal === proposalText)
 
+        // Best-effort quorum audit proposal (non-blocking).
+        let auditDecisionId: number | null = null
+        let auditError: string | null = null
         if (!alreadyApproved) {
-          // Check for pending vote (don't create duplicate proposals)
-          const pendingDecisions = queries.listDecisions(db, roomId, 'voting')
-          const alreadyPending = pendingDecisions.find(d => d.proposal === proposalText)
-          if (alreadyPending) {
-            return { content: [{ type: 'text' as const, text: `Proposal #${alreadyPending.id} is pending quorum vote. Vote YES to approve, then call this tool again.` }] }
-          }
-
-          // Create proposal
-          const decision = propose(db, {
-            roomId,
-            proposerId: null,
-            proposal: proposalText,
-            decisionType: 'strategy',
-          })
-
-          if (decision.status === 'voting') {
-            // Try tallying — if there are votes already (e.g. proposer auto-voted)
-            tally(db, decision.id)
-            const updated = queries.getDecision(db, decision.id)
-            if (updated?.status !== 'approved') {
-              return { content: [{ type: 'text' as const, text: `Proposal #${decision.id} created and pending quorum vote. Vote YES on it (quoroom_vote), then call this tool again.` }] }
+          try {
+            const pendingDecisions = queries.listDecisions(db, roomId, 'voting')
+            const alreadyPending = pendingDecisions.find(d => d.proposal === proposalText)
+            if (!alreadyPending) {
+              const decision = propose(db, {
+                roomId,
+                proposerId: null,
+                proposal: proposalText,
+                decisionType: 'low_impact',
+              })
+              if (decision.status === 'voting') {
+                // If there are any votes, this may resolve immediately.
+                tally(db, decision.id)
+              }
+              auditDecisionId = decision.id
+            } else {
+              auditDecisionId = alreadyPending.id
             }
-          } else if (decision.status !== 'approved') {
-            return { content: [{ type: 'text' as const, text: `Proposal #${decision.id} was ${decision.status}.` }] }
+          } catch (e) {
+            auditError = (e as Error).message
           }
         }
 
-        // Approved — send the message
+        // Always send the message (flexible mode).
         const msg = queries.createRoomMessage(db, roomId, 'outbound', subject, body, { toRoomId })
-        return { content: [{ type: 'text' as const, text: `Message sent to room ${toRoomId} (id: ${msg.id}).` }] }
+        const auditSuffix = auditDecisionId
+          ? ` Quorum audit proposal #${auditDecisionId} logged.`
+          : (auditError ? ` Quorum audit skipped: ${auditError}.` : '')
+        return { content: [{ type: 'text' as const, text: `Message sent to room ${toRoomId} (id: ${msg.id}).${auditSuffix}` }] }
       } catch (e) {
         return { content: [{ type: 'text' as const, text: (e as Error).message }], isError: true }
       }

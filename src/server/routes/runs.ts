@@ -1,5 +1,6 @@
 import type { Router } from '../router'
 import * as queries from '../../shared/db-queries'
+import type { TaskRun } from '../../shared/types'
 
 function parseLimit(raw: string | undefined, fallback: number, max: number): number {
   const n = Number(raw)
@@ -10,7 +11,21 @@ function parseLimit(raw: string | undefined, fallback: number, max: number): num
 export function registerRunRoutes(router: Router): void {
   router.get('/api/runs', (ctx) => {
     const limit = parseLimit(ctx.query.limit, 20, 500)
-    const runs = queries.listAllRuns(ctx.db, limit)
+    const status = ctx.query.status
+    const includeResult = ctx.query.includeResult === '1'
+    let runs: TaskRun[]
+
+    if (status === 'running') {
+      runs = queries.getRunningTaskRuns(ctx.db).slice(0, limit)
+    } else if (status) {
+      runs = queries.listAllRuns(ctx.db, limit).filter((run) => run.status === status)
+    } else {
+      runs = queries.listAllRuns(ctx.db, limit)
+    }
+
+    if (!includeResult) {
+      runs = runs.map((run) => ({ ...run, result: null }))
+    }
     return { data: runs }
   })
 

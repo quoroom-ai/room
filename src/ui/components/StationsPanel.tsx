@@ -2,6 +2,8 @@ import { useEffect, useState } from 'react'
 import { usePolling } from '../hooks/usePolling'
 import { api } from '../lib/client'
 import { formatRelativeTime } from '../utils/time'
+import { CryptoStationModal } from './CryptoStationModal'
+import type { Wallet, OnChainBalance } from '@shared/types'
 
 const CLOUD_STATIONS_URL = 'https://quoroom.ai/stations'
 
@@ -54,6 +56,20 @@ export function StationsPanel({ roomId, autonomyMode }: StationsPanelProps): Rea
   const [cloudRoomId, setCloudRoomId] = useState<string | null>(null)
   const [confirmAction, setConfirmAction] = useState<{ id: number; action: 'cancel' | 'delete' } | null>(null)
   const [busy, setBusy] = useState<number | null>(null)
+  const [actionError, setActionError] = useState<string | null>(null)
+  const [showCryptoModal, setShowCryptoModal] = useState(false)
+
+  // Check if room has a wallet
+  const { data: wallet } = usePolling<Wallet | null>(
+    () => roomId ? api.wallet.get(roomId).catch(() => null) : Promise.resolve(null),
+    30000
+  )
+
+  // Fetch on-chain balance
+  const { data: onChainBalance } = usePolling<OnChainBalance | null>(
+    () => roomId && wallet ? api.wallet.balance(roomId).catch(() => null) : Promise.resolve(null),
+    30000
+  )
 
   // Fetch the cloud room ID (stable hash) from local server
   useEffect(() => {
@@ -78,9 +94,12 @@ export function StationsPanel({ roomId, autonomyMode }: StationsPanelProps): Rea
   async function handleStart(id: number): Promise<void> {
     if (!roomId) return
     setBusy(id)
+    setActionError(null)
     try {
       await api.cloudStations.start(roomId, id)
       refresh()
+    } catch (err) {
+      setActionError(err instanceof Error ? err.message : 'Failed to start station')
     } finally {
       setBusy(null)
     }
@@ -89,9 +108,12 @@ export function StationsPanel({ roomId, autonomyMode }: StationsPanelProps): Rea
   async function handleStop(id: number): Promise<void> {
     if (!roomId) return
     setBusy(id)
+    setActionError(null)
     try {
       await api.cloudStations.stop(roomId, id)
       refresh()
+    } catch (err) {
+      setActionError(err instanceof Error ? err.message : 'Failed to stop station')
     } finally {
       setBusy(null)
     }
@@ -100,10 +122,13 @@ export function StationsPanel({ roomId, autonomyMode }: StationsPanelProps): Rea
   async function handleCancel(id: number): Promise<void> {
     if (!roomId) return
     setBusy(id)
+    setActionError(null)
     try {
       await api.cloudStations.cancel(roomId, id)
       setConfirmAction(null)
       refresh()
+    } catch (err) {
+      setActionError(err instanceof Error ? err.message : 'Failed to cancel station')
     } finally {
       setBusy(null)
     }
@@ -112,10 +137,13 @@ export function StationsPanel({ roomId, autonomyMode }: StationsPanelProps): Rea
   async function handleDelete(id: number): Promise<void> {
     if (!roomId) return
     setBusy(id)
+    setActionError(null)
     try {
       await api.cloudStations.delete(roomId, id)
       setConfirmAction(null)
       refresh()
+    } catch (err) {
+      setActionError(err instanceof Error ? err.message : 'Failed to delete station')
     } finally {
       setBusy(null)
     }
@@ -141,20 +169,43 @@ export function StationsPanel({ roomId, autonomyMode }: StationsPanelProps): Rea
           {totalMonthlyCost > 0 && (
             <span className="text-xs text-text-muted">${totalMonthlyCost}/mo</span>
           )}
-          {cloudRoomId && (
-            <button
-              onClick={handleAddStation}
-              className="text-xs px-2.5 py-1.5 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700"
-            >
-              + Add Station
-            </button>
-          )}
+          <div className="flex items-center gap-1.5">
+            {cloudRoomId && (
+              <button
+                onClick={handleAddStation}
+                className="text-xs px-2.5 py-1.5 bg-interactive text-text-invert rounded-lg hover:bg-interactive-hover"
+              >
+                + Add Station with Card
+              </button>
+            )}
+            {semi && wallet && (
+              <button
+                onClick={() => setShowCryptoModal(true)}
+                className="text-xs px-2.5 py-1.5 bg-status-success text-text-invert rounded-lg hover:opacity-90"
+              >
+                + Add Station with USDC/USDT
+              </button>
+            )}
+          </div>
         </div>
       </div>
 
+      {wallet && onChainBalance && (
+        <div className="bg-surface-secondary rounded-lg px-3 py-2 flex items-center justify-between">
+          <span className="text-xs text-text-secondary">Wallet balance</span>
+          <span className="text-sm font-semibold text-text-primary">${onChainBalance.totalBalance.toFixed(2)}</span>
+        </div>
+      )}
+
+      {actionError && (
+        <div className="px-3 py-2 text-sm text-status-warning bg-status-warning-bg rounded-lg">
+          {actionError}
+        </div>
+      )}
+
       {(!stations || stations.length === 0) ? (
         <div className="text-sm text-text-muted py-4 text-center">
-          No stations. Click "Add Station" to rent a cloud server.
+          No stations yet.
         </div>
       ) : (
         <div className="space-y-2">
@@ -205,7 +256,7 @@ export function StationsPanel({ roomId, autonomyMode }: StationsPanelProps): Rea
                           ? handleCancel(station.id)
                           : handleDelete(station.id)}
                         disabled={busy === station.id}
-                        className="text-xs px-2.5 py-1.5 bg-status-error text-white rounded-lg disabled:opacity-50"
+                        className="text-xs px-2.5 py-1.5 bg-status-error text-text-invert rounded-lg disabled:opacity-50"
                       >
                         {confirmAction.action === 'cancel' ? 'Confirm cancel' : 'Confirm delete'}
                       </button>
@@ -243,6 +294,16 @@ export function StationsPanel({ roomId, autonomyMode }: StationsPanelProps): Rea
             </div>
           ))}
         </div>
+      )}
+
+      {showCryptoModal && roomId && (
+        <CryptoStationModal
+          roomId={roomId}
+          onClose={() => setShowCryptoModal(false)}
+          onSuccess={() => { setShowCryptoModal(false); refresh() }}
+          walletBalance={onChainBalance ?? null}
+          walletAddress={wallet?.address ?? null}
+        />
       )}
     </div>
   )

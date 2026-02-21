@@ -85,25 +85,25 @@ export function SkillsPanel({ roomId, autonomyMode }: SkillsPanelProps): React.J
       </div>
 
       {semi && showCreate && (
-        <div className="p-4 border-b-2 border-blue-300 bg-interactive-bg/50 space-y-2">
+        <div className="p-4 border-b-2 border-border-primary bg-surface-secondary space-y-2">
           <input
             placeholder="Skill name"
             value={createName}
             onChange={(e) => setCreateName(e.target.value)}
-            className="w-full px-2.5 py-1.5 text-sm border border-border-primary rounded-lg focus:outline-none focus:border-gray-500 bg-surface-primary"
+            className="w-full px-2.5 py-1.5 text-sm border border-border-primary rounded-lg focus:outline-none focus:border-text-muted bg-surface-primary"
           />
           <textarea
             placeholder="Skill content (instructions, code, etc.)"
             value={createContent}
             onChange={(e) => setCreateContent(e.target.value)}
             rows={4}
-            className="w-full px-2.5 py-1.5 text-sm border border-border-primary rounded-lg focus:outline-none focus:border-gray-500 bg-surface-primary resize-y font-mono"
+            className="w-full px-2.5 py-1.5 text-sm border border-border-primary rounded-lg focus:outline-none focus:border-text-muted bg-surface-primary resize-y font-mono"
           />
           <input
             placeholder="Activation contexts (comma-separated, optional)"
             value={createContexts}
             onChange={(e) => setCreateContexts(e.target.value)}
-            className="w-full px-2.5 py-1.5 text-sm border border-border-primary rounded-lg focus:outline-none focus:border-gray-500 bg-surface-primary"
+            className="w-full px-2.5 py-1.5 text-sm border border-border-primary rounded-lg focus:outline-none focus:border-text-muted bg-surface-primary"
           />
           <div className="flex gap-2 items-center">
             <label className="flex items-center gap-2 text-sm text-text-secondary cursor-pointer shrink-0">
@@ -118,7 +118,7 @@ export function SkillsPanel({ roomId, autonomyMode }: SkillsPanelProps): React.J
             <button
               onClick={handleCreate}
               disabled={!createName.trim() || !createContent.trim()}
-              className="text-sm bg-interactive text-white px-4 py-2 rounded-lg hover:bg-interactive-hover disabled:opacity-50 disabled:cursor-not-allowed shrink-0"
+              className="text-sm bg-interactive text-text-invert px-4 py-2 rounded-lg hover:bg-interactive-hover disabled:opacity-50 disabled:cursor-not-allowed shrink-0"
             >
               Create
             </button>

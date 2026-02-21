@@ -1,5 +1,5 @@
 import type Database from 'better-sqlite3'
-import type { Entity, Observation, Relation, MemoryStats, Task, CreateTaskInput, TaskRun, Worker, CreateWorkerInput, TriggerType, TaskStatus, Watch, ConsoleLogEntry, Room, RoomConfig, RoomActivityEntry, ActivityEventType, QuorumDecision, DecisionType, DecisionStatus, QuorumVote, VoteValue, Goal, GoalStatus, GoalUpdate, Skill, SelfModAuditEntry, Escalation, EscalationStatus, ChatMessage, Credential, Wallet, WalletTransaction, WalletTransactionType, Station, StationStatus, StationProvider, StationTier, RoomMessage, RevenueSummary } from './types'
+import type { Entity, Observation, Relation, MemoryStats, Task, CreateTaskInput, TaskRun, Worker, CreateWorkerInput, TriggerType, TaskStatus, Watch, ConsoleLogEntry, Room, RoomConfig, RoomActivityEntry, ActivityEventType, QuorumDecision, DecisionType, DecisionStatus, QuorumVote, VoteValue, Goal, GoalStatus, GoalUpdate, Skill, SelfModAuditEntry, SelfModSnapshot, Escalation, EscalationStatus, ChatMessage, Credential, Wallet, WalletTransaction, WalletTransactionType, Station, StationStatus, StationProvider, StationTier, RoomMessage, RevenueSummary } from './types'
 import { DEFAULT_ROOM_CONFIG } from './constants'
 import { encryptSecret, decryptSecret } from './secret-store'
 
@@ -386,6 +386,12 @@ export function pauseWatch(db: Database.Database, id: number): void {
 
 export function resumeWatch(db: Database.Database, id: number): void {
   db.prepare("UPDATE watches SET status = 'active' WHERE id = ?").run(id)
+}
+
+export function markWatchTriggered(db: Database.Database, id: number): void {
+  db.prepare(
+    "UPDATE watches SET last_triggered = datetime('now','localtime'), trigger_count = trigger_count + 1 WHERE id = ?"
+  ).run(id)
 }
 
 // ─── Settings ───────────────────────────────────────────────
@@ -1141,6 +1147,7 @@ function mapDecisionRow(row: Record<string, unknown>): QuorumDecision {
     result: (row.result as string | null) ?? null,
     threshold: row.threshold as string,
     timeoutAt: (row.timeout_at as string | null) ?? null,
+    keeperVote: (row.keeper_vote as VoteValue | null) ?? null,
     createdAt: row.created_at as string,
     resolvedAt: (row.resolved_at as string | null) ?? null
   }
@@ -1173,6 +1180,10 @@ export function listDecisions(db: Database.Database, roomId: number, status?: De
 export function resolveDecision(db: Database.Database, id: number, status: DecisionStatus, result?: string): void {
   db.prepare("UPDATE quorum_decisions SET status = ?, result = ?, resolved_at = datetime('now','localtime') WHERE id = ?")
     .run(status, result ?? null, id)
+}
+
+export function setKeeperVote(db: Database.Database, decisionId: number, vote: VoteValue): void {
+  db.prepare('UPDATE quorum_decisions SET keeper_vote = ? WHERE id = ?').run(vote, decisionId)
 }
 
 export function getExpiredDecisions(db: Database.Database): QuorumDecision[] {
@@ -1427,6 +1438,11 @@ function mapSelfModRow(row: Record<string, unknown>): SelfModAuditEntry {
   }
 }
 
+export function getSelfModEntry(db: Database.Database, id: number): SelfModAuditEntry | null {
+  const row = db.prepare('SELECT * FROM self_mod_audit WHERE id = ?').get(id) as Record<string, unknown> | undefined
+  return row ? mapSelfModRow(row) : null
+}
+
 export function logSelfMod(
   db: Database.Database, roomId: number | null, workerId: number | null,
   filePath: string, oldHash: string | null, newHash: string | null,
@@ -1437,6 +1453,42 @@ export function logSelfMod(
     .run(roomId, workerId, filePath, oldHash, newHash, reason ?? null, reversible ? 1 : 0)
   const row = db.prepare('SELECT * FROM self_mod_audit WHERE id = ?').get(result.lastInsertRowid) as Record<string, unknown>
   return mapSelfModRow(row)
+}
+
+function mapSelfModSnapshotRow(row: Record<string, unknown>): SelfModSnapshot {
+  return {
+    auditId: row.audit_id as number,
+    targetType: row.target_type as string,
+    targetId: (row.target_id as number | null) ?? null,
+    oldContent: (row.old_content as string | null) ?? null,
+    newContent: (row.new_content as string | null) ?? null
+  }
+}
+
+export function saveSelfModSnapshot(
+  db: Database.Database,
+  auditId: number,
+  targetType: string,
+  targetId: number | null,
+  oldContent: string | null,
+  newContent: string | null
+): void {
+  db.prepare(
+    `INSERT INTO self_mod_snapshots (audit_id, target_type, target_id, old_content, new_content)
+     VALUES (?, ?, ?, ?, ?)
+     ON CONFLICT(audit_id) DO UPDATE SET
+       target_type = excluded.target_type,
+       target_id = excluded.target_id,
+       old_content = excluded.old_content,
+       new_content = excluded.new_content`
+  ).run(auditId, targetType, targetId, oldContent, newContent)
+}
+
+export function getSelfModSnapshot(db: Database.Database, auditId: number): SelfModSnapshot | null {
+  const row = db
+    .prepare('SELECT * FROM self_mod_snapshots WHERE audit_id = ?')
+    .get(auditId) as Record<string, unknown> | undefined
+  return row ? mapSelfModSnapshotRow(row) : null
 }
 
 export function getSelfModHistory(db: Database.Database, roomId: number, limit: number = 50): SelfModAuditEntry[] {
@@ -1877,6 +1929,10 @@ export function markRoomMessageRead(db: Database.Database, id: number): void {
 
 export function replyToRoomMessage(db: Database.Database, id: number): void {
   db.prepare("UPDATE room_messages SET status = 'replied' WHERE id = ?").run(id)
+}
+
+export function updateRoomMessageStatus(db: Database.Database, id: number, status: string): void {
+  db.prepare('UPDATE room_messages SET status = ? WHERE id = ?').run(status, id)
 }
 
 export function deleteRoomMessage(db: Database.Database, id: number): void {

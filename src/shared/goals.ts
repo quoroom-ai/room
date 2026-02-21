@@ -36,7 +36,11 @@ export function updateGoalProgress(
   if (metricValue != null) {
     const subGoals = queries.getSubGoals(db, goalId)
     if (subGoals.length === 0) {
-      const clamped = Math.max(0, Math.min(1, metricValue))
+      // Accept 0..1 (fraction) and 0..100 (percent) inputs.
+      const normalized = metricValue >= 2 && metricValue <= 100
+        ? metricValue / 100
+        : metricValue
+      const clamped = Math.max(0, Math.min(1, normalized))
       queries.updateGoal(db, goalId, { progress: clamped })
     }
   }

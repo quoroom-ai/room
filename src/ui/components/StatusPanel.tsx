@@ -3,10 +3,10 @@ import { usePolling } from '../hooks/usePolling'
 import { useWebSocket } from '../hooks/useWebSocket'
 import { useContainerWidth } from '../hooks/useContainerWidth'
 import { LiveConsoleSection } from './LiveConsoleSection'
-import { QueenChat } from './QueenChat'
 import { api } from '../lib/client'
 import type { Task, TaskRun, RoomActivityEntry, Worker, Wallet, RevenueSummary, OnChainBalance } from '@shared/types'
 import { formatRelativeTime } from '../utils/time'
+import { CopyAddressButton } from './CopyAddressButton'
 
 interface StatusData {
   entityCount: number
@@ -26,7 +26,7 @@ async function fetchStatus(): Promise<StatusData> {
     api.watches.list()
   ])
 
-  const runningRuns = (await api.runs.list(20)).filter(r => r.status === 'running')
+  const runningRuns = await api.runs.list(20, { status: 'running' })
 
   return {
     entityCount: stats.entityCount,
@@ -82,11 +82,11 @@ export function StatusPanel({ onNavigate, advancedMode, roomId }: StatusPanelPro
     30000
   )
   const { data: onChainBalance } = usePolling<OnChainBalance | null>(
-    () => roomId ? api.wallet.balance(roomId).catch(() => null) : Promise.resolve(null),
+    () => roomId && wallet ? api.wallet.balance(roomId).catch(() => null) : Promise.resolve(null),
     30000
   )
 
-  const [viewMode, setViewMode] = useState<'activity' | 'console' | 'chat'>('activity')
+  const [viewMode, setViewMode] = useState<'activity' | 'console'>('activity')
   const [activeFilters, setActiveFilters] = useState<Set<string>>(new Set())
   const [expandedActivityId, setExpandedActivityId] = useState<number | null>(null)
 
@@ -176,7 +176,10 @@ export function StatusPanel({ onNavigate, advancedMode, roomId }: StatusPanelPro
         <span className="text-sm font-medium text-text-secondary">Wallet</span>
         <span className="text-sm text-text-muted">EVM</span>
       </div>
-      <div className="font-mono text-xs text-text-muted truncate">{wallet.address}</div>
+      <div className="flex items-center gap-1">
+        <div className="font-mono text-xs text-text-muted truncate">{wallet.address}</div>
+        <CopyAddressButton address={wallet.address} />
+      </div>
       {onChainBalance && onChainBalance.totalBalance > 0 && (
         <div className="text-sm mt-1">
           <span className="text-interactive font-medium">${onChainBalance.totalBalance.toFixed(2)}</span>
@@ -325,14 +328,6 @@ export function StatusPanel({ onNavigate, advancedMode, roomId }: StatusPanelPro
       >
         Console
       </button>
-      <button
-        onClick={() => setViewMode('chat')}
-        className={`px-2.5 py-1 rounded-md text-sm font-medium transition-colors ${
-          activeView === 'chat' ? 'bg-surface-primary text-text-primary shadow-sm' : 'text-text-muted hover:text-text-secondary'
-        }`}
-      >
-        Chat
-      </button>
     </div>
   ) : null
 
@@ -340,10 +335,7 @@ export function StatusPanel({ onNavigate, advancedMode, roomId }: StatusPanelPro
     if (activeView === 'activity') {
       return activitySection ?? <LiveConsoleSection runningRuns={data.runningRuns} taskNames={taskNames} />
     }
-    if (activeView === 'console') {
-      return consoleSection
-    }
-    return <QueenChat roomId={roomId ?? null} />
+    return consoleSection
   }
 
   if (!wide) {

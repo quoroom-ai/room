@@ -369,8 +369,8 @@ export async function cancelCloudStation(cloudRoomId: string, subId: number): Pr
 
 export interface CryptoPricing {
   treasuryAddress: string
-  network: string
-  token: string
+  chains: string[]
+  tokens: string[]
   multiplier: number
   tiers: Array<{ tier: string; stripePrice: number; cryptoPrice: number }>
 }
@@ -400,7 +400,8 @@ export async function cryptoCheckoutStation(
   cloudRoomId: string,
   tier: string,
   stationName: string,
-  txHash: string
+  txHash: string,
+  chain: string = 'base'
 ): Promise<{ ok: boolean; subscriptionId?: number; status?: string; currentPeriodEnd?: string; error?: string }> {
   try {
     const res = await fetch(
@@ -408,7 +409,7 @@ export async function cryptoCheckoutStation(
       {
         method: 'POST',
         headers: cloudHeaders(cloudRoomId, { 'Content-Type': 'application/json' }),
-        body: JSON.stringify({ tier, stationName, txHash }),
+        body: JSON.stringify({ tier, stationName, txHash, chain }),
         signal: AbortSignal.timeout(60000)
       }
     )
@@ -424,7 +425,8 @@ export async function cryptoCheckoutStation(
 export async function cryptoRenewStation(
   cloudRoomId: string,
   subscriptionId: number,
-  txHash: string
+  txHash: string,
+  chain: string = 'base'
 ): Promise<{ ok: boolean; currentPeriodEnd?: string; error?: string }> {
   try {
     const res = await fetch(
@@ -432,7 +434,7 @@ export async function cryptoRenewStation(
       {
         method: 'POST',
         headers: cloudHeaders(cloudRoomId, { 'Content-Type': 'application/json' }),
-        body: JSON.stringify({ txHash }),
+        body: JSON.stringify({ txHash, chain }),
         signal: AbortSignal.timeout(60000)
       }
     )

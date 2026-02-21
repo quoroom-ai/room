@@ -21,7 +21,9 @@ switch (command) {
 
   case 'serve': {
     const portIdx = args.indexOf('--port')
-    const port = parseInt(portIdx !== -1 ? args[portIdx + 1] : (args[1] || '3700'), 10)
+    const rawPort = portIdx !== -1 ? args[portIdx + 1] : args[1]
+    const parsedPort = rawPort ? Number.parseInt(rawPort, 10) : 3700
+    const port = Number.isFinite(parsedPort) && parsedPort > 0 ? parsedPort : 3700
     const { startServer } = require('../server/index')
     startServer({ port })
     break
@@ -44,7 +46,7 @@ Usage:
   quoroom chat          Chat with the queen (interactive REPL)
   quoroom help          Show this help message
 
-Dashboard:  https://app.quoroom.ai
+Dashboard:  http://localhost:3700
 Website:    https://quoroom.ai
 `)
     break

@@ -10,10 +10,9 @@ export function registerResourceTools(server: McpServer): void {
     {
       title: 'Get Local Resources',
       description:
-        'Get current local machine resource usage: CPU load, RAM usage, Ollama status, and wallet balance. '
+        'Get current local machine resource usage: CPU load, RAM usage, and Ollama status. '
         + 'Use this to decide if the room needs to rent a cloud station for extra compute. '
-        + 'If CPU load > number of CPUs or RAM used > 85%, consider proposing a station rental to the quorum. '
-        + 'Check wallet balance first — only propose if there are enough funds (station costs $5–100/month).',
+        + 'If CPU load > number of CPUs or RAM used > 85%, consider proposing a station rental to the quorum.',
       inputSchema: {}
     },
     async () => {
