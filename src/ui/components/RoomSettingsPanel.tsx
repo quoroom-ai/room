@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { usePolling } from '../hooks/usePolling'
 import { api } from '../lib/client'
 import type { Room, Wallet, RevenueSummary } from '@shared/types'
@@ -18,15 +18,23 @@ export function RoomSettingsPanel({ roomId }: RoomSettingsPanelProps): React.JSX
     30000
   )
   const [queenRunning, setQueenRunning] = useState<Record<number, boolean>>({})
+  const [queenModel, setQueenModel] = useState<Record<number, string | null>>({})
+  const [globalQueenModel, setGlobalQueenModel] = useState('claude-opus-4-6')
+  useEffect(() => {
+    api.settings.get('queen_model').then(v => {
+      if (v) setGlobalQueenModel(v)
+    }).catch(() => {})
+  }, [])
   usePolling(async () => {
     if (!rooms || rooms.length === 0) return {}
     const entries = await Promise.all(
       rooms.map(async r => {
         const q = await api.rooms.queenStatus(r.id).catch(() => null)
-        return [r.id, q?.running ?? false] as const
+        return [r.id, q] as const
       })
     )
-    setQueenRunning(Object.fromEntries(entries))
+    setQueenRunning(Object.fromEntries(entries.map(([id, q]) => [id, q?.running ?? false])))
+    setQueenModel(Object.fromEntries(entries.map(([id, q]) => [id, q?.model ?? null])))
     return {}
   }, 5000)
 
@@ -100,6 +108,16 @@ export function RoomSettingsPanel({ roomId }: RoomSettingsPanelProps): React.JSX
     } catch (e) {
       console.error('Failed to update worker model:', e)
       optimistic(room.id, { workerModel: room.workerModel })
+    }
+  }
+
+  async function handleSetQueenModel(room: Room, model: string): Promise<void> {
+    if (!room.queenWorkerId) return
+    setQueenModel(prev => ({ ...prev, [room.id]: model }))
+    try {
+      await api.workers.update(room.queenWorkerId, { model })
+    } catch (e) {
+      console.error('Failed to update queen model:', e)
     }
   }
 
@@ -199,6 +217,19 @@ export function RoomSettingsPanel({ roomId }: RoomSettingsPanelProps): React.JSX
                     }`}
                   >Semi</button>
                 </div>
+              )}
+
+              {/* Queen model */}
+              {row('Model',
+                <select
+                  value={queenModel[room.id] ?? globalQueenModel}
+                  onChange={(e) => handleSetQueenModel(room, e.target.value)}
+                  className="text-[10px] border border-gray-200 rounded px-1.5 py-0.5 bg-white text-gray-600"
+                >
+                  <option value="claude-opus-4-6">Opus</option>
+                  <option value="claude-sonnet-4-6">Sonnet</option>
+                  <option value="claude-haiku-4-5-20251001">Haiku</option>
+                </select>
               )}
 
               {/* Sessions */}

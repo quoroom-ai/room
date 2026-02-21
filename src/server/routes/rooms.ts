@@ -32,6 +32,12 @@ export function registerRoomRoutes(router: Router): void {
     const planDefaults = QUEEN_DEFAULTS_BY_PLAN[plan]
     queries.updateRoom(ctx.db, result.room.id, planDefaults)
 
+    // Apply global queen model default
+    const globalQueenModel = queries.getSetting(ctx.db, 'queen_model')
+    if (globalQueenModel && result.queen) {
+      queries.updateWorker(ctx.db, result.queen.id, { model: globalQueenModel })
+    }
+
     const room = queries.getRoom(ctx.db, result.room.id)!
     eventBus.emit(`room:${result.room.id}`, 'room:created', room)
     return { status: 201, data: { ...result, room } }
@@ -150,7 +156,8 @@ export function registerRoomRoutes(router: Router): void {
         workerId: room.queenWorkerId,
         name: worker?.name,
         agentState: worker?.agentState ?? 'idle',
-        running: isAgentRunning(room.queenWorkerId)
+        running: isAgentRunning(room.queenWorkerId),
+        model: worker?.model ?? null
       }
     }
   })

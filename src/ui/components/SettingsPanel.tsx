@@ -39,6 +39,7 @@ export function SettingsPanel({ advancedMode, onAdvancedModeChange, installPromp
   const [updateChecking, setUpdateChecking] = useState(false)
   const [updateChecked, setUpdateChecked] = useState(false)
   const [claudePlan, setClaudePlan] = useState<'pro' | 'max' | 'api' | null>(null)
+  const [queenModel, setQueenModel] = useState<string | null>(null)
   const [telemetryEnabled, setTelemetryEnabled] = useState<boolean | null>(null)
 
   async function handleCheckForUpdates(): Promise<void> {
@@ -67,6 +68,10 @@ export function SettingsPanel({ advancedMode, onAdvancedModeChange, installPromp
       setClaudePlan(plan)
     }).catch(() => {})
 
+    api.settings.get('queen_model').then((v) => {
+      setQueenModel(v || null)
+    }).catch(() => setQueenModel(null))
+
     api.settings.get('telemetry_enabled').then((v) => {
       setTelemetryEnabled(v !== 'false')
     }).catch(() => setTelemetryEnabled(true))
@@ -75,6 +80,11 @@ export function SettingsPanel({ advancedMode, onAdvancedModeChange, installPromp
   async function setClaudePlanSetting(plan: 'pro' | 'max' | 'api' | null): Promise<void> {
     await api.settings.set('claude_plan', plan ?? '')
     setClaudePlan(plan)
+  }
+
+  async function setQueenModelSetting(model: string): Promise<void> {
+    await api.settings.set('queen_model', model)
+    setQueenModel(model)
   }
 
   async function toggleTelemetry(): Promise<void> {
@@ -192,6 +202,25 @@ export function SettingsPanel({ advancedMode, onAdvancedModeChange, installPromp
               </div>
             </div>
             <p className="text-[10px] text-gray-400 mt-0.5 leading-tight">Optimizes queen cycle gap and max turns for your plan's token limits</p>
+          </div>
+          <div className="py-1">
+            <div className="flex items-center justify-between text-xs">
+              <span className="text-gray-600">Queen model</span>
+              <div className="flex rounded overflow-hidden border border-gray-200">
+                {([['claude-opus-4-6', 'Opus'], ['claude-sonnet-4-6', 'Sonnet'], ['claude-haiku-4-5-20251001', 'Haiku']] as const).map(([id, label]) => (
+                  <button
+                    key={id}
+                    onClick={() => setQueenModelSetting(id)}
+                    className={`px-2 py-0.5 text-[10px] font-medium transition-colors ${
+                      (queenModel ?? 'claude-opus-4-6') === id
+                        ? 'bg-blue-500 text-white'
+                        : 'bg-white text-gray-500 hover:bg-gray-50'
+                    }`}
+                  >{label}</button>
+                ))}
+              </div>
+            </div>
+            <p className="text-[10px] text-gray-400 mt-0.5 leading-tight">Default model for new rooms. Sonnet and Haiku use fewer tokens.</p>
           </div>
         </div>
       </div>

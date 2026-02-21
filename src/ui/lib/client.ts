@@ -169,7 +169,7 @@ export const api = {
     delete: (id: number) =>
       request<{ ok: true }>('DELETE', `/api/rooms/${id}`),
     queenStatus: (id: number) =>
-      request<{ workerId: number; name: string; agentState: string; running: boolean }>('GET', `/api/rooms/${id}/queen`),
+      request<{ workerId: number; name: string; agentState: string; running: boolean; model: string | null }>('GET', `/api/rooms/${id}/queen`),
     queenStart: (id: number) =>
       request<{ ok: true; running: boolean }>('POST', `/api/rooms/${id}/queen/start`),
     queenStop: (id: number) =>
