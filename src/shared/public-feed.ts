@@ -15,6 +15,7 @@ export interface PublicRoomProfile {
   goal: string | null
   status: string
   workerCount: number
+  queenModel: string | null
   walletAddress: string | null
   revenue: RevenueSummary
   recentActivity: RoomActivityEntry[]
@@ -48,6 +49,7 @@ export function getPublicRoomProfile(db: Database.Database, roomId: number): Pub
   if (!room) throw new Error(`Room ${roomId} not found`)
 
   const workers = queries.listRoomWorkers(db, roomId)
+  const queen = room.queenWorkerId ? queries.getWorker(db, room.queenWorkerId) : null
   const wallet = queries.getWalletByRoom(db, roomId)
   const revenue = queries.getRevenueSummary(db, roomId)
   const recentActivity = getPublicFeed(db, roomId, 20)
@@ -58,6 +60,7 @@ export function getPublicRoomProfile(db: Database.Database, roomId: number): Pub
     goal: room.goal,
     status: room.status,
     workerCount: workers.length,
+    queenModel: queen?.model ?? null,
     walletAddress: wallet?.address ?? null,
     revenue,
     recentActivity

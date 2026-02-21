@@ -97,6 +97,7 @@ export function buildRegistrationURI(db: Database.Database, roomId: number): str
     'x-quoroom': {
       architecture: 'collective',
       queen: queen ? queen.name : null,
+      queenModel: queen?.model ?? null,
       workerCount: workers.length,
       visibility: room.visibility,
       threshold: room.config.threshold

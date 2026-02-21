@@ -25,6 +25,7 @@ export type SwarmEventKind =
   | 'station_created'
   | 'station_started'
   | 'station_stopped'
+  | 'self_mod'
 
 export interface SwarmEvent {
   id: string
@@ -72,6 +73,7 @@ const RIPPLE_COLORS: Partial<Record<SwarmEventKind, string>> = {
   station_created: 'var(--status-info)',
   station_started: 'var(--status-success)',
   station_stopped: 'var(--status-warning)',
+  self_mod: 'var(--interactive)',
 }
 
 // ─── Worker state → event kind mapping ──────────────────────
@@ -173,6 +175,14 @@ function mapWsEvent(msg: WsMessage, rooms: Room[]): { kind: SwarmEventKind; labe
     }
     case 'station:stopped': {
       return roomId ? { kind: 'station_stopped', label: 'Station stopped', roomId } : null
+    }
+    case 'self_mod:edited': {
+      const reason = (data.reason as string) ?? 'Code modified'
+      const short = reason.length > 18 ? reason.slice(0, 17) + '\u2026' : reason
+      return roomId ? { kind: 'self_mod', label: short, roomId } : null
+    }
+    case 'self_mod:reverted': {
+      return roomId ? { kind: 'self_mod', label: 'Mod reverted', roomId } : null
     }
     default:
       return null
@@ -304,6 +314,8 @@ export function useSwarmEvents(
       { kind: 'task_completed', label: 'HN Digest done' },
       { kind: 'vote_cast', label: 'Vote: abstain' },
       { kind: 'goal_progress', label: 'Goal 95%' },
+      { kind: 'self_mod', label: 'Skill rewritten' },
+      { kind: 'self_mod', label: 'Mod reverted' },
     ]
     let idx = 0
     const fire = () => {

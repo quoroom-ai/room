@@ -26,10 +26,10 @@ const STATUS_LABEL: Record<string, string> = {
 }
 
 const TIER_COSTS: Record<string, string> = {
-  micro: '$5/mo',
-  small: '$15/mo',
-  medium: '$40/mo',
-  large: '$100/mo',
+  micro: '$9/mo',
+  small: '$25/mo',
+  medium: '$89/mo',
+  large: '$179/mo',
 }
 
 interface CloudStation {

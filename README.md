@@ -406,15 +406,17 @@ room/
 
 ## Model Providers
 
-Queen supports multiple providers:
-- [Claude Code](https://docs.anthropic.com/en/docs/claude-code) subscription (CLI)
-- Codex (ChatGPT subscription, CLI)
-- OpenAI API key (optional)
-- Anthropic API key (optional)
+Run entirely free with Ollama, or use your existing Claude/ChatGPT subscription or API.
 
-Workers use [Ollama](https://ollama.com) — free, open-source LLMs. Scale up with stations.
-
-Quoroom is not affiliated with Anthropic or OpenAI.
+| Role | Provider | Cost |
+|------|----------|------|
+| **Queen** | [Claude Code](https://docs.anthropic.com/en/docs/claude-code) | Subscription |
+| | Codex (ChatGPT) | Subscription |
+| | OpenAI API | Pay-per-use |
+| | Claude API | Pay-per-use |
+| | **Llama 3.2 via [Ollama](https://ollama.com)** | **Free** |
+| **Workers** | [Ollama](https://ollama.com) models | **Free** |
+| | Claude (subscription or API) | Subscription / API |
 
 ## License
 

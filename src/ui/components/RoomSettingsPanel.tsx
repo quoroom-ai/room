@@ -87,6 +87,19 @@ export function RoomSettingsPanel({ roomId }: RoomSettingsPanelProps): React.JSX
   } | null>(null)
   const [apiKeyBusyRoomId, setApiKeyBusyRoomId] = useState<number | null>(null)
   const [apiKeyFeedback, setApiKeyFeedback] = useState<Record<number, ApiKeyFeedback | null>>({})
+  const [editingName, setEditingName] = useState('')
+  const [editingGoal, setEditingGoal] = useState('')
+  const [ollamaBusy, setOllamaBusy] = useState(false)
+  const [archiveBusy, setArchiveBusy] = useState(false)
+
+  // Sync editingName/editingGoal when selected room changes
+  const currentRoom = rooms?.find(r => r.id === roomId) ?? null
+  useEffect(() => {
+    if (currentRoom) {
+      setEditingName(currentRoom.name)
+      setEditingGoal(currentRoom.goal ?? '')
+    }
+  }, [currentRoom?.name, currentRoom?.goal, currentRoom?.id])
 
   function optimistic(id: number, patch: Partial<Room>): void {
     setRoomOverrides(prev => ({ ...prev, [id]: { ...prev[id], ...patch } }))
@@ -147,7 +160,7 @@ export function RoomSettingsPanel({ roomId }: RoomSettingsPanelProps): React.JSX
   }
 
   async function handleSetWorkerModel(room: Room, useOllama: boolean): Promise<void> {
-    const workerModel = useOllama ? 'ollama:llama3.2' : 'claude'
+    const workerModel = useOllama ? 'ollama:llama3.2' : 'queen'
     optimistic(room.id, { workerModel })
     try {
       await api.rooms.update(room.id, { workerModel })
@@ -170,6 +183,8 @@ export function RoomSettingsPanel({ roomId }: RoomSettingsPanelProps): React.JSX
       setQueenAuth(prev => ({ ...prev, [room.id]: { provider: 'openai_api', mode: 'api', credentialName: 'openai_api_key', envVar: 'OPENAI_API_KEY', hasCredential: false, hasEnvKey: false, ready: false } }))
     } else if (model.startsWith('anthropic:')) {
       setQueenAuth(prev => ({ ...prev, [room.id]: { provider: 'anthropic_api', mode: 'api', credentialName: 'anthropic_api_key', envVar: 'ANTHROPIC_API_KEY', hasCredential: false, hasEnvKey: false, ready: false } }))
+    } else if (model.startsWith('ollama:')) {
+      setQueenAuth(prev => ({ ...prev, [room.id]: { provider: 'ollama', mode: 'subscription', credentialName: null, envVar: null, hasCredential: false, hasEnvKey: false, ready: false } }))
     } else {
       setQueenAuth(prev => ({ ...prev, [room.id]: { provider: 'claude_subscription', mode: 'subscription', credentialName: null, envVar: null, hasCredential: false, hasEnvKey: false, ready: true } }))
     }
@@ -282,8 +297,91 @@ export function RoomSettingsPanel({ roomId }: RoomSettingsPanelProps): React.JSX
     )
   }
 
+  const nameChanged = editingName.trim() !== '' && editingName.trim() !== room.name
+  const goalChanged = editingGoal.trim() !== (room.goal ?? '')
+
+  async function handleSaveName(): Promise<void> {
+    const trimmed = editingName.trim()
+    if (!trimmed || trimmed === room.name) return
+    optimistic(room.id, { name: trimmed })
+    await api.rooms.update(room.id, { name: trimmed })
+    refresh()
+  }
+
+  async function handleSaveGoal(): Promise<void> {
+    const trimmed = editingGoal.trim()
+    if (trimmed === (room.goal ?? '')) return
+    optimistic(room.id, { goal: trimmed || null })
+    await api.rooms.update(room.id, { goal: trimmed || null })
+    refresh()
+  }
+
+  async function handleArchiveRoom(): Promise<void> {
+    if (!window.confirm(`Archive "${room.name}"? This will stop the queen, cancel all stations, and hide the room.`)) return
+    setArchiveBusy(true)
+    try {
+      // Stop the queen
+      await api.rooms.queenStop(room.id).catch(() => {})
+      // Cancel all cloud stations immediately
+      const stations = await api.stations.list(room.id).catch(() => [])
+      for (const s of stations) {
+        await api.stations.delete(room.id, (s as Record<string, unknown>).id as number).catch(() => {})
+      }
+      // Set room status to stopped (also pauses all agents server-side)
+      await api.rooms.update(room.id, { status: 'stopped' } as Record<string, unknown>)
+      refresh()
+    } catch {
+      // ignore
+    }
+    setArchiveBusy(false)
+  }
+
   return (
     <div className="p-4">
+      {/* Room name */}
+      <div className="mb-4">
+        <label className="block text-sm font-medium text-text-secondary mb-1">Room Name</label>
+        <div className="flex gap-2">
+          <input
+            type="text"
+            value={editingName}
+            onChange={e => setEditingName(e.target.value)}
+            onKeyDown={e => { if (e.key === 'Enter') void handleSaveName() }}
+            onBlur={() => void handleSaveName()}
+            className="flex-1 px-3 py-2 rounded-lg bg-surface-secondary border border-border-primary text-sm text-text-primary focus:outline-none focus:border-interactive"
+          />
+          {nameChanged && (
+            <button
+              onClick={() => void handleSaveName()}
+              className="px-3 py-2 rounded-lg bg-interactive text-text-invert text-sm font-medium hover:bg-interactive-hover transition-colors"
+            >
+              Save
+            </button>
+          )}
+        </div>
+      </div>
+
+      {/* Primary Objective */}
+      <div className="mb-4">
+        <label className="block text-sm font-medium text-text-secondary mb-1">Primary Objective</label>
+        <textarea
+          value={editingGoal}
+          onChange={e => setEditingGoal(e.target.value)}
+          onBlur={() => void handleSaveGoal()}
+          rows={4}
+          placeholder="What should this room accomplish?"
+          className="w-full px-3 py-2 rounded-lg bg-surface-secondary border border-border-primary text-sm text-text-primary placeholder:text-text-muted focus:outline-none focus:border-interactive resize-none"
+        />
+        {goalChanged && (
+          <button
+            onClick={() => void handleSaveGoal()}
+            className="mt-1 px-3 py-1.5 rounded-lg bg-interactive text-text-invert text-sm font-medium hover:bg-interactive-hover transition-colors"
+          >
+            Save
+          </button>
+        )}
+      </div>
+
       <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
         <div className="space-y-4">
           {/* Queen */}
@@ -323,6 +421,7 @@ export function RoomSettingsPanel({ roomId }: RoomSettingsPanelProps): React.JSX
                     { value: 'codex', label: 'Codex (ChatGPT subscription)' },
                     { value: 'openai:gpt-4o-mini', label: 'OpenAI API' },
                     { value: 'anthropic:claude-3-5-sonnet-latest', label: 'Claude API' },
+                    { value: 'ollama:llama3.2', label: 'Llama 3.2 (Ollama, free)' },
                   ]}
                 />,
                 'LLM provider for the queen. Subscription has lower cost per token than API. API options require a key.'
@@ -363,16 +462,19 @@ export function RoomSettingsPanel({ roomId }: RoomSettingsPanelProps): React.JSX
                     </span>
                     {activeQueenAuth.provider === 'ollama' && (
                       <button
+                        disabled={ollamaBusy}
                         onClick={async () => {
+                          setOllamaBusy(true)
                           try {
                             await api.ollama.start()
                             const q = await api.rooms.queenStatus(room.id).catch(() => null)
                             if (q) setQueenAuth(prev => ({ ...prev, [room.id]: q.auth }))
                           } catch {}
+                          setOllamaBusy(false)
                         }}
-                        className="text-xs px-2.5 py-1.5 rounded-lg border border-border-primary text-text-secondary hover:bg-surface-hover"
+                        className="text-xs px-2.5 py-1.5 rounded-lg border border-border-primary text-text-secondary hover:bg-surface-hover disabled:opacity-50"
                       >
-                        Start
+                        {ollamaBusy ? 'Installing...' : 'Install & Start'}
                       </button>
                     )}
                   </div>
@@ -535,29 +637,23 @@ export function RoomSettingsPanel({ roomId }: RoomSettingsPanelProps): React.JSX
           {/* Workers */}
           <div>
             <h3 className="text-sm font-semibold text-text-secondary mb-1">Workers</h3>
-            <div className="bg-surface-secondary shadow-sm rounded-lg p-3 space-y-2">
-              {row('Model',
-                <div className="flex rounded-lg overflow-hidden border border-border-primary">
-                  <button
-                    onClick={() => handleSetWorkerModel(room, false)}
-                    className={`px-4 py-2 text-sm font-medium transition-colors ${
-                      !(room.workerModel ?? 'claude').startsWith('ollama:') ? 'bg-interactive text-text-invert' : 'bg-surface-primary text-text-muted hover:bg-surface-hover'
-                    }`}
-                  >Claude</button>
-                  <button
-                    onClick={() => handleSetWorkerModel(room, true)}
-                    className={`px-4 py-2 text-sm font-medium transition-colors ${
-                      (room.workerModel ?? 'claude').startsWith('ollama:') ? 'bg-interactive text-text-invert' : 'bg-surface-primary text-text-muted hover:bg-surface-hover'
-                    }`}
-                  >Ollama</button>
-                </div>,
-                'LLM for worker agents. Ollama runs free local models, Claude uses your subscription or API key.'
-              )}
-              {(room.workerModel ?? 'claude').startsWith('ollama:') && (
-                <p className="text-xs text-status-success leading-tight pl-0">
-                  Free local LLM — model: {room.workerModel.replace('ollama:', '')}. Requires Ollama running locally.
-                </p>
-              )}
+            <div className="bg-surface-secondary shadow-sm rounded-lg p-3">
+              <div className="flex items-center justify-between text-sm py-1">
+                <div>
+                  <span className="text-text-secondary">Llama for workers</span>
+                  <p className="text-xs text-text-muted mt-0.5 leading-tight">Local only. When off, workers use the queen's model. Stations always run Llama.</p>
+                </div>
+                <button
+                  onClick={() => handleSetWorkerModel(room, !(room.workerModel ?? 'queen').startsWith('ollama:'))}
+                  className={`w-8 h-4 rounded-full transition-colors relative ml-3 flex-shrink-0 ${
+                    (room.workerModel ?? 'queen').startsWith('ollama:') ? 'bg-interactive' : 'bg-surface-tertiary'
+                  }`}
+                >
+                  <span className={`absolute top-0.5 w-3 h-3 bg-white rounded-full transition-transform ${
+                    (room.workerModel ?? 'queen').startsWith('ollama:') ? 'left-4' : 'left-0.5'
+                  }`} />
+                </button>
+              </div>
             </div>
           </div>
 
@@ -583,6 +679,22 @@ export function RoomSettingsPanel({ roomId }: RoomSettingsPanelProps): React.JSX
               </div>
             </div>
           </div>
+        </div>
+      </div>
+
+      {/* Danger Zone */}
+      <div className="mt-6 w-fit">
+        <h3 className="text-sm font-semibold text-status-error mb-2">Danger Zone</h3>
+        <div className="border border-status-error rounded-lg p-4">
+          <p className="text-sm text-text-secondary mb-1">Archive this room</p>
+          <p className="text-xs text-text-muted mb-3">Stops the queen, cancels all stations, and hides the room from the sidebar.</p>
+          <button
+            onClick={() => void handleArchiveRoom()}
+            disabled={archiveBusy}
+            className="px-4 py-2 rounded-lg border border-status-error text-status-error text-sm font-medium hover:bg-status-error-bg transition-colors disabled:opacity-50"
+          >
+            {archiveBusy ? 'Archiving...' : 'Archive Room'}
+          </button>
         </div>
       </div>
 

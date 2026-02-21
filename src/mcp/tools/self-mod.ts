@@ -4,6 +4,7 @@ import { getMcpDatabase } from '../db'
 import * as queries from '../../shared/db-queries'
 import { performModification, revertModification, getModificationHistory } from '../../shared/self-mod'
 import { incrementSkillVersion } from '../../shared/skills'
+import { eventBus } from '../../server/event-bus'
 
 export function registerSelfModTools(server: McpServer): void {
   server.registerTool(
@@ -44,11 +45,13 @@ export function registerSelfModTools(server: McpServer): void {
           queries.saveSelfModSnapshot(db, entry.id, 'skill', skillId, skill.content, newContent)
           queries.updateSkill(db, skillId, { content: newContent })
           incrementSkillVersion(db, skillId)
+          eventBus.emit(`room:${roomId}`, 'self_mod:edited', { roomId, workerId, filePath, reason })
           return { content: [{ type: 'text' as const, text: `Skill "${skill.name}" updated (v${skill.version + 1}).` }] }
         }
 
         // General file modification audit (no file write is performed here).
         performModification(db, roomId, workerId, filePath, null, simpleHash(newContent), reason)
+        eventBus.emit(`room:${roomId}`, 'self_mod:edited', { roomId, workerId, filePath, reason })
         return { content: [{ type: 'text' as const, text: `Modification logged: ${reason}` }] }
       } catch (e) {
         return { content: [{ type: 'text' as const, text: (e as Error).message }], isError: true }
@@ -69,7 +72,11 @@ export function registerSelfModTools(server: McpServer): void {
     async ({ auditId }) => {
       const db = getMcpDatabase()
       try {
+        const entry = queries.getSelfModEntry(db, auditId)
         revertModification(db, auditId)
+        if (entry?.roomId) {
+          eventBus.emit(`room:${entry.roomId}`, 'self_mod:reverted', { roomId: entry.roomId, auditId })
+        }
         return { content: [{ type: 'text' as const, text: `Modification #${auditId} reverted.` }] }
       } catch (e) {
         return { content: [{ type: 'text' as const, text: (e as Error).message }], isError: true }

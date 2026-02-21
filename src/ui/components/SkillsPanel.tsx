@@ -90,20 +90,20 @@ export function SkillsPanel({ roomId, autonomyMode }: SkillsPanelProps): React.J
             placeholder="Skill name"
             value={createName}
             onChange={(e) => setCreateName(e.target.value)}
-            className="w-full px-2.5 py-1.5 text-sm border border-border-primary rounded-lg focus:outline-none focus:border-text-muted bg-surface-primary"
+            className="w-full px-2.5 py-1.5 text-sm border border-border-primary rounded-lg focus:outline-none focus:border-text-muted bg-surface-primary text-text-primary placeholder:text-text-muted"
           />
           <textarea
             placeholder="Skill content (instructions, code, etc.)"
             value={createContent}
             onChange={(e) => setCreateContent(e.target.value)}
             rows={4}
-            className="w-full px-2.5 py-1.5 text-sm border border-border-primary rounded-lg focus:outline-none focus:border-text-muted bg-surface-primary resize-y font-mono"
+            className="w-full px-2.5 py-1.5 text-sm border border-border-primary rounded-lg focus:outline-none focus:border-text-muted bg-surface-primary text-text-primary placeholder:text-text-muted resize-y font-mono"
           />
           <input
             placeholder="Activation contexts (comma-separated, optional)"
             value={createContexts}
             onChange={(e) => setCreateContexts(e.target.value)}
-            className="w-full px-2.5 py-1.5 text-sm border border-border-primary rounded-lg focus:outline-none focus:border-text-muted bg-surface-primary"
+            className="w-full px-2.5 py-1.5 text-sm border border-border-primary rounded-lg focus:outline-none focus:border-text-muted bg-surface-primary text-text-primary placeholder:text-text-muted"
           />
           <div className="flex gap-2 items-center">
             <label className="flex items-center gap-2 text-sm text-text-secondary cursor-pointer shrink-0">

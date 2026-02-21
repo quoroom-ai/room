@@ -89,6 +89,9 @@ export interface CloudHeartbeat {
   taskCount: number
   earnings: string
   version: string
+  queenModel: string | null
+  workers: Array<{ name: string; state: string }>
+  stations: Array<{ name: string; status: string; tier: string }>
 }
 
 export async function ensureCloudRoomToken(data: CloudRegistration): Promise<boolean> {
@@ -140,6 +143,27 @@ export async function sendCloudHeartbeat(data: CloudHeartbeat): Promise<void> {
         signal: AbortSignal.timeout(10000)
       })
     }
+  } catch {
+    // Fail silently
+  }
+}
+
+/**
+ * Push a single activity event to cloud for the public feed.
+ * Fails silently — never blocks local operation.
+ */
+export async function pushActivityToCloud(
+  cloudRoomId: string,
+  eventType: string,
+  summary: string
+): Promise<void> {
+  try {
+    await fetch(`${CLOUD_API}/rooms/${encodeURIComponent(cloudRoomId)}/activity`, {
+      method: 'POST',
+      headers: cloudHeaders(cloudRoomId, { 'Content-Type': 'application/json' }),
+      body: JSON.stringify({ eventType, summary, isPublic: true }),
+      signal: AbortSignal.timeout(5000)
+    })
   } catch {
     // Fail silently
   }

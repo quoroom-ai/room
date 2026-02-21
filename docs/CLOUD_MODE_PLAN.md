@@ -18,6 +18,20 @@ User should be able to:
 4. Get a Room server provisioned on Fly.io automatically.
 5. Open the same UI in **remote mode** (desktop + mobile), install as PWA, and control the hosted room.
 
+## 1.2 Pricing Baseline (2026-02-21)
+
+Current planned monthly tiers:
+
+- `micro` — `$9/mo`
+- `small` — `$25/mo`
+- `medium` — `$89/mo`
+- `large` — `$179/mo`
+
+Notes:
+
+- These prices assume current `TIER_TO_GUEST` machine shapes (shared for micro/small, performance for medium/large).
+- LLM subscription cost is not included (user brings Claude/Codex subscription or API key).
+
 ## 1.1 Locked Decisions (2026-02-21)
 
 - Remote dashboard is **private by default** (authenticated access only).
@@ -136,6 +150,40 @@ Reuse sources (reference implementation):
 - `/Users/vasily/projects/auto/apps/api/src/utils/jwt.ts`
 - `/Users/vasily/projects/auto/apps/api/src/utils/oauth.ts`
 
+## 5.1 LLM Subscription Auth in Cloud Runtime
+
+Goal: keep subscription-based providers available in hosted mode (not API-key-only).
+
+### Runtime prerequisites
+
+- Yes: if we support `claude_subscription` and `codex_subscription` in cloud mode, each hosted Room instance must include both CLIs.
+- Runtime image bootstrap:
+  - Install Codex CLI (`npm i -g @openai/codex`).
+  - Install Claude Code (native installer preferred; npm fallback only if needed).
+- Startup health checks:
+  - `codex --version`
+  - `claude --version`
+- `/api/status` should expose runtime provider availability in cloud mode.
+
+### Provider authorization flow
+
+- Codex subscription:
+  - Start auth from remote UI with device flow (`codex login --device-auth`).
+  - Show code + verification URL in UI; user completes in browser.
+  - Persist credentials on that instance only.
+- Claude subscription:
+  - Start auth from remote UI by launching CLI login flow and guiding user to browser-based sign-in.
+  - Team/enterprise setups can use Claude for Teams/Enterprise or Claude Console auth.
+  - If interactive subscription auth is blocked in specific headless deployments, fallback path is Anthropic API key mode.
+
+### Token and isolation rules
+
+- Provider auth state is private per runtime instance.
+- Control plane stores only metadata (connected/disconnected, provider, last check), not provider tokens.
+- One tenant per runtime instance (no shared host-level credential store across users).
+- Disconnect action revokes/clears provider auth files on instance.
+- Instance destroy guarantees auth state deletion.
+
 ## 6) API Contract Plan
 
 ## 6.1 Control plane endpoints (new, `cloud`)
@@ -153,6 +201,10 @@ Reuse sources (reference implementation):
 - `POST /api/cloud/instances/:id/checkout/confirm` -> verify payment, enqueue provisioning
 - `GET /api/cloud/instances/:id/status` -> provisioning state
 - `POST /api/cloud/instances/:id/runtime-token` -> short-lived token for runtime UI
+- `POST /api/cloud/instances/:id/providers/codex/connect` -> start device auth, return code+URL
+- `POST /api/cloud/instances/:id/providers/codex/disconnect`
+- `POST /api/cloud/instances/:id/providers/claude/connect` -> start CLI login flow
+- `POST /api/cloud/instances/:id/providers/claude/disconnect`
 
 Stripe webhooks:
 
@@ -190,6 +242,7 @@ Add:
 - Define cloud instance schema and lifecycle states.
 - Add Fly machine template for Room runtime (image, volume, health checks).
 - Add Stripe product/price mapping for tiers.
+- Build runtime image with `codex` + `claude` preinstalled and version-checked.
 
 Exit criteria:
 
@@ -215,6 +268,7 @@ In `room` repo:
 - Add remote-safe CORS policy.
 - Add explicit API mode in `/api/status`.
 - Update UI gate logic to support cloud mode without localhost probing.
+- Add provider connection UX in Room settings (connect/disconnect/status for Claude/Codex subscription).
 
 Exit criteria:
 
@@ -251,6 +305,8 @@ Exit criteria:
 - `src/ui/App.tsx` + `src/ui/components/ConnectPage.tsx` (local probe vs cloud routing)
 - `src/server/routes/status.ts` (expose mode capabilities)
 - `src/server/access.ts` (room-level ACL hooks in cloud mode)
+- `src/shared/model-provider.ts` (subscription readiness must reflect real provider auth state in cloud mode)
+- `src/ui/components/RoomSettingsPanel.tsx` (subscription provider connect/disconnect actions)
 
 `cloud` repo:
 
@@ -259,6 +315,7 @@ Exit criteria:
 - auth routes/controllers/middleware (ported from `auto` patterns)
 - Stripe checkout + webhook handlers
 - Fly provisioning worker and status polling endpoints
+- provider-connect worker/actions (codex device auth + claude login orchestration)
 
 ## 9) Risks and Mitigations
 

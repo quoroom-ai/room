@@ -80,21 +80,45 @@ export function registerStatusRoutes(router: Router): void {
 
   router.post('/api/ollama/start', async () => {
     const already = await isOllamaAvailable()
-    if (already) return { data: { available: true } }
+    if (already) return { data: { available: true, status: 'running' } }
+
+    // Check if ollama binary exists
+    let hasBinary = false
+    try {
+      execSync('which ollama 2>/dev/null', { timeout: 3000 })
+      hasBinary = true
+    } catch {}
+
+    // Install ollama if not present
+    if (!hasBinary) {
+      try {
+        if (process.platform === 'darwin') {
+          execSync('brew install ollama 2>&1', { timeout: 120000 })
+        } else {
+          execSync('curl -fsSL https://ollama.com/install.sh | sh 2>&1', { timeout: 120000 })
+        }
+      } catch {
+        return { data: { available: false, status: 'install_failed' } }
+      }
+    }
+
+    // Start ollama serve
     try {
       const child = spawn('ollama', ['serve'], { detached: true, stdio: 'ignore' })
+      child.on('error', () => {})
       child.unref()
     } catch {
-      return { data: { available: false } }
+      return { data: { available: false, status: 'start_failed' } }
     }
+
     // Wait for Ollama to start up
-    await new Promise(r => setTimeout(r, 2000))
+    await new Promise(r => setTimeout(r, 3000))
     const available = await isOllamaAvailable()
     // Invalidate caches so next polls pick up the change
     cachedOllama = null
     ollamaCachedAt = 0
     invalidateOllamaCache()
-    return { data: { available } }
+    return { data: { available, status: available ? 'running' : 'start_failed' } }
   })
 
   router.get('/api/status', async (ctx) => {

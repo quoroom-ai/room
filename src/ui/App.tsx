@@ -22,6 +22,7 @@ import { ChatPanel } from './components/ChatPanel'
 import { ConnectPage } from './components/ConnectPage'
 import { WalkthroughModal } from './components/WalkthroughModal'
 import { UpdateModal } from './components/UpdateModal'
+import { CreateRoomModal } from './components/CreateRoomModal'
 import { useNotifications } from './hooks/useNotifications'
 import { semverGt } from './lib/releases'
 import { useInstallPrompt, type InstallPrompt } from './hooks/useInstallPrompt'
@@ -90,11 +91,7 @@ function App(): React.JSX.Element {
   })
   const [rooms, setRooms] = useState<Room[]>([])
   const [queenRunning, setQueenRunning] = useState<Record<number, boolean>>({})
-  const [showCreateRoom, setShowCreateRoom] = useState(false)
-  const [createRoomName, setCreateRoomName] = useState('')
-  const [createRoomGoal, setCreateRoomGoal] = useState('')
-  const [createRoomBusy, setCreateRoomBusy] = useState(false)
-  const [createRoomError, setCreateRoomError] = useState<string | null>(null)
+  const [showCreateRoomModal, setShowCreateRoomModal] = useState(false)
 
   const [messagesUnread, setMessagesUnread] = useState(0)
   const [votesActive, setVotesActive] = useState(0)
@@ -302,48 +299,20 @@ function App(): React.JSX.Element {
     handleTabChange(t)
   }
 
-  function toggleCreateRoomForm(): void {
-    setShowCreateRoom(prev => {
-      const next = !prev
-      if (!next) {
-        setCreateRoomName('')
-        setCreateRoomGoal('')
-        setCreateRoomError(null)
-      }
-      return next
-    })
-  }
+  async function handleRoomCreated(created: Room): Promise<void> {
+    const createdRoomId = parseCreatedRoomId(created)
+    const nextRooms = await api.rooms.list()
+    syncRooms(nextRooms)
 
-  async function handleCreateRoom(): Promise<void> {
-    const name = createRoomName.trim()
-    const goal = createRoomGoal.trim()
-    if (!name || createRoomBusy) return
-
-    setCreateRoomBusy(true)
-    setCreateRoomError(null)
-    try {
-      const created = await api.rooms.create({ name, goal: goal || undefined })
-      const createdRoomId = parseCreatedRoomId(created)
-      const nextRooms = await api.rooms.list()
-      syncRooms(nextRooms)
-
-      const resolvedRoomId = createdRoomId
-        ?? [...nextRooms].reverse().find(r => r.name === name)?.id
-        ?? null
-      if (resolvedRoomId !== null) {
-        handleRoomChange(resolvedRoomId)
-        setExpandedRoomId(resolvedRoomId)
-      }
-      handleTabChange('room-settings')
-
-      setCreateRoomName('')
-      setCreateRoomGoal('')
-      setShowCreateRoom(false)
-    } catch (err) {
-      setCreateRoomError(err instanceof Error ? err.message : 'Failed to create room')
-    } finally {
-      setCreateRoomBusy(false)
+    const resolvedRoomId = createdRoomId
+      ?? [...nextRooms].reverse().find(r => r.name === created.name)?.id
+      ?? null
+    if (resolvedRoomId !== null) {
+      handleRoomChange(resolvedRoomId)
+      setExpandedRoomId(resolvedRoomId)
     }
+    handleTabChange('room-settings')
+    setShowCreateRoomModal(false)
   }
 
   const selectedRoom = rooms.find(r => r.id === selectedRoomId) ?? null
@@ -351,7 +320,7 @@ function App(): React.JSX.Element {
   function renderPanel(): React.JSX.Element {
     switch (tab) {
       case 'swarm':
-        return <SwarmPanel rooms={rooms} queenRunning={queenRunning} onNavigateToRoom={(roomId) => {
+        return <SwarmPanel rooms={rooms.filter(r => r.status !== 'stopped')} queenRunning={queenRunning} onNavigateToRoom={(roomId) => {
           handleRoomChange(roomId)
           setExpandedRoomId(roomId)
           handleTabChange('status')
@@ -487,51 +456,19 @@ function App(): React.JSX.Element {
         {/* Create room */}
         <div className="pb-2 mb-2 border-b border-border-primary">
           <button
-            onClick={toggleCreateRoomForm}
+            onClick={() => setShowCreateRoomModal(true)}
             className="w-full px-3 py-1.5 text-sm text-left text-interactive hover:text-interactive-hover rounded-lg hover:bg-interactive-bg transition-colors"
           >
-            {showCreateRoom ? 'Cancel' : '+ New Room'}
+            + New Room
           </button>
-          {showCreateRoom && (
-            <div className="mt-1.5 space-y-1.5 px-1">
-              <input
-                value={createRoomName}
-                onChange={(e) => setCreateRoomName(e.target.value)}
-                placeholder="Room name"
-                className="w-full bg-surface-primary border border-border-primary rounded-lg px-2 py-1.5 text-sm text-text-primary placeholder:text-text-muted"
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter') void handleCreateRoom()
-                }}
-              />
-              <input
-                value={createRoomGoal}
-                onChange={(e) => setCreateRoomGoal(e.target.value)}
-                placeholder="Goal (optional)"
-                className="w-full bg-surface-primary border border-border-primary rounded-lg px-2 py-1.5 text-sm text-text-secondary placeholder:text-text-muted"
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter') void handleCreateRoom()
-                }}
-              />
-              <button
-                onClick={() => void handleCreateRoom()}
-                disabled={createRoomBusy || !createRoomName.trim()}
-                className="w-full px-3 py-1.5 text-sm rounded-lg bg-interactive text-text-invert hover:bg-interactive-hover disabled:opacity-40 transition-colors"
-              >
-                {createRoomBusy ? 'Creating...' : 'Create'}
-              </button>
-              {createRoomError && (
-                <p className="text-xs text-status-error leading-tight">{createRoomError}</p>
-              )}
-            </div>
-          )}
         </div>
 
         {/* Room accordion — scrollable */}
         <div className="flex-1 overflow-y-auto min-h-0">
-          {rooms.length === 0 && (
+          {rooms.filter(r => r.status !== 'stopped').length === 0 && (
             <p className="text-xs text-text-muted text-center py-4 px-2">No rooms</p>
           )}
-          {rooms.map(r => {
+          {rooms.filter(r => r.status !== 'stopped').map(r => {
             const isOpen = expandedRoomId === r.id
             const isSelected = selectedRoomId === r.id
             const running = r.status === 'active' && queenRunning[r.id]
@@ -639,7 +576,7 @@ function App(): React.JSX.Element {
               {selectedRoom.goal && (
                 <>
                   <span className="text-text-muted flex-shrink-0 hidden sm:inline">{'\u00B7'}</span>
-                  <span className="text-xs text-text-muted truncate flex-1 min-w-0 hidden sm:inline">{selectedRoom.goal}</span>
+                  <span className="text-sm text-text-secondary truncate flex-1 min-w-0 hidden sm:inline">{selectedRoom.goal}</span>
                 </>
               )}
             </div>
@@ -663,6 +600,12 @@ function App(): React.JSX.Element {
         </div>
       </div>
 
+      {showCreateRoomModal && (
+        <CreateRoomModal
+          onClose={() => setShowCreateRoomModal(false)}
+          onCreate={(room) => void handleRoomCreated(room)}
+        />
+      )}
       {showWalkthrough && <WalkthroughModal onClose={() => setShowWalkthrough(false)} />}
       {serverUpdateInfo && !updateDismissed && (
         <UpdateModal

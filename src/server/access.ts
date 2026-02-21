@@ -48,6 +48,8 @@ const AUTO_MODE_USER_WHITELIST = [
   /^POST \/api\/rooms\/\d+\/credentials$/,       // manage credentials
   /^DELETE \/api\/credentials\/\d+$/,            // delete credential
   /^POST \/api\/status\/simulate-update$/,       // dev: simulate update notification
+  /^POST \/api\/ollama\/start$/,                 // start Ollama server
+  /^DELETE \/api\/rooms\/\d+\/cloud-stations\/\d+$/, // delete cloud station (archive)
 ]
 
 /** Sensitive read endpoints blocked for user token in auto mode. */

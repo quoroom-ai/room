@@ -157,7 +157,7 @@ export function GoalsPanel({ roomId, autonomyMode }: GoalsPanelProps): React.JSX
             value={createDesc}
             onChange={(e) => setCreateDesc(e.target.value)}
             rows={2}
-            className="w-full px-2.5 py-1.5 text-sm border border-border-primary rounded-lg focus:outline-none focus:border-text-muted bg-surface-primary resize-y"
+            className="w-full px-2.5 py-1.5 text-sm border border-border-primary rounded-lg focus:outline-none focus:border-text-muted bg-surface-primary text-text-primary placeholder:text-text-muted resize-y"
           />
           <div className="flex gap-2">
             <Select
@@ -274,13 +274,13 @@ export function GoalsPanel({ roomId, autonomyMode }: GoalsPanelProps): React.JSX
                             value={updateObs}
                             onChange={(e) => setUpdateObs(e.target.value)}
                             placeholder="Log an update..."
-                            className="flex-1 px-2.5 py-1.5 text-sm border border-border-primary rounded-lg focus:outline-none focus:border-text-muted bg-surface-primary"
+                            className="flex-1 px-2.5 py-1.5 text-sm border border-border-primary rounded-lg focus:outline-none focus:border-text-muted bg-surface-primary text-text-primary placeholder:text-text-muted"
                           />
                           <input
                             value={updateMetric}
                             onChange={(e) => setUpdateMetric(e.target.value)}
                             placeholder="%"
-                            className="w-12 px-2.5 py-1.5 text-sm border border-border-primary rounded-lg focus:outline-none focus:border-text-muted bg-surface-primary text-center"
+                            className="w-12 px-2.5 py-1.5 text-sm border border-border-primary rounded-lg focus:outline-none focus:border-text-muted bg-surface-primary text-text-primary placeholder:text-text-muted text-center"
                           />
                           <button
                             onClick={() => handleAddUpdate(goal.id)}

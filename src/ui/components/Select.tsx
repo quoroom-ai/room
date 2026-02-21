@@ -47,7 +47,8 @@ export function Select({
     const rect = triggerRef.current?.getBoundingClientRect()
     if (rect) {
       const spaceBelow = window.innerHeight - rect.bottom
-      setFlipUp(spaceBelow < 240)
+      const estimatedHeight = options.length * 32 + 8
+      setFlipUp(spaceBelow < estimatedHeight)
     }
     setOpen(true)
     const idx = options.findIndex(o => o.value === value)
@@ -139,7 +140,7 @@ export function Select({
         <div
           ref={listRef}
           role="listbox"
-          className={`absolute z-50 min-w-full max-h-60 overflow-y-auto
+          className={`absolute z-50 min-w-full
             bg-surface-primary border border-border-primary rounded-lg shadow-lg py-1
             ${flipUp ? 'bottom-full mb-1' : 'top-full mt-1'}`}
         >

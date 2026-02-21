@@ -158,6 +158,13 @@
 }
 
 /* ─── Base ─── */
+input, textarea, select {
+  color: var(--text-primary);
+}
+input::placeholder, textarea::placeholder {
+  color: var(--text-muted);
+}
+
 body {
   overflow: hidden;
   -webkit-font-smoothing: antialiased;

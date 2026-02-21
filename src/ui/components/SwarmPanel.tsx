@@ -80,6 +80,10 @@ function fmtMoney(n: number): string {
   return `$${n.toFixed(2)}`
 }
 
+function fmtModel(model: string): string {
+  return model.replace(/^claude-/, '').replace(/-(\d+)-(\d+)/, ' $1.$2')
+}
+
 // ─── Status → color maps ───────────────────────────────────
 
 function roomColors(room: Room, running: boolean): { fill: string; stroke: string } {
@@ -154,6 +158,8 @@ function eventIcon(kind: SwarmEventKind): React.JSX.Element {
       return <svg {...common}><rect x="2" y="3" width="10" height="8" rx="1.5" fill="var(--status-success)" fillOpacity="0.15" stroke="var(--status-success)" strokeWidth="1.2"/><circle cx="5" cy="7" r="1" fill="var(--status-success)"/><path d="M8 5.5h2M8 7h2M8 8.5h2" stroke="var(--status-success)" strokeWidth="0.8" strokeLinecap="round"/></svg>
     case 'station_stopped':
       return <svg {...common}><rect x="2" y="3" width="10" height="8" rx="1.5" fill="var(--status-warning)" fillOpacity="0.15" stroke="var(--status-warning)" strokeWidth="1.2"/><path d="M5.5 5.5v3M8.5 5.5v3" stroke="var(--status-warning)" strokeWidth="1.3" strokeLinecap="round"/></svg>
+    case 'self_mod':
+      return <svg {...common}><path d="M4 2v10M10 2v10" stroke="var(--interactive)" strokeWidth="1.2" strokeLinecap="round"/><path d="M4 4c2 0 2 2 6 2M4 8c2 0 2-2 6-2" stroke="var(--interactive)" strokeWidth="1.2" fill="none" strokeLinecap="round"/></svg>
     default:
       return <svg {...common}><circle cx="7" cy="7" r="4" fill="var(--text-muted)" fillOpacity="0.3"/></svg>
   }
@@ -165,7 +171,7 @@ function eventBgColor(kind: SwarmEventKind): string {
       return 'var(--status-info-bg)'
     case 'worker_acting': case 'decision_approved': case 'goal_completed': case 'task_completed': case 'money_received': case 'station_started':
       return 'var(--status-success-bg)'
-    case 'worker_voting': case 'vote_cast': case 'skill_created':
+    case 'worker_voting': case 'vote_cast': case 'skill_created': case 'self_mod':
       return 'var(--interactive-bg)'
     case 'worker_rate_limited': case 'escalation': case 'station_stopped':
       return 'var(--status-warning-bg)'
@@ -654,6 +660,10 @@ export function SwarmPanel({ rooms, queenRunning, onNavigateToRoom }: SwarmPanel
             const totalSats = workers.length + stations.length
             const satPositions = showSatellites ? satellitePositions(cx, cy, totalSats) : []
 
+            // Queen model
+            const queenWorker = workers.find(w => w.id === room.queenWorkerId)
+            const queenModel = queenWorker?.model || room.workerModel
+
             // Goal text wrapped into lines
             const goalText = room.goal || 'No objective set'
             const goalLines = wrapText(goalText, 28).slice(0, 6) // max 6 lines
@@ -662,14 +672,15 @@ export function SwarmPanel({ rooms, queenRunning, onNavigateToRoom }: SwarmPanel
             const busyWorkers = workers.filter(w => w.agentState === 'thinking' || w.agentState === 'acting').length
             const activeStations = stations.filter(s => s.status === 'active').length
 
-            // Layout: goal lines at top, then gap, then life bar, then money
+            // Layout: goal lines at top, then gap, then life bar, then model, then money
             const lineH = 16
             const goalBlockH = goalLines.length * lineH
             const lifeLineY = 1 // relative offset after goal block
-            const moneyLineY = lifeLineY + lineH + 2
+            const modelLineY = lifeLineY + lineH + 1
+            const moneyLineY = modelLineY + lineH
 
             // Total content height — always reserve money line when toggle is on
-            const contentH = goalBlockH + lineH + (showMoney ? lineH + 2 : 0)
+            const contentH = goalBlockH + lineH + lineH + 1 + (showMoney ? lineH : 0)
             const startY = cy - contentH / 2
 
             return (
@@ -719,6 +730,20 @@ export function SwarmPanel({ rooms, queenRunning, onNavigateToRoom }: SwarmPanel
                 >
                   {workers.length}w{busyWorkers > 0 ? ` (${busyWorkers} active)` : ''}
                   {stations.length > 0 ? ` \u00b7 ${stations.length}s${activeStations > 0 ? ` (${activeStations} up)` : ''}` : ''}
+                </text>
+
+                {/* Queen model */}
+                <text
+                  x={cx}
+                  y={startY + goalBlockH + modelLineY + 8}
+                  textAnchor="middle"
+                  dominantBaseline="middle"
+                  fontSize="13"
+                  fontWeight="500"
+                  fill="var(--interactive)"
+                  style={{ pointerEvents: 'none' }}
+                >
+                  {fmtModel(queenModel)}
                 </text>
 
                 {/* Money line — always shown when $ toggle is on */}

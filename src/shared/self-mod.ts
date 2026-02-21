@@ -47,7 +47,7 @@ export function performModification(
   }
 
   if (roomId != null) {
-    queries.logRoomActivity(db, roomId, 'system',
+    queries.logRoomActivity(db, roomId, 'self_mod',
       `Self-mod: ${reason} (${filePath})`, undefined, workerId ?? undefined)
   }
 

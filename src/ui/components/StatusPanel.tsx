@@ -49,6 +49,18 @@ const EVENT_TYPE_COLORS: Record<string, string> = {
   worker: 'bg-brand-100 text-brand-700',
   error: 'bg-status-error-bg text-status-error',
   system: 'bg-surface-tertiary text-text-muted',
+  self_mod: 'bg-interactive-bg text-interactive',
+}
+
+const EVENT_TYPE_LABELS: Record<string, string> = {
+  decision: 'Decisions',
+  milestone: 'Milestones',
+  financial: 'Financial',
+  deployment: 'Deployment',
+  worker: 'Workers',
+  error: 'Errors',
+  system: 'System',
+  self_mod: 'Self-Mod',
 }
 
 interface StatusPanelProps {
@@ -262,7 +274,7 @@ export function StatusPanel({ onNavigate, advancedMode, roomId }: StatusPanelPro
                   : 'bg-surface-tertiary text-text-muted'
               }`}
             >
-              {type}
+              {EVENT_TYPE_LABELS[type] ?? type}
             </button>
           ))}
         </div>

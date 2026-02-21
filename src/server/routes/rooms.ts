@@ -93,9 +93,10 @@ export function registerRoomRoutes(router: Router): void {
     const body = ctx.body as Record<string, unknown> || {}
     const room = queries.getRoom(ctx.db, roomId)
     if (!room) return { status: 404, error: 'Room not found' }
-    const updates: Partial<{ name: string; goal: string | null; visibility: string; autonomyMode: string; maxConcurrentTasks: number; workerModel: string; queenCycleGapMs: number; queenMaxTurns: number; queenQuietFrom: string | null; queenQuietUntil: string | null }> = {}
+    const updates: Partial<{ name: string; goal: string | null; status: string; visibility: string; autonomyMode: string; maxConcurrentTasks: number; workerModel: string; queenCycleGapMs: number; queenMaxTurns: number; queenQuietFrom: string | null; queenQuietUntil: string | null }> = {}
     if (body.name !== undefined) updates.name = body.name as string
     if (body.goal !== undefined) updates.goal = body.goal as string | null
+    if (body.status === 'stopped') updates.status = 'stopped'
     if (body.visibility !== undefined) updates.visibility = body.visibility as string
     if (body.autonomyMode !== undefined) updates.autonomyMode = body.autonomyMode as string
     if (body.maxConcurrentTasks !== undefined) {
@@ -114,6 +115,28 @@ export function registerRoomRoutes(router: Router): void {
     if (body.queenQuietFrom !== undefined) updates.queenQuietFrom = body.queenQuietFrom as string | null
     if (body.queenQuietUntil !== undefined) updates.queenQuietUntil = body.queenQuietUntil as string | null
     queries.updateRoom(ctx.db, roomId, updates)
+
+    // Sync root goal when objective changes
+    if (updates.goal !== undefined) {
+      const allGoals = queries.listGoals(ctx.db, roomId)
+      const rootGoal = allGoals.find(g => g.parentGoalId === null)
+      if (rootGoal && updates.goal) {
+        queries.updateGoal(ctx.db, rootGoal.id, { description: updates.goal })
+      } else if (!rootGoal && updates.goal) {
+        queries.createGoal(ctx.db, roomId, updates.goal)
+      }
+    }
+
+    // Archive: pause all agents and log
+    if (updates.status === 'stopped') {
+      const workers = queries.listRoomWorkers(ctx.db, roomId)
+      for (const w of workers) {
+        queries.updateAgentState(ctx.db, w.id, 'idle')
+        pauseAgent(ctx.db, w.id)
+      }
+      queries.logRoomActivity(ctx.db, roomId, 'system', 'Room archived')
+    }
+
     const updated = queries.getRoom(ctx.db, roomId)!
     eventBus.emit(`room:${roomId}`, 'room:updated', updated)
 
