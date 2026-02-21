@@ -6,6 +6,7 @@ import { isOllamaAvailable, listOllamaModels } from '../../shared/agent-executor
 import { invalidateOllamaCache } from '../../shared/model-provider'
 import { isSupportedFreeOllamaModel, stripOllamaPrefix } from '../../shared/ollama-models'
 import { getUpdateInfo, simulateUpdate } from '../updateChecker'
+import { getDeploymentMode } from '../auth'
 
 const startedAt = Date.now()
 
@@ -245,6 +246,7 @@ export function registerStatusRoutes(router: Router): void {
     const codex = checkCodex()
     const ollama = await checkOllama()
     const resources = getResources()
+    const deploymentMode = getDeploymentMode()
 
     return {
       data: {
@@ -256,6 +258,7 @@ export function registerStatusRoutes(router: Router): void {
         codex,
         ollama,
         resources,
+        deploymentMode,
         updateInfo: getUpdateInfo(),
         serverPlatform: process.platform === 'darwin' ? 'mac' : process.platform === 'win32' ? 'windows' : 'linux',
       }

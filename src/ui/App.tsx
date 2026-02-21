@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { getToken, clearToken, API_BASE } from './lib/auth'
+import { getToken, clearToken, API_BASE, APP_MODE } from './lib/auth'
 import { TabBar, mainTabs, tabIcons, type Tab } from './components/TabBar'
 import { StatusPanel } from './components/StatusPanel'
 import { MemoryPanel } from './components/MemoryPanel'
@@ -37,6 +37,7 @@ const ALL_TAB_IDS: Tab[] = ['swarm', 'status', 'chat', 'goals', 'votes', 'messag
 
 const DEFAULT_PORT = '3700'
 const isRemoteOrigin = location.hostname !== 'localhost' && location.hostname !== '127.0.0.1'
+const shouldProbeLocalServer = APP_MODE === 'local' && isRemoteOrigin
 
 function getLocalPort(): string {
   return localStorage.getItem('quoroom_port') || DEFAULT_PORT
@@ -114,11 +115,12 @@ function App(): React.JSX.Element {
 
   // Remote origin gate: 'probing' → 'connect' or redirect to localhost
   const [gate, setGate] = useState<'probing' | 'connect' | 'app'>(() =>
-    isRemoteOrigin ? 'probing' : 'app'
+    shouldProbeLocalServer ? 'probing' : 'app'
   )
 
   // Remote origin: probe localhost and redirect or show connect page
   useEffect(() => {
+    if (!shouldProbeLocalServer) return
     if (gate !== 'probing') return
     probeLocalServer(getLocalPort()).then((redirected) => {
       if (!redirected) setGate('connect')

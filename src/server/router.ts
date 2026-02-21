@@ -16,6 +16,7 @@ export interface ApiResponse {
   status?: number
   data?: unknown
   error?: string
+  redirect?: string
 }
 
 export type RouteHandler = (ctx: RouteContext) => Promise<ApiResponse> | ApiResponse

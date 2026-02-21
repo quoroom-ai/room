@@ -4,6 +4,8 @@ import { getMcpDatabase } from '../db'
 import { createRoomWallet, getWalletAddress, getOnChainBalance, sendToken, getTransactionHistory } from '../../shared/wallet'
 import { CHAIN_CONFIGS } from '../../shared/constants'
 import { recordPaymentAudit, formatPaymentAuditSuffix } from './payment-audit'
+import * as queries from '../../shared/db-queries'
+import { getRoomCloudId, ensureCloudRoomToken, getCloudOnrampUrl } from '../../shared/cloud-sync'
 
 export function registerWalletTools(server: McpServer): void {
   server.registerTool(
@@ -156,6 +158,41 @@ export function registerWalletTools(server: McpServer): void {
           description: tx.description, status: tx.status, createdAt: tx.createdAt
         }))
         return { content: [{ type: 'text' as const, text: JSON.stringify(list, null, 2) }] }
+      } catch (e) {
+        return { content: [{ type: 'text' as const, text: (e as Error).message }], isError: true }
+      }
+    }
+  )
+
+  server.registerTool(
+    'quoroom_wallet_topup',
+    {
+      title: 'Wallet Top-Up URL',
+      description: 'Get a Coinbase On-Ramp URL for the keeper to top up the room wallet with a credit card. '
+        + 'USDC arrives on Base with 0% fees. Share this URL with the keeper via escalation if the room needs funding.',
+      inputSchema: {
+        roomId: z.number().describe('The room ID'),
+        amount: z.number().positive().optional().describe('Suggested top-up amount in USD')
+      }
+    },
+    async ({ roomId, amount }) => {
+      const db = getMcpDatabase()
+      try {
+        const room = queries.getRoom(db, roomId)
+        if (!room) return { content: [{ type: 'text' as const, text: 'Room not found' }], isError: true }
+        const address = getWalletAddress(db, roomId)
+        const cloudRoomId = getRoomCloudId(roomId)
+        await ensureCloudRoomToken({
+          roomId: cloudRoomId,
+          name: room.name,
+          goal: room.goal ?? null,
+          visibility: room.visibility,
+        })
+        const result = await getCloudOnrampUrl(cloudRoomId, address, amount)
+        if (!result) {
+          return { content: [{ type: 'text' as const, text: 'On-ramp unavailable. The keeper can send USDC/USDT directly to: ' + address }] }
+        }
+        return { content: [{ type: 'text' as const, text: result.onrampUrl }] }
       } catch (e) {
         return { content: [{ type: 'text' as const, text: (e as Error).message }], isError: true }
       }

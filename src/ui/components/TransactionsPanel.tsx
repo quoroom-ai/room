@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { usePolling } from '../hooks/usePolling'
 import { api } from '../lib/client'
+import { getCachedToken } from '../lib/auth'
 import { formatRelativeTime } from '../utils/time'
 import { CopyAddressButton } from './CopyAddressButton'
 import type { WalletTransaction, RevenueSummary, Wallet, OnChainBalance } from '@shared/types'
@@ -112,7 +113,17 @@ export function TransactionsPanel({ roomId }: TransactionsPanelProps): React.JSX
           {/* Wallet Info */}
           {wallet && (
             <div className="bg-surface-secondary rounded-lg p-3 shadow-sm text-sm">
-              <div className="text-text-muted">Wallet</div>
+              <div className="flex items-center justify-between">
+                <div className="text-text-muted">Wallet</div>
+                <a
+                  href={roomId ? `/api/rooms/${roomId}/wallet/onramp-redirect?token=${encodeURIComponent(getCachedToken() ?? '')}` : '#'}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="text-xs px-2.5 py-1.5 rounded-lg bg-interactive text-text-invert hover:bg-interactive-hover no-underline"
+                >
+                  Top Up from Card
+                </a>
+              </div>
               <div className="flex items-center gap-1">
                 <div className="font-mono text-xs text-text-secondary truncate">{wallet.address}</div>
                 <CopyAddressButton address={wallet.address} />

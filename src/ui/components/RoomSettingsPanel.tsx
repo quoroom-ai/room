@@ -1,6 +1,8 @@
 import { useState, useRef, useEffect } from 'react'
 import { usePolling } from '../hooks/usePolling'
 import { api } from '../lib/client'
+import { getCachedToken } from '../lib/auth'
+import { wsClient, type WsMessage } from '../lib/ws'
 import { Select } from './Select'
 import { CopyAddressButton } from './CopyAddressButton'
 import { PromptDialog } from './PromptDialog'
@@ -32,6 +34,39 @@ type ApiKeyFeedback = {
 
 type ApiKeyPromptMode = 'validate' | 'save'
 type QueenModelSetupPhase = 'starting' | 'installing'
+type ProviderName = 'codex' | 'claude'
+type ProviderAuthStatus = 'starting' | 'running' | 'completed' | 'failed' | 'canceled' | 'timeout'
+
+interface ProviderAuthLine {
+  id: number
+  stream: 'stdout' | 'stderr' | 'system'
+  text: string
+  timestamp: string
+}
+
+interface ProviderAuthSession {
+  sessionId: string
+  provider: ProviderName
+  status: ProviderAuthStatus
+  command: string
+  startedAt: string
+  updatedAt: string
+  endedAt: string | null
+  exitCode: number | null
+  verificationUrl: string | null
+  deviceCode: string | null
+  active: boolean
+  lines: ProviderAuthLine[]
+}
+
+interface ProviderStatusEntry {
+  installed: boolean
+  version?: string
+  connected: boolean | null
+  requestedAt: string | null
+  disconnectedAt: string | null
+  authSession: ProviderAuthSession | null
+}
 
 export function RoomSettingsPanel({ roomId }: RoomSettingsPanelProps): React.JSX.Element {
   const { data: rooms, refresh } = usePolling<Room[]>(() => api.rooms.list(), 10000)
@@ -46,6 +81,13 @@ export function RoomSettingsPanel({ roomId }: RoomSettingsPanelProps): React.JSX
   const { data: onChainBalance } = usePolling<OnChainBalance | null>(
     () => roomId && wallet ? api.wallet.balance(roomId).catch(() => null) : Promise.resolve(null),
     30000
+  )
+  const { data: providerStatus, refresh: refreshProviderStatus } = usePolling<{
+    codex: ProviderStatusEntry
+    claude: ProviderStatusEntry
+  } | null>(
+    () => api.providers.status().catch(() => null),
+    10000
   )
   const [queenRunning, setQueenRunning] = useState<Record<number, boolean>>({})
   const [queenModel, setQueenModel] = useState<Record<number, string | null>>({})
@@ -93,9 +135,14 @@ export function RoomSettingsPanel({ roomId }: RoomSettingsPanelProps): React.JSX
   const [editingGoal, setEditingGoal] = useState('')
   const [queenModelBusyRoomId, setQueenModelBusyRoomId] = useState<number | null>(null)
   const [queenModelFeedback, setQueenModelFeedback] = useState<Record<number, ApiKeyFeedback | null>>({})
+  const [providerFeedback, setProviderFeedback] = useState<Record<number, ApiKeyFeedback | null>>({})
+  const [providerAuthSessions, setProviderAuthSessions] = useState<Partial<Record<ProviderName, ProviderAuthSession | null>>>({})
+  const [providerAuthBusySessionId, setProviderAuthBusySessionId] = useState<string | null>(null)
+  const providerAuthUnsubsRef = useRef<Map<string, () => void>>(new Map())
   const [queenModelSetup, setQueenModelSetup] = useState<{ roomId: number; phase: QueenModelSetupPhase; startedAt: number } | null>(null)
   const [queenModelSetupTick, setQueenModelSetupTick] = useState<number>(Date.now())
   const [archiveBusy, setArchiveBusy] = useState(false)
+  const [showCryptoTopUp, setShowCryptoTopUp] = useState(false)
 
   // Sync editingName/editingGoal when selected room changes
   const currentRoom = rooms?.find(r => r.id === roomId) ?? null
@@ -111,6 +158,104 @@ export function RoomSettingsPanel({ roomId }: RoomSettingsPanelProps): React.JSX
     const timer = window.setInterval(() => setQueenModelSetupTick(Date.now()), 500)
     return () => window.clearInterval(timer)
   }, [queenModelSetup])
+
+  function upsertProviderAuthSession(session: ProviderAuthSession): void {
+    setProviderAuthSessions(prev => ({ ...prev, [session.provider]: session }))
+  }
+
+  function providerAuthStatusLabel(status: ProviderAuthStatus): string {
+    switch (status) {
+      case 'starting': return 'Starting'
+      case 'running': return 'Waiting for login'
+      case 'completed': return 'Connected'
+      case 'failed': return 'Failed'
+      case 'canceled': return 'Canceled'
+      case 'timeout': return 'Timed out'
+      default: return status
+    }
+  }
+
+  useEffect(() => {
+    if (!providerStatus) return
+    setProviderAuthSessions(prev => ({
+      codex: providerStatus.codex.authSession ?? prev.codex ?? null,
+      claude: providerStatus.claude.authSession ?? prev.claude ?? null,
+    }))
+  }, [providerStatus])
+
+  useEffect(() => {
+    const unsubs = providerAuthUnsubsRef.current
+    const activeSessions = [providerAuthSessions.codex, providerAuthSessions.claude]
+      .filter((session): session is ProviderAuthSession => Boolean(session?.active))
+    const activeIds = new Set(activeSessions.map((session) => session.sessionId))
+
+    for (const [sessionId, unsubscribe] of [...unsubs.entries()]) {
+      if (!activeIds.has(sessionId)) {
+        unsubscribe()
+        unsubs.delete(sessionId)
+      }
+    }
+
+    for (const session of activeSessions) {
+      if (unsubs.has(session.sessionId)) continue
+      const unsubscribe = wsClient.subscribe(`provider-auth:${session.sessionId}`, (event: WsMessage) => {
+        if (event.type === 'provider_auth:status') {
+          const data = event.data as ProviderAuthSession
+          if (!data?.sessionId || !data?.provider) return
+          upsertProviderAuthSession(data)
+          if (!data.active) void refreshProviderStatus()
+          return
+        }
+        if (event.type === 'provider_auth:line') {
+          const data = event.data as {
+            sessionId: string
+            provider: ProviderName
+            id: number
+            stream: 'stdout' | 'stderr' | 'system'
+            text: string
+            timestamp: string
+            deviceCode?: string | null
+            verificationUrl?: string | null
+          }
+          if (!data?.sessionId || !data?.provider) return
+          setProviderAuthSessions(prev => {
+            const current = prev[data.provider]
+            if (!current || current.sessionId !== data.sessionId) return prev
+            if (current.lines.some((line) => line.id === data.id)) return prev
+            const nextLines = [...current.lines, {
+              id: data.id,
+              stream: data.stream,
+              text: data.text,
+              timestamp: data.timestamp,
+            }]
+            return {
+              ...prev,
+              [data.provider]: {
+                ...current,
+                updatedAt: data.timestamp,
+                lines: nextLines.slice(-300),
+                deviceCode: data.deviceCode ?? current.deviceCode,
+                verificationUrl: data.verificationUrl ?? current.verificationUrl,
+              },
+            }
+          })
+        }
+      })
+      unsubs.set(session.sessionId, unsubscribe)
+    }
+  }, [
+    providerAuthSessions.codex?.sessionId,
+    providerAuthSessions.codex?.active,
+    providerAuthSessions.claude?.sessionId,
+    providerAuthSessions.claude?.active,
+    refreshProviderStatus,
+  ])
+
+  useEffect(() => () => {
+    const unsubs = providerAuthUnsubsRef.current
+    for (const unsubscribe of unsubs.values()) unsubscribe()
+    unsubs.clear()
+  }, [])
 
   function optimistic(id: number, patch: Partial<Room>): void {
     setRoomOverrides(prev => ({ ...prev, [id]: { ...prev[id], ...patch } }))
@@ -298,6 +443,63 @@ export function RoomSettingsPanel({ roomId }: RoomSettingsPanelProps): React.JSX
     }
   }
 
+  async function handleProviderConnect(room: Room, provider: 'codex' | 'claude'): Promise<void> {
+    setProviderFeedback(prev => ({ ...prev, [room.id]: { kind: 'info', text: `Preparing ${provider} login...` } }))
+    try {
+      const response = await api.providers.connect(provider)
+      upsertProviderAuthSession(response.session)
+      await refreshProviderStatus()
+      setProviderFeedback(prev => ({
+        ...prev,
+        [room.id]: {
+          kind: 'success',
+          text: response.reused
+            ? `${provider} login is already running. Continue in the log panel below.`
+            : `${provider} login started. Continue in the log panel below.`,
+        },
+      }))
+    } catch (e) {
+      const message = e instanceof Error ? e.message : `Failed to connect ${provider}`
+      setProviderFeedback(prev => ({ ...prev, [room.id]: { kind: 'error', text: message } }))
+    }
+  }
+
+  async function handleProviderDisconnect(room: Room, provider: 'codex' | 'claude'): Promise<void> {
+    setProviderFeedback(prev => ({ ...prev, [room.id]: { kind: 'info', text: `Disconnecting ${provider}...` } }))
+    try {
+      await api.providers.disconnect(provider)
+      setProviderAuthSessions(prev => {
+        const current = prev[provider]
+        return { ...prev, [provider]: current ? { ...current, active: false } : null }
+      })
+      await refreshProviderStatus()
+      setProviderFeedback(prev => ({
+        ...prev,
+        [room.id]: { kind: 'success', text: `${provider} disconnected.` },
+      }))
+    } catch (e) {
+      const message = e instanceof Error ? e.message : `Failed to disconnect ${provider}`
+      setProviderFeedback(prev => ({ ...prev, [room.id]: { kind: 'error', text: message } }))
+    }
+  }
+
+  async function handleProviderAuthCancel(room: Room, sessionId: string): Promise<void> {
+    if (providerAuthBusySessionId === sessionId) return
+    setProviderAuthBusySessionId(sessionId)
+    setProviderFeedback(prev => ({ ...prev, [room.id]: { kind: 'info', text: 'Canceling login flow...' } }))
+    try {
+      const response = await api.providers.cancelSession(sessionId)
+      upsertProviderAuthSession(response.session)
+      await refreshProviderStatus()
+      setProviderFeedback(prev => ({ ...prev, [room.id]: { kind: 'success', text: 'Login flow canceled.' } }))
+    } catch (e) {
+      const message = e instanceof Error ? e.message : 'Failed to cancel login flow'
+      setProviderFeedback(prev => ({ ...prev, [room.id]: { kind: 'error', text: message } }))
+    } finally {
+      setProviderAuthBusySessionId(null)
+    }
+  }
+
   async function handleQueenStart(roomId: number): Promise<void> {
     await api.rooms.queenStart(roomId)
     setQueenRunning(prev => ({ ...prev, [roomId]: true }))
@@ -338,6 +540,19 @@ export function RoomSettingsPanel({ roomId }: RoomSettingsPanelProps): React.JSX
   const showQueenSubscriptionStatus = activeQueenAuth?.mode === 'subscription'
     && !activeQueenAuth.ready
     && !(activeQueenAuth.provider === 'ollama' && isQueenModelBusy)
+  const queenSubscriptionProvider: 'codex' | 'claude' | null = activeQueenAuth?.provider === 'codex_subscription'
+    ? 'codex'
+    : activeQueenAuth?.provider === 'claude_subscription'
+      ? 'claude'
+      : null
+  const queenSubscriptionStatus = queenSubscriptionProvider ? providerStatus?.[queenSubscriptionProvider] ?? null : null
+  const queenProviderAuthSession = queenSubscriptionProvider
+    ? (providerAuthSessions[queenSubscriptionProvider] ?? queenSubscriptionStatus?.authSession ?? null)
+    : null
+  const queenProviderAuthBusy = queenProviderAuthSession
+    ? providerAuthBusySessionId === queenProviderAuthSession.sessionId
+    : false
+  const queenProviderAuthRecentLines = queenProviderAuthSession?.lines.slice(-12) ?? []
   const queenModelOptions = [
     { value: 'claude', label: 'Claude Code (subscription)' },
     { value: 'claude-opus-4-6', label: 'Opus (subscription)' },
@@ -559,12 +774,45 @@ export function RoomSettingsPanel({ roomId }: RoomSettingsPanelProps): React.JSX
               )}
               {showQueenSubscriptionStatus && (
                 row('Status',
-                  <div className="flex items-center gap-2">
+                  <div className="flex flex-wrap items-center gap-2">
                     <span className="text-xs text-status-warning">
-                      {activeQueenAuth.provider === 'claude_subscription' && 'Claude CLI not installed'}
-                      {activeQueenAuth.provider === 'codex_subscription' && 'Codex CLI not installed'}
+                      {activeQueenAuth.provider === 'claude_subscription' && (
+                        queenSubscriptionStatus?.installed
+                          ? queenSubscriptionStatus.connected === true
+                            ? 'Claude connected'
+                            : queenSubscriptionStatus.connected === false
+                              ? 'Claude disconnected'
+                              : 'Claude auth status unknown'
+                          : 'Claude CLI not installed'
+                      )}
+                      {activeQueenAuth.provider === 'codex_subscription' && (
+                        queenSubscriptionStatus?.installed
+                          ? queenSubscriptionStatus.connected === true
+                            ? 'Codex connected'
+                            : queenSubscriptionStatus.connected === false
+                              ? 'Codex disconnected'
+                              : 'Codex auth status unknown'
+                          : 'Codex CLI not installed'
+                      )}
                       {activeQueenAuth.provider === 'ollama' && 'Ollama unavailable'}
                     </span>
+                    {queenSubscriptionProvider && queenSubscriptionStatus?.installed && (
+                      <>
+                        <button
+                          onClick={() => { void handleProviderConnect(room, queenSubscriptionProvider) }}
+                          className="text-xs px-2 py-1 rounded-lg border border-border-primary text-text-secondary hover:bg-surface-hover disabled:opacity-50 disabled:cursor-not-allowed"
+                          disabled={queenProviderAuthSession?.active}
+                        >
+                          Connect
+                        </button>
+                        <button
+                          onClick={() => { void handleProviderDisconnect(room, queenSubscriptionProvider) }}
+                          className="text-xs px-2 py-1 rounded-lg border border-border-primary text-text-secondary hover:bg-surface-hover"
+                        >
+                          Disconnect
+                        </button>
+                      </>
+                    )}
                     {activeQueenAuth.provider === 'ollama' && queenModelValue.startsWith('ollama:') && (
                       <button
                         onClick={() => { void handleSetQueenModel(room, queenModelValue) }}
@@ -575,6 +823,65 @@ export function RoomSettingsPanel({ roomId }: RoomSettingsPanelProps): React.JSX
                       </button>
                     )}
                   </div>
+                )
+              )}
+              {showQueenSubscriptionStatus && queenSubscriptionProvider && queenProviderAuthSession && (
+                row('Login flow',
+                  <div className="w-full max-w-[360px] space-y-2">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <span className={`text-xs ${
+                        queenProviderAuthSession.status === 'completed'
+                          ? 'text-status-success'
+                          : queenProviderAuthSession.status === 'failed' || queenProviderAuthSession.status === 'timeout'
+                            ? 'text-status-error'
+                            : 'text-text-muted'
+                      }`}>
+                        {providerAuthStatusLabel(queenProviderAuthSession.status)}
+                      </span>
+                      {queenProviderAuthSession.active && (
+                        <button
+                          onClick={() => { void handleProviderAuthCancel(room, queenProviderAuthSession.sessionId) }}
+                          disabled={queenProviderAuthBusy}
+                          className="text-xs px-2 py-1 rounded-lg border border-border-primary text-text-secondary hover:bg-surface-hover disabled:opacity-50 disabled:cursor-not-allowed"
+                        >
+                          {queenProviderAuthBusy ? 'Canceling...' : 'Cancel'}
+                        </button>
+                      )}
+                      {!queenProviderAuthSession.active && (
+                        <button
+                          onClick={() => { void refreshProviderStatus() }}
+                          className="text-xs px-2 py-1 rounded-lg border border-border-primary text-text-secondary hover:bg-surface-hover"
+                        >
+                          Refresh
+                        </button>
+                      )}
+                    </div>
+                    {queenProviderAuthSession.deviceCode && (
+                      <div className="text-xs text-text-secondary">
+                        Code: <code className="px-1 py-0.5 rounded bg-surface-primary border border-border-primary">{queenProviderAuthSession.deviceCode}</code>
+                      </div>
+                    )}
+                    {queenProviderAuthSession.verificationUrl && (
+                      <a
+                        href={queenProviderAuthSession.verificationUrl}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="text-xs text-interactive hover:underline break-all inline-block"
+                      >
+                        Open verification page
+                      </a>
+                    )}
+                    <div className="max-h-32 overflow-y-auto rounded-lg border border-border-primary bg-surface-primary p-2 font-mono text-[11px] text-text-muted">
+                      {queenProviderAuthRecentLines.length === 0
+                        ? 'Waiting for login output...'
+                        : queenProviderAuthRecentLines.map((line) => (
+                            <div key={line.id} className="whitespace-pre-wrap break-words">
+                              {line.text}
+                            </div>
+                          ))}
+                    </div>
+                  </div>,
+                  'Runs provider CLI login in the runtime and streams device-code output.'
                 )
               )}
               {queenModelFeedback[room.id] && (
@@ -597,6 +904,17 @@ export function RoomSettingsPanel({ roomId }: RoomSettingsPanelProps): React.JSX
                       : 'text-text-muted'
                 }`}>
                   {apiKeyFeedback[room.id]?.text}
+                </div>
+              )}
+              {providerFeedback[room.id] && (
+                <div className={`text-xs mt-1 ${
+                  providerFeedback[room.id]?.kind === 'success'
+                    ? 'text-status-success'
+                    : providerFeedback[room.id]?.kind === 'error'
+                      ? 'text-status-error'
+                      : 'text-text-muted'
+                }`}>
+                  {providerFeedback[room.id]?.text}
                 </div>
               )}
 
@@ -730,12 +1048,21 @@ export function RoomSettingsPanel({ roomId }: RoomSettingsPanelProps): React.JSX
                       </div>
                     )}
                   </div>
-                  <div className="pt-1 border-t border-border-primary">
-                    <p className="text-xs text-text-muted leading-relaxed">
-                      Supports USDC and USDT on Base, Ethereum, Arbitrum, Optimism, and Polygon.
-                      Same address works on all EVM chains. Balance is aggregated across all networks.
-                      Fund the wallet to give the queen resources for stations and services.
-                    </p>
+                  <div className="flex gap-2">
+                    <a
+                      href={`/api/rooms/${roomId}/wallet/onramp-redirect?token=${encodeURIComponent(getCachedToken() ?? '')}`}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="flex-1 py-2 text-sm font-medium text-center text-text-invert bg-interactive hover:bg-interactive-hover rounded-lg transition-colors no-underline"
+                    >
+                      Top Up from Card
+                    </a>
+                    <button
+                      onClick={() => setShowCryptoTopUp(true)}
+                      className="flex-1 py-2 text-sm font-medium text-center text-text-primary bg-surface-tertiary hover:bg-surface-hover rounded-lg transition-colors"
+                    >
+                      Top Up with Crypto
+                    </button>
                   </div>
                 </div>
               )}
@@ -811,6 +1138,53 @@ export function RoomSettingsPanel({ roomId }: RoomSettingsPanelProps): React.JSX
             setApiKeyPrompt(null)
           }}
         />
+      )}
+
+      {showCryptoTopUp && wallet && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/50"
+          onClick={e => { if (e.target === e.currentTarget) setShowCryptoTopUp(false) }}
+        >
+          <div className="bg-surface-primary rounded-2xl shadow-2xl w-full max-w-sm mx-4 p-6 relative">
+            <button
+              onClick={() => setShowCryptoTopUp(false)}
+              className="absolute top-4 right-4 text-text-muted hover:text-text-secondary text-lg leading-none transition-colors"
+              aria-label="Close"
+            >
+              {'\u2715'}
+            </button>
+            <h2 className="text-lg font-bold text-text-primary mb-4">Top Up with Crypto</h2>
+            <div className="space-y-3">
+              <p className="text-sm text-text-secondary">
+                Send USDC or USDT to the wallet address below. The balance updates automatically.
+              </p>
+              <div className="bg-surface-secondary rounded-lg p-3">
+                <div className="text-xs text-text-muted mb-1">Wallet address</div>
+                <div className="flex items-center gap-2">
+                  <code className="text-xs text-text-primary font-mono truncate flex-1">{wallet.address}</code>
+                  <CopyAddressButton address={wallet.address} />
+                </div>
+              </div>
+              <div className="bg-surface-secondary rounded-lg p-3">
+                <div className="text-xs text-text-muted mb-1">Supported chains</div>
+                <div className="text-sm text-text-primary">Base, Ethereum, Arbitrum, Optimism, Polygon</div>
+              </div>
+              <div className="bg-surface-secondary rounded-lg p-3">
+                <div className="text-xs text-text-muted mb-1">Supported tokens</div>
+                <div className="text-sm text-text-primary">USDC, USDT</div>
+              </div>
+              <p className="text-xs text-text-muted">
+                Same address works on all EVM chains. Send from any exchange or wallet. Balance is aggregated across all networks.
+              </p>
+              <button
+                onClick={() => setShowCryptoTopUp(false)}
+                className="w-full py-2 text-sm font-medium text-center text-text-primary bg-surface-tertiary hover:bg-surface-hover rounded-lg transition-colors"
+              >
+                Done
+              </button>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   )

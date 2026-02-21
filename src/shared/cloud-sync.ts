@@ -417,6 +417,29 @@ export async function getCloudCryptoPrices(cloudRoomId: string): Promise<CryptoP
 }
 
 /**
+ * Get a Coinbase On-Ramp URL for topping up a wallet with a credit card.
+ * Returns { onrampUrl } or null on failure.
+ */
+export async function getCloudOnrampUrl(
+  cloudRoomId: string,
+  walletAddress: string,
+  amount?: number
+): Promise<{ onrampUrl: string } | null> {
+  try {
+    const params = new URLSearchParams({ address: walletAddress })
+    if (amount) params.set('amount', String(amount))
+    const res = await fetch(
+      `${CLOUD_API}/rooms/${encodeURIComponent(cloudRoomId)}/billing/onramp-url?${params}`,
+      { signal: AbortSignal.timeout(15000) }
+    )
+    if (!res.ok) return null
+    return res.json() as Promise<{ onrampUrl: string }>
+  } catch {
+    return null
+  }
+}
+
+/**
  * Submit a crypto payment (tx hash) for a new station.
  * Cloud verifies on-chain and provisions the station.
  */

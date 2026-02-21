@@ -21,15 +21,128 @@ import crypto from 'node:crypto'
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 
-export type TokenRole = 'agent' | 'user'
+export type TokenRole = 'agent' | 'user' | 'member'
+export type DeploymentMode = 'local' | 'cloud'
 
 let agentToken: string | null = null
 let userToken: string | null = null
 
 const AUTH_TOKENS_FILE = 'auth.tokens.json'
+const DEFAULT_CLOUD_ALLOWED_ORIGINS = ['https://app.quoroom.ai', 'https://quoroom.ai', 'https://www.quoroom.ai']
 
 function isValidToken(value: unknown): value is string {
   return typeof value === 'string' && /^[a-f0-9]{64}$/i.test(value)
+}
+
+function normalizeDeploymentMode(value: string | undefined): DeploymentMode {
+  return value?.trim().toLowerCase() === 'cloud' ? 'cloud' : 'local'
+}
+
+function normalizeOrigin(origin: string): string {
+  try {
+    const parsed = new URL(origin)
+    return `${parsed.protocol}//${parsed.host}`.toLowerCase()
+  } catch {
+    return ''
+  }
+}
+
+function getCloudAllowedOrigins(): Set<string> {
+  const configured = (process.env.QUOROOM_ALLOWED_ORIGINS || '')
+    .split(',')
+    .map(s => normalizeOrigin(s.trim()))
+    .filter(Boolean)
+  const origins = configured.length > 0 ? configured : DEFAULT_CLOUD_ALLOWED_ORIGINS
+  return new Set(origins.map(normalizeOrigin).filter(Boolean))
+}
+
+function getCloudUserToken(): string {
+  return (process.env.QUOROOM_CLOUD_USER_TOKEN || '').trim()
+}
+
+function getCloudJwtSecret(): string {
+  return (process.env.QUOROOM_CLOUD_JWT_SECRET || '').trim()
+}
+
+function getCloudInstanceId(): string {
+  return (process.env.QUOROOM_CLOUD_INSTANCE_ID || '').trim()
+}
+
+function tokenEquals(expected: string | null, provided: string): boolean {
+  if (!expected) return false
+  const expectedBuf = Buffer.from(expected)
+  const providedBuf = Buffer.from(provided)
+  return expectedBuf.length === providedBuf.length && crypto.timingSafeEqual(expectedBuf, providedBuf)
+}
+
+function parseJwtPart<T>(input: string): T | null {
+  try {
+    const decoded = Buffer.from(input, 'base64url').toString('utf8')
+    return JSON.parse(decoded) as T
+  } catch {
+    return null
+  }
+}
+
+function isFiniteNumber(value: unknown): value is number {
+  return typeof value === 'number' && Number.isFinite(value)
+}
+
+function validateCloudJwt(token: string): 'user' | 'member' | null {
+  const secret = getCloudJwtSecret()
+  if (!secret) return null
+  const parts = token.split('.')
+  if (parts.length !== 3) return null
+  const [headerB64, payloadB64, signatureB64] = parts
+  const header = parseJwtPart<{ alg?: string; typ?: string }>(headerB64)
+  const payload = parseJwtPart<{
+    iss?: string
+    aud?: string
+    sub?: string
+    exp?: number
+    nbf?: number
+    instanceId?: string
+    role?: string
+  }>(payloadB64)
+  if (!header || !payload) return null
+  if (header.alg !== 'HS256') return null
+  if (payload.iss !== 'quoroom-cloud' || payload.aud !== 'quoroom-runtime') return null
+  if (typeof payload.sub !== 'string' || payload.sub.length === 0) return null
+
+  const expectedInstanceId = getCloudInstanceId()
+  if (expectedInstanceId) {
+    if (typeof payload.instanceId !== 'string' || payload.instanceId !== expectedInstanceId) return null
+  }
+
+  const nowSec = Math.floor(Date.now() / 1000)
+  if (isFiniteNumber(payload.nbf) && nowSec < payload.nbf) return null
+  if (!isFiniteNumber(payload.exp) || nowSec >= payload.exp) return null
+
+  const expectedSig = crypto
+    .createHmac('sha256', secret)
+    .update(`${headerB64}.${payloadB64}`)
+    .digest()
+  let providedSig: Buffer
+  try {
+    providedSig = Buffer.from(signatureB64, 'base64url')
+  } catch {
+    return null
+  }
+  if (!(expectedSig.length === providedSig.length && crypto.timingSafeEqual(expectedSig, providedSig))) {
+    return null
+  }
+
+  const cloudRole = (payload.role || '').toLowerCase()
+  if (cloudRole === 'member') return 'member'
+  return 'user'
+}
+
+export function getDeploymentMode(): DeploymentMode {
+  return normalizeDeploymentMode(process.env.QUOROOM_DEPLOYMENT_MODE)
+}
+
+export function isCloudDeployment(): boolean {
+  return getDeploymentMode() === 'cloud'
 }
 
 function readPersistedTokens(dataDir: string): { agent: string; user: string } | null {
@@ -110,19 +223,15 @@ export function resetTokens(): void {
  * Validate auth header and return the token role, or null if invalid.
  */
 export function validateToken(authHeader: string | undefined): TokenRole | null {
-  if (!agentToken || !userToken) return null
   if (!authHeader?.startsWith('Bearer ')) return null
-  const provided = Buffer.from(authHeader.slice(7))
-
-  const agentBuf = Buffer.from(agentToken)
-  if (provided.length === agentBuf.length && crypto.timingSafeEqual(provided, agentBuf)) {
-    return 'agent'
+  const provided = authHeader.slice(7)
+  if (tokenEquals(agentToken, provided)) return 'agent'
+  if (tokenEquals(userToken, provided)) return 'user'
+  if (isCloudDeployment()) {
+    const cloudRole = validateCloudJwt(provided)
+    if (cloudRole) return cloudRole
   }
-
-  const userBuf = Buffer.from(userToken)
-  if (provided.length === userBuf.length && crypto.timingSafeEqual(provided, userBuf)) {
-    return 'user'
-  }
+  if (isCloudDeployment() && tokenEquals(getCloudUserToken(), provided)) return 'user'
 
   return null
 }
@@ -142,6 +251,14 @@ function isLoopbackHostname(hostname: string): boolean {
 }
 
 export function isAllowedOrigin(origin: string | undefined): boolean {
+  if (isCloudDeployment()) {
+    // Same-origin or non-browser requests may omit Origin.
+    if (!origin) return true
+    const normalized = normalizeOrigin(origin)
+    if (!normalized) return false
+    return getCloudAllowedOrigins().has(normalized)
+  }
+
   // Same-origin requests have no Origin header
   if (!origin) return true
   try {

@@ -19,6 +19,8 @@ import {
   validateToken,
   isAllowedOrigin,
   isLocalOrigin,
+  isCloudDeployment,
+  getDeploymentMode,
   setCorsHeaders,
   writeTokenFile,
   getUserToken,
@@ -40,7 +42,8 @@ try {
 }
 
 const DEFAULT_PORT = 3700
-const DEFAULT_BIND_HOST = '127.0.0.1'
+const DEFAULT_BIND_HOST_LOCAL = '127.0.0.1'
+const DEFAULT_BIND_HOST_CLOUD = '0.0.0.0'
 
 /** Fetch a URL following redirects and pipe the response body to `res`. */
 function streamWithRedirects(
@@ -257,7 +260,7 @@ export function createApiServer(options: ServerOptions = {}): {
       return
     }
 
-    // Auth handshake — no token needed, Origin must be localhost
+    // Auth handshake — local-mode only.
     // Returns user token (restricted in auto mode, full in semi mode)
     if (pathname === '/api/auth/handshake' && req.method === 'GET') {
       const handshakeHeaders: Record<string, string> = {
@@ -265,6 +268,11 @@ export function createApiServer(options: ServerOptions = {}): {
         'Cache-Control': 'no-store, no-cache, must-revalidate, proxy-revalidate',
         'Pragma': 'no-cache',
         'Expires': '0',
+      }
+      if (isCloudDeployment()) {
+        res.writeHead(403, handshakeHeaders)
+        res.end(JSON.stringify({ error: 'Handshake is disabled in cloud mode' }))
+        return
       }
       const isLocalClient = isLoopbackAddress(req.socket.remoteAddress)
       if (!isLocalClient || (origin && !isLocalOrigin(origin))) {
@@ -292,9 +300,10 @@ export function createApiServer(options: ServerOptions = {}): {
 
     // All other /api/* routes require auth
     if (pathname.startsWith('/api/')) {
-      // Support query-token only for binary update download links.
+      // Support query-token for routes that browsers navigate to directly (no JS fetch).
       const isDownloadRoute = pathname === '/api/status/update/download' && req.method === 'GET'
-      const queryToken = isDownloadRoute ? url.searchParams.get('token') : null
+      const isRedirectRoute = pathname.endsWith('/onramp-redirect') && req.method === 'GET'
+      const queryToken = (isDownloadRoute || isRedirectRoute) ? url.searchParams.get('token') : null
       const authValue = req.headers.authorization ?? (queryToken ? `Bearer ${queryToken}` : undefined)
       const role = validateToken(authValue)
       if (!role) {
@@ -356,6 +365,11 @@ export function createApiServer(options: ServerOptions = {}): {
           db
         }
         const result = await matched.handler(ctx)
+        if (result.redirect) {
+          res.writeHead(302, { ...responseHeaders, Location: result.redirect })
+          res.end()
+          return
+        }
         const status = result.error ? (result.status || 400) : (result.status || 200)
         res.writeHead(status, responseHeaders)
         res.end(JSON.stringify(result.error ? { error: result.error } : result.data))
@@ -457,7 +471,9 @@ function registerMcpGlobally(dbPath: string): void {
 /** Start the server (for CLI use) */
 export function startServer(options: ServerOptions = {}): void {
   const port = options.port ?? DEFAULT_PORT
-  const bindHost = process.env.QUOROOM_BIND_HOST || DEFAULT_BIND_HOST
+  const deploymentMode = getDeploymentMode()
+  const bindHost = process.env.QUOROOM_BIND_HOST
+    || (deploymentMode === 'cloud' ? DEFAULT_BIND_HOST_CLOUD : DEFAULT_BIND_HOST_LOCAL)
   // Default to built UI directory next to the compiled server output
   if (!options.staticDir) {
     const defaultUiDir = path.join(__dirname, '../ui')
@@ -490,10 +506,12 @@ export function startServer(options: ServerOptions = {}): void {
       const dashboardUrl = `http://localhost:${boundPort}`
       console.error(`Quoroom API server started on http://localhost:${boundPort}`)
       console.error(`Dashboard: ${dashboardUrl}`)
+      console.error(`Deployment mode: ${deploymentMode}`)
+      console.error(`Bind host: ${bindHost}`)
       console.error(`Auth token: ${token.slice(0, 8)}...`)
 
       // Auto-open dashboard only in production builds.
-      if (process.env.NODE_ENV === 'production') {
+      if (process.env.NODE_ENV === 'production' && deploymentMode !== 'cloud') {
         const cmd = process.platform === 'darwin' ? 'open'
           : process.platform === 'win32' ? 'start'
           : 'xdg-open'

@@ -327,8 +327,142 @@ export const api = {
         codex: { available: boolean; version?: string }
         ollama: { available: boolean; models: Array<{ name: string; size: number }> }
         resources: { cpuCount: number; loadAvg1m: number; loadAvg5m: number; memTotalGb: number; memFreeGb: number; memUsedPct: number }
+        deploymentMode?: 'local' | 'cloud'
         updateInfo?: { latestVersion: string; releaseUrl: string; assets: { mac: string | null; windows: string | null; linux: string | null } } | null
       }>('GET', '/api/status'),
+  },
+
+  // ─── Providers (cloud subscription auth helpers) ───────
+  providers: {
+    status: () =>
+      request<{
+        codex: {
+          installed: boolean
+          version?: string
+          connected: boolean | null
+          requestedAt: string | null
+          disconnectedAt: string | null
+          authSession: {
+            sessionId: string
+            provider: 'codex' | 'claude'
+            status: 'starting' | 'running' | 'completed' | 'failed' | 'canceled' | 'timeout'
+            command: string
+            startedAt: string
+            updatedAt: string
+            endedAt: string | null
+            exitCode: number | null
+            verificationUrl: string | null
+            deviceCode: string | null
+            active: boolean
+            lines: Array<{ id: number; stream: 'stdout' | 'stderr' | 'system'; text: string; timestamp: string }>
+          } | null
+        }
+        claude: {
+          installed: boolean
+          version?: string
+          connected: boolean | null
+          requestedAt: string | null
+          disconnectedAt: string | null
+          authSession: {
+            sessionId: string
+            provider: 'codex' | 'claude'
+            status: 'starting' | 'running' | 'completed' | 'failed' | 'canceled' | 'timeout'
+            command: string
+            startedAt: string
+            updatedAt: string
+            endedAt: string | null
+            exitCode: number | null
+            verificationUrl: string | null
+            deviceCode: string | null
+            active: boolean
+            lines: Array<{ id: number; stream: 'stdout' | 'stderr' | 'system'; text: string; timestamp: string }>
+          } | null
+        }
+      }>('GET', '/api/providers/status'),
+    connect: (provider: 'codex' | 'claude') =>
+      request<{
+        ok: true
+        provider: 'codex' | 'claude'
+        status: 'pending'
+        requestedAt: string
+        reused: boolean
+        session: {
+          sessionId: string
+          provider: 'codex' | 'claude'
+          status: 'starting' | 'running' | 'completed' | 'failed' | 'canceled' | 'timeout'
+          command: string
+          startedAt: string
+          updatedAt: string
+          endedAt: string | null
+          exitCode: number | null
+          verificationUrl: string | null
+          deviceCode: string | null
+          active: boolean
+          lines: Array<{ id: number; stream: 'stdout' | 'stderr' | 'system'; text: string; timestamp: string }>
+        }
+        channel: string
+      }>('POST', `/api/providers/${provider}/connect`),
+    disconnect: (provider: 'codex' | 'claude') =>
+      request<{
+        ok: true
+        provider: 'codex' | 'claude'
+        status: 'disconnected'
+        disconnectedAt: string
+        command: string
+        commandResult: 'ok' | 'unknown'
+      }>('POST', `/api/providers/${provider}/disconnect`),
+    latestSession: (provider: 'codex' | 'claude') =>
+      request<{
+        session: {
+          sessionId: string
+          provider: 'codex' | 'claude'
+          status: 'starting' | 'running' | 'completed' | 'failed' | 'canceled' | 'timeout'
+          command: string
+          startedAt: string
+          updatedAt: string
+          endedAt: string | null
+          exitCode: number | null
+          verificationUrl: string | null
+          deviceCode: string | null
+          active: boolean
+          lines: Array<{ id: number; stream: 'stdout' | 'stderr' | 'system'; text: string; timestamp: string }>
+        } | null
+      }>('GET', `/api/providers/${provider}/session`),
+    session: (sessionId: string) =>
+      request<{
+        session: {
+          sessionId: string
+          provider: 'codex' | 'claude'
+          status: 'starting' | 'running' | 'completed' | 'failed' | 'canceled' | 'timeout'
+          command: string
+          startedAt: string
+          updatedAt: string
+          endedAt: string | null
+          exitCode: number | null
+          verificationUrl: string | null
+          deviceCode: string | null
+          active: boolean
+          lines: Array<{ id: number; stream: 'stdout' | 'stderr' | 'system'; text: string; timestamp: string }>
+        }
+      }>('GET', `/api/providers/sessions/${encodeURIComponent(sessionId)}`),
+    cancelSession: (sessionId: string) =>
+      request<{
+        ok: true
+        session: {
+          sessionId: string
+          provider: 'codex' | 'claude'
+          status: 'starting' | 'running' | 'completed' | 'failed' | 'canceled' | 'timeout'
+          command: string
+          startedAt: string
+          updatedAt: string
+          endedAt: string | null
+          exitCode: number | null
+          verificationUrl: string | null
+          deviceCode: string | null
+          active: boolean
+          lines: Array<{ id: number; stream: 'stdout' | 'stderr' | 'system'; text: string; timestamp: string }>
+        }
+      }>('POST', `/api/providers/sessions/${encodeURIComponent(sessionId)}/cancel`),
   },
 
   // ─── Ollama ──────────────────────────────────────────
@@ -349,6 +483,8 @@ export const api = {
       request<RevenueSummary>('GET', `/api/rooms/${roomId}/wallet/summary`),
     balance: (roomId: number) =>
       request<OnChainBalance>('GET', `/api/rooms/${roomId}/wallet/balance`),
+    onrampUrl: (roomId: number, amount?: number) =>
+      request<{ onrampUrl: string }>('GET', `/api/rooms/${roomId}/wallet/onramp-url${qs({ amount })}`),
   },
 
   // ─── Credentials ──────────────────────────────────────

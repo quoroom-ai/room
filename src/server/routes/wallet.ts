@@ -3,6 +3,7 @@ import * as queries from '../../shared/db-queries'
 import { getOnChainBalance, type NetworkName } from '../../shared/wallet'
 import { SUPPORTED_CHAINS, SUPPORTED_TOKENS } from '../../shared/constants'
 import type { OnChainBalance } from '../../shared/types'
+import { getRoomCloudId, getCloudOnrampUrl } from '../../shared/cloud-sync'
 
 function parseLimit(raw: string | undefined, fallback: number, max: number): number {
   const n = Number(raw)
@@ -119,5 +120,30 @@ export function registerWalletRoutes(router: Router): void {
         } satisfies OnChainBalance
       }
     }
+  })
+
+  // Server-side redirect — browser <a> tag navigates here, gets 302 to Coinbase
+  router.get('/api/rooms/:roomId/wallet/onramp-redirect', async (ctx) => {
+    const roomId = Number(ctx.params.roomId)
+    const wallet = queries.getWalletByRoom(ctx.db, roomId)
+    if (!wallet) return { status: 400, error: 'Room has no wallet' }
+
+    const cloudRoomId = getRoomCloudId(roomId)
+    const amount = ctx.query.amount ? Number(ctx.query.amount) : undefined
+    const result = await getCloudOnrampUrl(cloudRoomId, wallet.address, amount)
+    if (!result) return { status: 503, error: 'On-ramp service unavailable' }
+    return { redirect: result.onrampUrl }
+  })
+
+  router.get('/api/rooms/:roomId/wallet/onramp-url', async (ctx) => {
+    const roomId = Number(ctx.params.roomId)
+    const wallet = queries.getWalletByRoom(ctx.db, roomId)
+    if (!wallet) return { status: 400, error: 'Room has no wallet' }
+
+    const cloudRoomId = getRoomCloudId(roomId)
+    const amount = ctx.query.amount ? Number(ctx.query.amount) : undefined
+    const result = await getCloudOnrampUrl(cloudRoomId, wallet.address, amount)
+    if (!result) return { status: 503, error: 'On-ramp unavailable' }
+    return { data: result }
   })
 }

@@ -1,8 +1,24 @@
 const DEFAULT_PORT = 3700
+const CLOUD_TOKEN_STORAGE_KEY = 'quoroom_cloud_token'
+const CLOUD_TOKEN_QUERY_KEY = 'token'
+
+export type AppMode = 'local' | 'cloud'
+
+function normalizeApiBase(url: string): string {
+  return url.replace(/\/+$/, '')
+}
+
+function normalizeAppMode(value: string | undefined): AppMode {
+  return value?.trim().toLowerCase() === 'cloud' ? 'cloud' : 'local'
+}
+
+export const APP_MODE = normalizeAppMode(import.meta.env.VITE_APP_MODE)
 
 export function getApiBase(): string {
   // Explicit env override always wins
-  if (import.meta.env.VITE_API_URL) return import.meta.env.VITE_API_URL
+  if (import.meta.env.VITE_API_URL) return normalizeApiBase(import.meta.env.VITE_API_URL)
+  // Cloud mode defaults to same-origin API.
+  if (APP_MODE === 'cloud') return ''
   // On localhost — use same-origin URLs (Vite proxy or local server).
   const host = location.hostname
   if (host === 'localhost' || host === '127.0.0.1' || host === '::1' || host === '[::1]') return ''
@@ -15,6 +31,60 @@ export const API_BASE = getApiBase()
 
 let cachedToken: string | null = null
 let inFlightTokenRequest: Promise<string> | null = null
+
+async function verifyToken(token: string): Promise<boolean> {
+  const res = await fetch(`${API_BASE}/api/auth/verify`, {
+    method: 'GET',
+    cache: 'no-store',
+    headers: { Authorization: `Bearer ${token}` },
+  })
+  return res.ok
+}
+
+function getCloudTokenFromQuery(): string | null {
+  const params = new URLSearchParams(location.search)
+  const token = params.get(CLOUD_TOKEN_QUERY_KEY)?.trim()
+  return token && token.length > 0 ? token : null
+}
+
+function removeCloudTokenFromQuery(): void {
+  const params = new URLSearchParams(location.search)
+  if (!params.has(CLOUD_TOKEN_QUERY_KEY)) return
+  params.delete(CLOUD_TOKEN_QUERY_KEY)
+  const next = `${location.pathname}${params.toString() ? `?${params}` : ''}${location.hash}`
+  window.history.replaceState({}, '', next)
+}
+
+function getCloudTokenFromStorage(): string | null {
+  const token = localStorage.getItem(CLOUD_TOKEN_STORAGE_KEY)?.trim()
+  return token && token.length > 0 ? token : null
+}
+
+function saveCloudToken(token: string): void {
+  localStorage.setItem(CLOUD_TOKEN_STORAGE_KEY, token)
+}
+
+async function fetchCloudToken(): Promise<string> {
+  const queryToken = getCloudTokenFromQuery()
+  if (queryToken) {
+    if (await verifyToken(queryToken)) {
+      saveCloudToken(queryToken)
+      removeCloudTokenFromQuery()
+      return queryToken
+    }
+    removeCloudTokenFromQuery()
+  }
+
+  const storedToken = getCloudTokenFromStorage()
+  if (storedToken && await verifyToken(storedToken)) {
+    return storedToken
+  }
+
+  if (storedToken) {
+    localStorage.removeItem(CLOUD_TOKEN_STORAGE_KEY)
+  }
+  throw new Error('Cloud session missing or expired. Launch the app from your cloud dashboard again.')
+}
 
 async function fetchHandshakeToken(): Promise<string> {
   const res = await fetch(`${API_BASE}/api/auth/handshake`, {
@@ -30,7 +100,7 @@ async function fetchHandshakeToken(): Promise<string> {
 
 function requestToken(forceRefresh = false): Promise<string> {
   if (!forceRefresh && inFlightTokenRequest) return inFlightTokenRequest
-  const req = fetchHandshakeToken()
+  const req = (APP_MODE === 'cloud' ? fetchCloudToken() : fetchHandshakeToken())
     .then((token) => {
       if (inFlightTokenRequest === req) {
         cachedToken = token
@@ -51,6 +121,10 @@ export async function getToken(options: { forceRefresh?: boolean } = {}): Promis
   if (forceRefresh) cachedToken = null
   if (!forceRefresh && cachedToken) return cachedToken
   return requestToken(forceRefresh)
+}
+
+export function getCachedToken(): string | null {
+  return cachedToken
 }
 
 export function clearToken(): void {

@@ -50,12 +50,25 @@ const AUTO_MODE_USER_WHITELIST = [
   /^POST \/api\/status\/simulate-update$/,       // dev: simulate update notification
   /^POST \/api\/ollama\/start$/,                 // start Ollama server
   /^POST \/api\/ollama\/ensure-model$/,          // ensure Ollama model is installed
+  /^POST \/api\/providers\/(codex|claude)\/connect$/, // request provider auth flow
+  /^POST \/api\/providers\/(codex|claude)\/disconnect$/, // disconnect provider auth
+  /^POST \/api\/providers\/sessions\/[^/]+\/cancel$/, // cancel provider auth session
   /^DELETE \/api\/rooms\/\d+\/cloud-stations\/\d+$/, // delete cloud station (archive)
 ]
 
 /** Sensitive read endpoints blocked for user token in auto mode. */
 const AUTO_MODE_USER_GET_DENYLIST = [
   /^\/api\/credentials\/\d+$/,                    // full credential details
+]
+
+/** Cloud member token: collaborative access, no destructive control paths. */
+const MEMBER_ROLE_WRITE_WHITELIST = [
+  /^POST \/api\/decisions\/\d+\/vote$/,         // quorum participation
+  /^POST \/api\/decisions\/\d+\/keeper-vote$/,  // quorum participation
+  /^POST \/api\/escalations\/\d+\/resolve$/,    // resolve/reply escalation
+  /^POST \/api\/messages\/\d+\/reply$/,         // reply to room message
+  /^POST \/api\/rooms\/\d+\/messages\/\d+\/read$/, // inbox hygiene
+  /^POST \/api\/rooms\/\d+\/chat$/,             // chat with queen
 ]
 
 export interface AccessContext {
@@ -167,6 +180,15 @@ export function isAllowedForRole(
 ): boolean {
   // Agent always has full access
   if (role === 'agent') return true
+
+  // Cloud member role: read-only plus limited collaboration endpoints.
+  if (role === 'member') {
+    if (method === 'GET') {
+      return !AUTO_MODE_USER_GET_DENYLIST.some(pattern => pattern.test(pathname))
+    }
+    const key = `${method} ${pathname}`
+    return MEMBER_ROLE_WRITE_WHITELIST.some(pattern => pattern.test(key))
+  }
 
   // If request is tied to a specific room, apply that room's autonomy mode.
   const requestRoomId = resolveRoomId(pathname, db, context)

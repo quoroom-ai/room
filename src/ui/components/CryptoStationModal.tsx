@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { api } from '../lib/client'
+import { getCachedToken } from '../lib/auth'
 import { Select } from './Select'
 import { CopyAddressButton } from './CopyAddressButton'
 import type { OnChainBalance, CryptoPricing } from '@shared/types'
@@ -182,8 +183,17 @@ export function CryptoStationModal({ roomId, onClose, onSuccess, walletBalance, 
                   You need <span className="font-semibold text-text-secondary">${selectedPrice.toFixed(2)}</span> but your wallet has <span className="font-semibold text-text-secondary">${walletBalance?.totalBalance.toFixed(2) ?? '0.00'}</span>.
                 </div>
               </div>
+              <a
+                href={`/api/rooms/${roomId}/wallet/onramp-redirect?token=${encodeURIComponent(getCachedToken() ?? '')}&amount=${Math.ceil(selectedPrice - (walletBalance?.totalBalance ?? 0))}`}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="block w-full py-2.5 text-sm font-medium text-center bg-accent-primary text-white rounded-lg hover:bg-accent-hover no-underline"
+              >
+                Top Up from Card
+              </a>
+              <div className="text-[10px] text-text-muted text-center -mt-2">via Coinbase &middot; 0% fee &middot; USDC on Base</div>
               <div className="bg-surface-secondary rounded-lg p-4 space-y-2">
-                <div className="text-xs font-medium text-text-primary">How to add funds</div>
+                <div className="text-xs font-medium text-text-primary">Or send crypto directly</div>
                 <div className="text-xs text-text-muted leading-relaxed">
                   Send USDC or USDT on any supported chain (Base, Ethereum, Arbitrum, Optimism, Polygon) to the wallet address below. Balance updates automatically.
                 </div>

@@ -99,6 +99,8 @@ class WsClient {
 
     if (this.ws?.readyState === WebSocket.OPEN) {
       this.ws.send(JSON.stringify({ type: 'subscribe', channels: [channel] }))
+    } else if (!this.ws || this.ws.readyState === WebSocket.CLOSED) {
+      void this.connect()
     }
 
     return () => {

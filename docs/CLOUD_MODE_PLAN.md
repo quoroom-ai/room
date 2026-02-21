@@ -274,6 +274,38 @@ Exit criteria:
 
 - Same app bundle works in local and cloud mode.
 
+Status update (2026-02-21, `room` repo):
+
+- Completed:
+  - Added runtime deployment mode switch (`local|cloud`) in server auth/startup.
+  - Cloud-mode CORS/origin handling + cloud user token support in auth validator.
+  - Disabled localhost handshake in cloud mode.
+  - Added `deploymentMode` to `/api/status`.
+  - Added UI app-mode switch (`VITE_APP_MODE`) in auth layer.
+  - Cloud UI auth path now uses `token` query/localStorage + `/api/auth/verify` (works with signed runtime JWT).
+  - Cloud mode skips localhost probe/connect gate and opens dashboard directly.
+  - Added runtime JWT validation path (`QUOROOM_CLOUD_JWT_SECRET`) with instance binding (`QUOROOM_CLOUD_INSTANCE_ID`) for hosted access tokens.
+  - Added cloud-member role support (`member`) in auth + RBAC for safer shared instance access.
+  - Added provider auth helper routes:
+    - `GET /api/providers/status`
+    - `POST /api/providers/:provider/connect`
+    - `POST /api/providers/:provider/disconnect`
+  - Added provider connect/disconnect controls in Room settings UI for Claude/Codex subscription mode.
+- Pending in `room`:
+  - JWKS / key-rotation path (current MVP uses shared HMAC secret).
+
+Status update (2026-02-21, follow-up):
+
+- Completed:
+  - Added provider auth session manager in runtime (`codex login` / `claude login` spawn, stdout/stderr capture, timeout/cancel lifecycle).
+  - Added provider auth session APIs:
+    - `GET /api/providers/:provider/session`
+    - `GET /api/providers/sessions/:sessionId`
+    - `POST /api/providers/sessions/:sessionId/cancel`
+  - Added WebSocket live streaming for provider auth sessions on channel `provider-auth:{sessionId}` with line-by-line updates and status events.
+  - Updated Room Settings UI to show live login output, detected verification URL/device code, and cancel/refresh controls.
+  - WebSocket client now auto-connects on first subscription to prevent silent no-stream cases.
+
 ## Phase 3: Mobile + PWA hardening (2-4 days)
 
 - Verify responsive behavior for all primary tabs on narrow widths.

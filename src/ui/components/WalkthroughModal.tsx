@@ -3,19 +3,19 @@ import { useState } from 'react'
 const steps = [
   {
     title: 'You are the Keeper',
-    body: 'Your room is a swarm of AI agents. A Queen is created automatically when you start — she runs on Claude and coordinates everything from day one.',
+    body: 'Your room is a swarm of AI agents. A Queen is created automatically when you start — pick her brain in Settings: Claude, Codex, OpenAI, or a free local model via Ollama.',
   },
   {
     title: 'The Queen leads',
-    body: "The Queen uses your Claude subscription to strategize, plan, and assign work. She's the most powerful agent in the room — and she stays in charge.",
+    body: "The Queen strategizes, plans, and assigns work. She's the most powerful agent in the room. Choose her model wisely — smarter models give better results but may cost more.",
   },
   {
     title: 'Workers multiply',
-    body: 'The Queen spawns workers as needed. Create as many as you want — but remember, they share your Claude subscription and computer resources. More workers means more load.',
+    body: "The Queen spawns workers as needed. They share your machine resources, so more workers means more load. Workers can use the Queen's model or run on a separate free Ollama model.",
   },
   {
     title: 'Need more power? Rent stations',
-    body: 'Workers can run on rented cloud stations using a free LLM model (Ollama). This offloads compute from your machine. The Queen stays on Claude, workers go remote.',
+    body: 'Workers can run on rented cloud stations with free Ollama models. This offloads compute from your machine — the Queen stays local, workers go remote.',
   },
   {
     title: 'Democracy in the swarm',
