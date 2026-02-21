@@ -103,7 +103,7 @@ async function main() {
   const viteProcess = spawn(
     'node',
     ['node_modules/.bin/vite', 'build', '--watch', '--config', 'src/ui/vite.config.ts'],
-    { stdio: 'inherit' }
+    { stdio: 'inherit', env: { ...process.env, VITE_CLOUD_URL: 'http://localhost:3710' } }
   )
   viteProcess.on('exit', (code) => {
     if (code !== 0 && code !== null) console.error(`Vite exited with code ${code}`)

@@ -82,6 +82,55 @@ function qs(params: Record<string, string | number | undefined>): string {
   return '?' + new URLSearchParams(entries.map(([k, v]) => [k, String(v)])).toString()
 }
 
+type ProviderName = 'codex' | 'claude'
+type ProviderSessionStatus = 'starting' | 'running' | 'completed' | 'failed' | 'canceled' | 'timeout'
+
+interface ProviderSessionLine {
+  id: number
+  stream: 'stdout' | 'stderr' | 'system'
+  text: string
+  timestamp: string
+}
+
+interface ProviderAuthSession {
+  sessionId: string
+  provider: ProviderName
+  status: ProviderSessionStatus
+  command: string
+  startedAt: string
+  updatedAt: string
+  endedAt: string | null
+  exitCode: number | null
+  verificationUrl: string | null
+  deviceCode: string | null
+  active: boolean
+  lines: ProviderSessionLine[]
+}
+
+interface ProviderInstallSession {
+  sessionId: string
+  provider: ProviderName
+  status: ProviderSessionStatus
+  command: string
+  startedAt: string
+  updatedAt: string
+  endedAt: string | null
+  exitCode: number | null
+  active: boolean
+  lines: ProviderSessionLine[]
+}
+
+interface ProviderStatusEntry {
+  installed: boolean
+  version?: string
+  connected: boolean | null
+  requestedAt: string | null
+  disconnectedAt: string | null
+  authSession: ProviderAuthSession | null
+  installRequestedAt: string | null
+  installSession: ProviderInstallSession | null
+}
+
 export const api = {
   // ─── Tasks ───────────────────────────────────────────────
   tasks: {
@@ -335,134 +384,57 @@ export const api = {
   // ─── Providers (cloud subscription auth helpers) ───────
   providers: {
     status: () =>
-      request<{
-        codex: {
-          installed: boolean
-          version?: string
-          connected: boolean | null
-          requestedAt: string | null
-          disconnectedAt: string | null
-          authSession: {
-            sessionId: string
-            provider: 'codex' | 'claude'
-            status: 'starting' | 'running' | 'completed' | 'failed' | 'canceled' | 'timeout'
-            command: string
-            startedAt: string
-            updatedAt: string
-            endedAt: string | null
-            exitCode: number | null
-            verificationUrl: string | null
-            deviceCode: string | null
-            active: boolean
-            lines: Array<{ id: number; stream: 'stdout' | 'stderr' | 'system'; text: string; timestamp: string }>
-          } | null
-        }
-        claude: {
-          installed: boolean
-          version?: string
-          connected: boolean | null
-          requestedAt: string | null
-          disconnectedAt: string | null
-          authSession: {
-            sessionId: string
-            provider: 'codex' | 'claude'
-            status: 'starting' | 'running' | 'completed' | 'failed' | 'canceled' | 'timeout'
-            command: string
-            startedAt: string
-            updatedAt: string
-            endedAt: string | null
-            exitCode: number | null
-            verificationUrl: string | null
-            deviceCode: string | null
-            active: boolean
-            lines: Array<{ id: number; stream: 'stdout' | 'stderr' | 'system'; text: string; timestamp: string }>
-          } | null
-        }
-      }>('GET', '/api/providers/status'),
-    connect: (provider: 'codex' | 'claude') =>
+      request<{ codex: ProviderStatusEntry; claude: ProviderStatusEntry }>('GET', '/api/providers/status'),
+    connect: (provider: ProviderName) =>
       request<{
         ok: true
-        provider: 'codex' | 'claude'
+        provider: ProviderName
         status: 'pending'
         requestedAt: string
         reused: boolean
-        session: {
-          sessionId: string
-          provider: 'codex' | 'claude'
-          status: 'starting' | 'running' | 'completed' | 'failed' | 'canceled' | 'timeout'
-          command: string
-          startedAt: string
-          updatedAt: string
-          endedAt: string | null
-          exitCode: number | null
-          verificationUrl: string | null
-          deviceCode: string | null
-          active: boolean
-          lines: Array<{ id: number; stream: 'stdout' | 'stderr' | 'system'; text: string; timestamp: string }>
-        }
+        session: ProviderAuthSession
         channel: string
       }>('POST', `/api/providers/${provider}/connect`),
-    disconnect: (provider: 'codex' | 'claude') =>
+    install: (provider: ProviderName) =>
       request<{
         ok: true
-        provider: 'codex' | 'claude'
+        provider: ProviderName
+        status: 'pending' | 'already_installed'
+        requestedAt?: string
+        reused?: boolean
+        installed?: { installed: true; version?: string }
+        session: ProviderInstallSession | null
+        channel?: string
+      }>('POST', `/api/providers/${provider}/install`),
+    disconnect: (provider: ProviderName) =>
+      request<{
+        ok: true
+        provider: ProviderName
         status: 'disconnected'
         disconnectedAt: string
         command: string
         commandResult: 'ok' | 'unknown'
       }>('POST', `/api/providers/${provider}/disconnect`),
-    latestSession: (provider: 'codex' | 'claude') =>
+    latestSession: (provider: ProviderName) =>
       request<{
-        session: {
-          sessionId: string
-          provider: 'codex' | 'claude'
-          status: 'starting' | 'running' | 'completed' | 'failed' | 'canceled' | 'timeout'
-          command: string
-          startedAt: string
-          updatedAt: string
-          endedAt: string | null
-          exitCode: number | null
-          verificationUrl: string | null
-          deviceCode: string | null
-          active: boolean
-          lines: Array<{ id: number; stream: 'stdout' | 'stderr' | 'system'; text: string; timestamp: string }>
-        } | null
+        session: ProviderAuthSession | null
       }>('GET', `/api/providers/${provider}/session`),
+    latestInstallSession: (provider: ProviderName) =>
+      request<{ session: ProviderInstallSession | null }>('GET', `/api/providers/${provider}/install-session`),
     session: (sessionId: string) =>
-      request<{
-        session: {
-          sessionId: string
-          provider: 'codex' | 'claude'
-          status: 'starting' | 'running' | 'completed' | 'failed' | 'canceled' | 'timeout'
-          command: string
-          startedAt: string
-          updatedAt: string
-          endedAt: string | null
-          exitCode: number | null
-          verificationUrl: string | null
-          deviceCode: string | null
-          active: boolean
-          lines: Array<{ id: number; stream: 'stdout' | 'stderr' | 'system'; text: string; timestamp: string }>
-        }
-      }>('GET', `/api/providers/sessions/${encodeURIComponent(sessionId)}`),
+      request<{ session: ProviderAuthSession }>('GET', `/api/providers/sessions/${encodeURIComponent(sessionId)}`),
     cancelSession: (sessionId: string) =>
       request<{
         ok: true
-        session: {
-          sessionId: string
-          provider: 'codex' | 'claude'
-          status: 'starting' | 'running' | 'completed' | 'failed' | 'canceled' | 'timeout'
-          command: string
-          startedAt: string
-          updatedAt: string
-          endedAt: string | null
-          exitCode: number | null
-          verificationUrl: string | null
-          deviceCode: string | null
-          active: boolean
-          lines: Array<{ id: number; stream: 'stdout' | 'stderr' | 'system'; text: string; timestamp: string }>
-        }
+        session: ProviderAuthSession
       }>('POST', `/api/providers/sessions/${encodeURIComponent(sessionId)}/cancel`),
+    installSession: (sessionId: string) =>
+      request<{ session: ProviderInstallSession }>('GET', `/api/providers/install-sessions/${encodeURIComponent(sessionId)}`),
+    cancelInstallSession: (sessionId: string) =>
+      request<{
+        ok: true
+        session: ProviderInstallSession
+      }>('POST', `/api/providers/install-sessions/${encodeURIComponent(sessionId)}/cancel`),
   },
 
   // ─── Ollama ──────────────────────────────────────────

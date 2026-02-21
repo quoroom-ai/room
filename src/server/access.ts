@@ -51,8 +51,10 @@ const AUTO_MODE_USER_WHITELIST = [
   /^POST \/api\/ollama\/start$/,                 // start Ollama server
   /^POST \/api\/ollama\/ensure-model$/,          // ensure Ollama model is installed
   /^POST \/api\/providers\/(codex|claude)\/connect$/, // request provider auth flow
+  /^POST \/api\/providers\/(codex|claude)\/install$/, // install provider CLI
   /^POST \/api\/providers\/(codex|claude)\/disconnect$/, // disconnect provider auth
   /^POST \/api\/providers\/sessions\/[^/]+\/cancel$/, // cancel provider auth session
+  /^POST \/api\/providers\/install-sessions\/[^/]+\/cancel$/, // cancel provider install session
   /^DELETE \/api\/rooms\/\d+\/cloud-stations\/\d+$/, // delete cloud station (archive)
 ]
 

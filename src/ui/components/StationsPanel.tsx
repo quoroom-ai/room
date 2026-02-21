@@ -2,10 +2,10 @@ import { useEffect, useState } from 'react'
 import { usePolling } from '../hooks/usePolling'
 import { api } from '../lib/client'
 import { formatRelativeTime } from '../utils/time'
-import { CryptoStationModal } from './CryptoStationModal'
 import type { Wallet, OnChainBalance } from '@shared/types'
 
-const CLOUD_STATIONS_URL = 'https://quoroom.ai/stations'
+const CLOUD_BASE = (import.meta.env.VITE_CLOUD_URL || 'https://quoroom.ai').replace(/\/$/, '')
+const CLOUD_STATIONS_URL = `${CLOUD_BASE}/stations`
 
 const STATUS_COLORS: Record<string, string> = {
   active: 'bg-status-success-bg text-status-success',
@@ -57,7 +57,7 @@ export function StationsPanel({ roomId, autonomyMode }: StationsPanelProps): Rea
   const [confirmAction, setConfirmAction] = useState<{ id: number; action: 'cancel' | 'delete' } | null>(null)
   const [busy, setBusy] = useState<number | null>(null)
   const [actionError, setActionError] = useState<string | null>(null)
-  const [showCryptoModal, setShowCryptoModal] = useState(false)
+
 
   // Check if room has a wallet
   const { data: wallet } = usePolling<Wallet | null>(
@@ -169,24 +169,14 @@ export function StationsPanel({ roomId, autonomyMode }: StationsPanelProps): Rea
           {totalMonthlyCost > 0 && (
             <span className="text-xs text-text-muted">${totalMonthlyCost}/mo</span>
           )}
-          <div className="flex items-center gap-1.5">
-            {cloudRoomId && (
-              <button
-                onClick={handleAddStation}
-                className="text-xs px-2.5 py-1.5 bg-interactive text-text-invert rounded-lg hover:bg-interactive-hover"
-              >
-                + Add Station with Card
-              </button>
-            )}
-            {semi && wallet && (
-              <button
-                onClick={() => setShowCryptoModal(true)}
-                className="text-xs px-2.5 py-1.5 bg-status-success text-text-invert rounded-lg hover:opacity-90"
-              >
-                + Add Station with USDC/USDT
-              </button>
-            )}
-          </div>
+          {cloudRoomId && (
+            <button
+              onClick={handleAddStation}
+              className="text-xs px-2.5 py-1.5 bg-interactive text-text-invert rounded-lg hover:bg-interactive-hover"
+            >
+              + Rent Station
+            </button>
+          )}
         </div>
       </div>
 
@@ -296,15 +286,6 @@ export function StationsPanel({ roomId, autonomyMode }: StationsPanelProps): Rea
         </div>
       )}
 
-      {showCryptoModal && roomId && (
-        <CryptoStationModal
-          roomId={roomId}
-          onClose={() => setShowCryptoModal(false)}
-          onSuccess={() => { setShowCryptoModal(false); refresh() }}
-          walletBalance={onChainBalance ?? null}
-          walletAddress={wallet?.address ?? null}
-        />
-      )}
     </div>
   )
 }

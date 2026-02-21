@@ -120,16 +120,13 @@ function getEnvValue(envVar: string): string {
   return (process.env[envVar] || '').trim()
 }
 
-let cachedCodexCheck: boolean | null = null
 function checkCodexCliAvailable(): boolean {
-  if (cachedCodexCheck !== null) return cachedCodexCheck
   try {
     execSync('codex --version', { timeout: 5000, stdio: ['pipe', 'pipe', 'pipe'] })
-    cachedCodexCheck = true
+    return true
   } catch {
-    cachedCodexCheck = false
+    return false
   }
-  return cachedCodexCheck
 }
 
 let ollamaCache: { value: boolean; at: number } | null = null

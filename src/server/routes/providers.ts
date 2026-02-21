@@ -1,5 +1,4 @@
 import type { Router } from '../router'
-import { execFileSync } from 'node:child_process'
 import { getSetting, setSetting } from '../../shared/db-queries'
 import {
   startProviderAuthSession,
@@ -8,6 +7,17 @@ import {
   cancelProviderAuthSession,
   type ProviderName,
 } from '../provider-auth'
+import {
+  cancelProviderInstallSession,
+  getLatestProviderInstallSession,
+  getProviderInstallSession,
+  startProviderInstallSession,
+} from '../provider-install'
+import {
+  disconnectProvider,
+  probeProviderConnected,
+  probeProviderInstalled,
+} from '../provider-cli'
 
 const PROVIDERS: ProviderName[] = ['codex', 'claude']
 
@@ -15,49 +25,12 @@ function isProvider(value: string): value is ProviderName {
   return PROVIDERS.includes(value as ProviderName)
 }
 
-function safeExec(cmd: string, args: string[]): { ok: boolean; stdout: string; stderr: string } {
-  try {
-    const stdout = execFileSync(cmd, args, { timeout: 5000, stdio: ['ignore', 'pipe', 'pipe'] }).toString().trim()
-    return { ok: true, stdout, stderr: '' }
-  } catch (err) {
-    const e = err as { stdout?: Buffer; stderr?: Buffer; message?: string }
-    return {
-      ok: false,
-      stdout: e.stdout?.toString().trim() ?? '',
-      stderr: e.stderr?.toString().trim() || e.message || '',
-    }
-  }
-}
-
-function probeInstalled(provider: ProviderName): { installed: boolean; version?: string } {
-  const out = safeExec(provider, ['--version'])
-  return out.ok ? { installed: true, version: out.stdout || undefined } : { installed: false }
-}
-
-function probeConnected(provider: ProviderName): boolean | null {
-  const attempts = provider === 'codex'
-    ? [['auth', 'status'], ['login', '--status']]
-    : [['auth', 'status'], ['login', 'status']]
-  for (const args of attempts) {
-    const out = safeExec(provider, args)
-    if (!out.ok) continue
-    const combined = `${out.stdout}\n${out.stderr}`.toLowerCase()
-    if (combined.includes('not logged') || combined.includes('logged out') || combined.includes('unauth')) return false
-    return true
-  }
-  return null
-}
-
-function disconnectCommand(provider: ProviderName): string {
-  return provider === 'codex' ? 'codex logout' : 'claude logout'
-}
-
 export function registerProviderRoutes(router: Router): void {
   router.get('/api/providers/status', async (ctx) => {
-    const codexInstalled = probeInstalled('codex')
-    const claudeInstalled = probeInstalled('claude')
-    const codexConnected = probeConnected('codex')
-    const claudeConnected = probeConnected('claude')
+    const codexInstalled = probeProviderInstalled('codex')
+    const claudeInstalled = probeProviderInstalled('claude')
+    const codexConnected = probeProviderConnected('codex')
+    const claudeConnected = probeProviderConnected('claude')
 
     return {
       data: {
@@ -67,6 +40,8 @@ export function registerProviderRoutes(router: Router): void {
           requestedAt: getSetting(ctx.db, 'provider_codex_connect_requested_at'),
           disconnectedAt: getSetting(ctx.db, 'provider_codex_disconnected_at'),
           authSession: getLatestProviderAuthSession('codex'),
+          installRequestedAt: getSetting(ctx.db, 'provider_codex_install_requested_at'),
+          installSession: getLatestProviderInstallSession('codex'),
         },
         claude: {
           ...claudeInstalled,
@@ -74,6 +49,8 @@ export function registerProviderRoutes(router: Router): void {
           requestedAt: getSetting(ctx.db, 'provider_claude_connect_requested_at'),
           disconnectedAt: getSetting(ctx.db, 'provider_claude_disconnected_at'),
           authSession: getLatestProviderAuthSession('claude'),
+          installRequestedAt: getSetting(ctx.db, 'provider_claude_install_requested_at'),
+          installSession: getLatestProviderInstallSession('claude'),
         },
       },
     }
@@ -83,7 +60,7 @@ export function registerProviderRoutes(router: Router): void {
     const provider = String(ctx.params.provider || '').toLowerCase()
     if (!isProvider(provider)) return { status: 400, error: 'provider must be codex or claude' }
 
-    const installed = probeInstalled(provider)
+    const installed = probeProviderInstalled(provider)
     if (!installed.installed) {
       return { status: 400, error: `${provider} CLI is not installed` }
     }
@@ -105,6 +82,40 @@ export function registerProviderRoutes(router: Router): void {
     }
   })
 
+  router.post('/api/providers/:provider/install', async (ctx) => {
+    const provider = String(ctx.params.provider || '').toLowerCase()
+    if (!isProvider(provider)) return { status: 400, error: 'provider must be codex or claude' }
+
+    const installed = probeProviderInstalled(provider)
+    if (installed.installed) {
+      return {
+        data: {
+          ok: true,
+          provider,
+          status: 'already_installed' as const,
+          installed,
+          session: getLatestProviderInstallSession(provider),
+        },
+      }
+    }
+
+    const requestedAt = new Date().toISOString()
+    setSetting(ctx.db, `provider_${provider}_install_requested_at`, requestedAt)
+
+    const { session, reused } = startProviderInstallSession(provider)
+    return {
+      data: {
+        ok: true,
+        provider,
+        status: 'pending' as const,
+        requestedAt,
+        reused,
+        session,
+        channel: `provider-install:${session.sessionId}`,
+      },
+    }
+  })
+
   router.post('/api/providers/:provider/disconnect', async (ctx) => {
     const provider = String(ctx.params.provider || '').toLowerCase()
     if (!isProvider(provider)) return { status: 400, error: 'provider must be codex or claude' }
@@ -112,7 +123,7 @@ export function registerProviderRoutes(router: Router): void {
     const latest = getLatestProviderAuthSession(provider)
     if (latest?.active) cancelProviderAuthSession(latest.sessionId)
 
-    const out = safeExec(provider, disconnectCommand(provider).split(' ').slice(1))
+    const disconnected = disconnectProvider(provider)
     const disconnectedAt = new Date().toISOString()
     setSetting(ctx.db, `provider_${provider}_disconnected_at`, disconnectedAt)
 
@@ -122,8 +133,8 @@ export function registerProviderRoutes(router: Router): void {
         provider,
         status: 'disconnected',
         disconnectedAt,
-        command: disconnectCommand(provider),
-        commandResult: out.ok ? 'ok' : 'unknown',
+        command: disconnected.command,
+        commandResult: disconnected.result.ok ? 'ok' : 'unknown',
       },
     }
   })
@@ -133,6 +144,12 @@ export function registerProviderRoutes(router: Router): void {
     if (!isProvider(provider)) return { status: 400, error: 'provider must be codex or claude' }
 
     return { data: { session: getLatestProviderAuthSession(provider) } }
+  })
+
+  router.get('/api/providers/:provider/install-session', async (ctx) => {
+    const provider = String(ctx.params.provider || '').toLowerCase()
+    if (!isProvider(provider)) return { status: 400, error: 'provider must be codex or claude' }
+    return { data: { session: getLatestProviderInstallSession(provider) } }
   })
 
   router.get('/api/providers/sessions/:sessionId', async (ctx) => {
@@ -147,6 +164,22 @@ export function registerProviderRoutes(router: Router): void {
     const sessionId = String(ctx.params.sessionId || '').trim()
     if (!sessionId) return { status: 400, error: 'sessionId is required' }
     const session = cancelProviderAuthSession(sessionId)
+    if (!session) return { status: 404, error: 'Session not found' }
+    return { data: { ok: true, session } }
+  })
+
+  router.get('/api/providers/install-sessions/:sessionId', async (ctx) => {
+    const sessionId = String(ctx.params.sessionId || '').trim()
+    if (!sessionId) return { status: 400, error: 'sessionId is required' }
+    const session = getProviderInstallSession(sessionId)
+    if (!session) return { status: 404, error: 'Session not found' }
+    return { data: { session } }
+  })
+
+  router.post('/api/providers/install-sessions/:sessionId/cancel', async (ctx) => {
+    const sessionId = String(ctx.params.sessionId || '').trim()
+    if (!sessionId) return { status: 400, error: 'sessionId is required' }
+    const session = cancelProviderInstallSession(sessionId)
     if (!session) return { status: 404, error: 'Session not found' }
     return { data: { ok: true, session } }
   })

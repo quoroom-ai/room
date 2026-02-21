@@ -35,9 +35,9 @@ type ApiKeyFeedback = {
 type ApiKeyPromptMode = 'validate' | 'save'
 type QueenModelSetupPhase = 'starting' | 'installing'
 type ProviderName = 'codex' | 'claude'
-type ProviderAuthStatus = 'starting' | 'running' | 'completed' | 'failed' | 'canceled' | 'timeout'
+type ProviderSessionStatus = 'starting' | 'running' | 'completed' | 'failed' | 'canceled' | 'timeout'
 
-interface ProviderAuthLine {
+interface ProviderSessionLine {
   id: number
   stream: 'stdout' | 'stderr' | 'system'
   text: string
@@ -47,7 +47,7 @@ interface ProviderAuthLine {
 interface ProviderAuthSession {
   sessionId: string
   provider: ProviderName
-  status: ProviderAuthStatus
+  status: ProviderSessionStatus
   command: string
   startedAt: string
   updatedAt: string
@@ -56,7 +56,20 @@ interface ProviderAuthSession {
   verificationUrl: string | null
   deviceCode: string | null
   active: boolean
-  lines: ProviderAuthLine[]
+  lines: ProviderSessionLine[]
+}
+
+interface ProviderInstallSession {
+  sessionId: string
+  provider: ProviderName
+  status: ProviderSessionStatus
+  command: string
+  startedAt: string
+  updatedAt: string
+  endedAt: string | null
+  exitCode: number | null
+  active: boolean
+  lines: ProviderSessionLine[]
 }
 
 interface ProviderStatusEntry {
@@ -66,6 +79,8 @@ interface ProviderStatusEntry {
   requestedAt: string | null
   disconnectedAt: string | null
   authSession: ProviderAuthSession | null
+  installRequestedAt: string | null
+  installSession: ProviderInstallSession | null
 }
 
 export function RoomSettingsPanel({ roomId }: RoomSettingsPanelProps): React.JSX.Element {
@@ -137,8 +152,11 @@ export function RoomSettingsPanel({ roomId }: RoomSettingsPanelProps): React.JSX
   const [queenModelFeedback, setQueenModelFeedback] = useState<Record<number, ApiKeyFeedback | null>>({})
   const [providerFeedback, setProviderFeedback] = useState<Record<number, ApiKeyFeedback | null>>({})
   const [providerAuthSessions, setProviderAuthSessions] = useState<Partial<Record<ProviderName, ProviderAuthSession | null>>>({})
+  const [providerInstallSessions, setProviderInstallSessions] = useState<Partial<Record<ProviderName, ProviderInstallSession | null>>>({})
   const [providerAuthBusySessionId, setProviderAuthBusySessionId] = useState<string | null>(null)
+  const [providerInstallBusySessionId, setProviderInstallBusySessionId] = useState<string | null>(null)
   const providerAuthUnsubsRef = useRef<Map<string, () => void>>(new Map())
+  const providerInstallUnsubsRef = useRef<Map<string, () => void>>(new Map())
   const [queenModelSetup, setQueenModelSetup] = useState<{ roomId: number; phase: QueenModelSetupPhase; startedAt: number } | null>(null)
   const [queenModelSetupTick, setQueenModelSetupTick] = useState<number>(Date.now())
   const [archiveBusy, setArchiveBusy] = useState(false)
@@ -163,11 +181,27 @@ export function RoomSettingsPanel({ roomId }: RoomSettingsPanelProps): React.JSX
     setProviderAuthSessions(prev => ({ ...prev, [session.provider]: session }))
   }
 
-  function providerAuthStatusLabel(status: ProviderAuthStatus): string {
+  function upsertProviderInstallSession(session: ProviderInstallSession): void {
+    setProviderInstallSessions(prev => ({ ...prev, [session.provider]: session }))
+  }
+
+  function providerAuthStatusLabel(status: ProviderSessionStatus): string {
     switch (status) {
       case 'starting': return 'Starting'
       case 'running': return 'Waiting for login'
       case 'completed': return 'Connected'
+      case 'failed': return 'Failed'
+      case 'canceled': return 'Canceled'
+      case 'timeout': return 'Timed out'
+      default: return status
+    }
+  }
+
+  function providerInstallStatusLabel(status: ProviderSessionStatus): string {
+    switch (status) {
+      case 'starting': return 'Starting'
+      case 'running': return 'Installing'
+      case 'completed': return 'Installed'
       case 'failed': return 'Failed'
       case 'canceled': return 'Canceled'
       case 'timeout': return 'Timed out'
@@ -180,6 +214,10 @@ export function RoomSettingsPanel({ roomId }: RoomSettingsPanelProps): React.JSX
     setProviderAuthSessions(prev => ({
       codex: providerStatus.codex.authSession ?? prev.codex ?? null,
       claude: providerStatus.claude.authSession ?? prev.claude ?? null,
+    }))
+    setProviderInstallSessions(prev => ({
+      codex: providerStatus.codex.installSession ?? prev.codex ?? null,
+      claude: providerStatus.claude.installSession ?? prev.claude ?? null,
     }))
   }, [providerStatus])
 
@@ -251,10 +289,77 @@ export function RoomSettingsPanel({ roomId }: RoomSettingsPanelProps): React.JSX
     refreshProviderStatus,
   ])
 
+  useEffect(() => {
+    const unsubs = providerInstallUnsubsRef.current
+    const activeSessions = [providerInstallSessions.codex, providerInstallSessions.claude]
+      .filter((session): session is ProviderInstallSession => Boolean(session?.active))
+    const activeIds = new Set(activeSessions.map((session) => session.sessionId))
+
+    for (const [sessionId, unsubscribe] of [...unsubs.entries()]) {
+      if (!activeIds.has(sessionId)) {
+        unsubscribe()
+        unsubs.delete(sessionId)
+      }
+    }
+
+    for (const session of activeSessions) {
+      if (unsubs.has(session.sessionId)) continue
+      const unsubscribe = wsClient.subscribe(`provider-install:${session.sessionId}`, (event: WsMessage) => {
+        if (event.type === 'provider_install:status') {
+          const data = event.data as ProviderInstallSession
+          if (!data?.sessionId || !data?.provider) return
+          upsertProviderInstallSession(data)
+          if (!data.active) void refreshProviderStatus()
+          return
+        }
+        if (event.type === 'provider_install:line') {
+          const data = event.data as {
+            sessionId: string
+            provider: ProviderName
+            id: number
+            stream: 'stdout' | 'stderr' | 'system'
+            text: string
+            timestamp: string
+          }
+          if (!data?.sessionId || !data?.provider) return
+          setProviderInstallSessions(prev => {
+            const current = prev[data.provider]
+            if (!current || current.sessionId !== data.sessionId) return prev
+            if (current.lines.some((line) => line.id === data.id)) return prev
+            const nextLines = [...current.lines, {
+              id: data.id,
+              stream: data.stream,
+              text: data.text,
+              timestamp: data.timestamp,
+            }]
+            return {
+              ...prev,
+              [data.provider]: {
+                ...current,
+                updatedAt: data.timestamp,
+                lines: nextLines.slice(-300),
+              },
+            }
+          })
+        }
+      })
+      unsubs.set(session.sessionId, unsubscribe)
+    }
+  }, [
+    providerInstallSessions.codex?.sessionId,
+    providerInstallSessions.codex?.active,
+    providerInstallSessions.claude?.sessionId,
+    providerInstallSessions.claude?.active,
+    refreshProviderStatus,
+  ])
+
   useEffect(() => () => {
-    const unsubs = providerAuthUnsubsRef.current
-    for (const unsubscribe of unsubs.values()) unsubscribe()
-    unsubs.clear()
+    const authUnsubs = providerAuthUnsubsRef.current
+    for (const unsubscribe of authUnsubs.values()) unsubscribe()
+    authUnsubs.clear()
+    const installUnsubs = providerInstallUnsubsRef.current
+    for (const unsubscribe of installUnsubs.values()) unsubscribe()
+    installUnsubs.clear()
   }, [])
 
   function optimistic(id: number, patch: Partial<Room>): void {
@@ -464,6 +569,31 @@ export function RoomSettingsPanel({ roomId }: RoomSettingsPanelProps): React.JSX
     }
   }
 
+  async function handleProviderInstall(room: Room, provider: 'codex' | 'claude'): Promise<void> {
+    setProviderFeedback(prev => ({ ...prev, [room.id]: { kind: 'info', text: `Installing ${provider} CLI...` } }))
+    try {
+      const response = await api.providers.install(provider)
+      if (response.session) {
+        upsertProviderInstallSession(response.session)
+      }
+      await refreshProviderStatus()
+      setProviderFeedback(prev => ({
+        ...prev,
+        [room.id]: {
+          kind: 'success',
+          text: response.status === 'already_installed'
+            ? `${provider} CLI is already installed.`
+            : response.reused
+              ? `${provider} install is already running. Continue in the install log below.`
+              : `${provider} install started. Continue in the install log below.`,
+        },
+      }))
+    } catch (e) {
+      const message = e instanceof Error ? e.message : `Failed to install ${provider}`
+      setProviderFeedback(prev => ({ ...prev, [room.id]: { kind: 'error', text: message } }))
+    }
+  }
+
   async function handleProviderDisconnect(room: Room, provider: 'codex' | 'claude'): Promise<void> {
     setProviderFeedback(prev => ({ ...prev, [room.id]: { kind: 'info', text: `Disconnecting ${provider}...` } }))
     try {
@@ -497,6 +627,23 @@ export function RoomSettingsPanel({ roomId }: RoomSettingsPanelProps): React.JSX
       setProviderFeedback(prev => ({ ...prev, [room.id]: { kind: 'error', text: message } }))
     } finally {
       setProviderAuthBusySessionId(null)
+    }
+  }
+
+  async function handleProviderInstallCancel(room: Room, sessionId: string): Promise<void> {
+    if (providerInstallBusySessionId === sessionId) return
+    setProviderInstallBusySessionId(sessionId)
+    setProviderFeedback(prev => ({ ...prev, [room.id]: { kind: 'info', text: 'Canceling install flow...' } }))
+    try {
+      const response = await api.providers.cancelInstallSession(sessionId)
+      upsertProviderInstallSession(response.session)
+      await refreshProviderStatus()
+      setProviderFeedback(prev => ({ ...prev, [room.id]: { kind: 'success', text: 'Install flow canceled.' } }))
+    } catch (e) {
+      const message = e instanceof Error ? e.message : 'Failed to cancel install flow'
+      setProviderFeedback(prev => ({ ...prev, [room.id]: { kind: 'error', text: message } }))
+    } finally {
+      setProviderInstallBusySessionId(null)
     }
   }
 
@@ -537,9 +684,9 @@ export function RoomSettingsPanel({ roomId }: RoomSettingsPanelProps): React.JSX
   const elapsedMinutes = Math.floor(elapsedSeconds / 60)
   const elapsedRemainderSeconds = elapsedSeconds % 60
   const elapsedText = `${elapsedMinutes}:${String(elapsedRemainderSeconds).padStart(2, '0')}`
-  const showQueenSubscriptionStatus = activeQueenAuth?.mode === 'subscription'
-    && !activeQueenAuth.ready
-    && !(activeQueenAuth.provider === 'ollama' && isQueenModelBusy)
+  const showQueenSubscriptionStatus = activeQueenAuth?.provider === 'claude_subscription'
+    || activeQueenAuth?.provider === 'codex_subscription'
+    || (activeQueenAuth?.provider === 'ollama' && !activeQueenAuth.ready && !isQueenModelBusy)
   const queenSubscriptionProvider: 'codex' | 'claude' | null = activeQueenAuth?.provider === 'codex_subscription'
     ? 'codex'
     : activeQueenAuth?.provider === 'claude_subscription'
@@ -549,10 +696,17 @@ export function RoomSettingsPanel({ roomId }: RoomSettingsPanelProps): React.JSX
   const queenProviderAuthSession = queenSubscriptionProvider
     ? (providerAuthSessions[queenSubscriptionProvider] ?? queenSubscriptionStatus?.authSession ?? null)
     : null
+  const queenProviderInstallSession = queenSubscriptionProvider
+    ? (providerInstallSessions[queenSubscriptionProvider] ?? queenSubscriptionStatus?.installSession ?? null)
+    : null
   const queenProviderAuthBusy = queenProviderAuthSession
     ? providerAuthBusySessionId === queenProviderAuthSession.sessionId
     : false
+  const queenProviderInstallBusy = queenProviderInstallSession
+    ? providerInstallBusySessionId === queenProviderInstallSession.sessionId
+    : false
   const queenProviderAuthRecentLines = queenProviderAuthSession?.lines.slice(-12) ?? []
+  const queenProviderInstallRecentLines = queenProviderInstallSession?.lines.slice(-12) ?? []
   const queenModelOptions = [
     { value: 'claude', label: 'Claude Code (subscription)' },
     { value: 'claude-opus-4-6', label: 'Opus (subscription)' },
@@ -775,9 +929,17 @@ export function RoomSettingsPanel({ roomId }: RoomSettingsPanelProps): React.JSX
               {showQueenSubscriptionStatus && (
                 row('Status',
                   <div className="flex flex-wrap items-center gap-2">
-                    <span className="text-xs text-status-warning">
+                    <span className={`text-xs ${
+                      queenSubscriptionStatus?.installed
+                        ? queenSubscriptionStatus.connected === true
+                          ? 'text-status-success'
+                          : 'text-text-muted'
+                        : 'text-status-warning'
+                    }`}>
                       {activeQueenAuth.provider === 'claude_subscription' && (
-                        queenSubscriptionStatus?.installed
+                        queenSubscriptionStatus == null
+                          ? 'Checking Claude status...'
+                          : queenSubscriptionStatus.installed
                           ? queenSubscriptionStatus.connected === true
                             ? 'Claude connected'
                             : queenSubscriptionStatus.connected === false
@@ -786,7 +948,9 @@ export function RoomSettingsPanel({ roomId }: RoomSettingsPanelProps): React.JSX
                           : 'Claude CLI not installed'
                       )}
                       {activeQueenAuth.provider === 'codex_subscription' && (
-                        queenSubscriptionStatus?.installed
+                        queenSubscriptionStatus == null
+                          ? 'Checking Codex status...'
+                          : queenSubscriptionStatus.installed
                           ? queenSubscriptionStatus.connected === true
                             ? 'Codex connected'
                             : queenSubscriptionStatus.connected === false
@@ -796,12 +960,21 @@ export function RoomSettingsPanel({ roomId }: RoomSettingsPanelProps): React.JSX
                       )}
                       {activeQueenAuth.provider === 'ollama' && 'Ollama unavailable'}
                     </span>
+                    {queenSubscriptionProvider && !queenSubscriptionStatus?.installed && (
+                      <button
+                        onClick={() => { void handleProviderInstall(room, queenSubscriptionProvider) }}
+                        className="text-xs px-2 py-1 rounded-lg border border-border-primary text-text-secondary hover:bg-surface-hover disabled:opacity-50 disabled:cursor-not-allowed"
+                        disabled={queenProviderInstallSession?.active || queenProviderInstallBusy}
+                      >
+                        {queenProviderInstallSession?.active ? 'Installing...' : 'Install'}
+                      </button>
+                    )}
                     {queenSubscriptionProvider && queenSubscriptionStatus?.installed && (
                       <>
                         <button
                           onClick={() => { void handleProviderConnect(room, queenSubscriptionProvider) }}
                           className="text-xs px-2 py-1 rounded-lg border border-border-primary text-text-secondary hover:bg-surface-hover disabled:opacity-50 disabled:cursor-not-allowed"
-                          disabled={queenProviderAuthSession?.active}
+                          disabled={queenProviderAuthSession?.active || queenProviderInstallSession?.active}
                         >
                           Connect
                         </button>
@@ -823,6 +996,50 @@ export function RoomSettingsPanel({ roomId }: RoomSettingsPanelProps): React.JSX
                       </button>
                     )}
                   </div>
+                )
+              )}
+              {showQueenSubscriptionStatus && queenSubscriptionProvider && queenProviderInstallSession && (
+                row('Install flow',
+                  <div className="w-full max-w-[360px] space-y-2">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <span className={`text-xs ${
+                        queenProviderInstallSession.status === 'completed'
+                          ? 'text-status-success'
+                          : queenProviderInstallSession.status === 'failed' || queenProviderInstallSession.status === 'timeout'
+                            ? 'text-status-error'
+                            : 'text-text-muted'
+                      }`}>
+                        {providerInstallStatusLabel(queenProviderInstallSession.status)}
+                      </span>
+                      {queenProviderInstallSession.active && (
+                        <button
+                          onClick={() => { void handleProviderInstallCancel(room, queenProviderInstallSession.sessionId) }}
+                          disabled={queenProviderInstallBusy}
+                          className="text-xs px-2 py-1 rounded-lg border border-border-primary text-text-secondary hover:bg-surface-hover disabled:opacity-50 disabled:cursor-not-allowed"
+                        >
+                          {queenProviderInstallBusy ? 'Canceling...' : 'Cancel'}
+                        </button>
+                      )}
+                      {!queenProviderInstallSession.active && (
+                        <button
+                          onClick={() => { void refreshProviderStatus() }}
+                          className="text-xs px-2 py-1 rounded-lg border border-border-primary text-text-secondary hover:bg-surface-hover"
+                        >
+                          Refresh
+                        </button>
+                      )}
+                    </div>
+                    <div className="max-h-32 overflow-y-auto rounded-lg border border-border-primary bg-surface-primary p-2 font-mono text-[11px] text-text-muted">
+                      {queenProviderInstallRecentLines.length === 0
+                        ? 'Waiting for install output...'
+                        : queenProviderInstallRecentLines.map((line) => (
+                            <div key={line.id} className="whitespace-pre-wrap break-words">
+                              {line.text}
+                            </div>
+                          ))}
+                    </div>
+                  </div>,
+                  'Installs provider CLI in the runtime and streams progress output.'
                 )
               )}
               {showQueenSubscriptionStatus && queenSubscriptionProvider && queenProviderAuthSession && (

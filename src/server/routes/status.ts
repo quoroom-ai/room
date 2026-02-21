@@ -22,28 +22,22 @@ function getVersion(): string {
   return cachedVersion!
 }
 
-let cachedClaudeCheck: { available: boolean; version?: string } | null = null
 function checkClaude(): { available: boolean; version?: string } {
-  if (cachedClaudeCheck) return cachedClaudeCheck
   try {
     const out = execSync('claude --version 2>/dev/null', { timeout: 5000 }).toString().trim()
-    cachedClaudeCheck = { available: true, version: out }
+    return { available: true, version: out }
   } catch {
-    cachedClaudeCheck = { available: false }
+    return { available: false }
   }
-  return cachedClaudeCheck
 }
 
-let cachedCodexCheck: { available: boolean; version?: string } | null = null
 function checkCodex(): { available: boolean; version?: string } {
-  if (cachedCodexCheck) return cachedCodexCheck
   try {
     const out = execSync('codex --version 2>/dev/null', { timeout: 5000 }).toString().trim()
-    cachedCodexCheck = { available: true, version: out }
+    return { available: true, version: out }
   } catch {
-    cachedCodexCheck = { available: false }
+    return { available: false }
   }
-  return cachedCodexCheck
 }
 
 // Cache Ollama status for 30s to avoid hammering it on every UI poll
