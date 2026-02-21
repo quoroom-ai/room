@@ -365,6 +365,136 @@ export async function cancelCloudStation(cloudRoomId: string, subId: number): Pr
   }
 }
 
+// ─── Crypto station payments ────────────────────────────────
+
+export interface CryptoPricing {
+  treasuryAddress: string
+  network: string
+  token: string
+  multiplier: number
+  tiers: Array<{ tier: string; stripePrice: number; cryptoPrice: number }>
+}
+
+/**
+ * Get crypto pricing and treasury address from cloud.
+ * Returns null on failure.
+ */
+export async function getCloudCryptoPrices(cloudRoomId: string): Promise<CryptoPricing | null> {
+  try {
+    const res = await fetch(
+      `${CLOUD_API}/rooms/${encodeURIComponent(cloudRoomId)}/billing/crypto-prices`,
+      { signal: AbortSignal.timeout(10000) }
+    )
+    if (!res.ok) return null
+    return res.json() as Promise<CryptoPricing>
+  } catch {
+    return null
+  }
+}
+
+/**
+ * Submit a crypto payment (tx hash) for a new station.
+ * Cloud verifies on-chain and provisions the station.
+ */
+export async function cryptoCheckoutStation(
+  cloudRoomId: string,
+  tier: string,
+  stationName: string,
+  txHash: string
+): Promise<{ ok: boolean; subscriptionId?: number; status?: string; currentPeriodEnd?: string; error?: string }> {
+  try {
+    const res = await fetch(
+      `${CLOUD_API}/rooms/${encodeURIComponent(cloudRoomId)}/billing/crypto-checkout`,
+      {
+        method: 'POST',
+        headers: cloudHeaders(cloudRoomId, { 'Content-Type': 'application/json' }),
+        body: JSON.stringify({ tier, stationName, txHash }),
+        signal: AbortSignal.timeout(60000)
+      }
+    )
+    return res.json() as Promise<{ ok: boolean; subscriptionId?: number; status?: string; currentPeriodEnd?: string; error?: string }>
+  } catch (err) {
+    return { ok: false, error: err instanceof Error ? err.message : String(err) }
+  }
+}
+
+/**
+ * Renew a crypto-paid station subscription with a new tx hash.
+ */
+export async function cryptoRenewStation(
+  cloudRoomId: string,
+  subscriptionId: number,
+  txHash: string
+): Promise<{ ok: boolean; currentPeriodEnd?: string; error?: string }> {
+  try {
+    const res = await fetch(
+      `${CLOUD_API}/rooms/${encodeURIComponent(cloudRoomId)}/billing/crypto-renew/${subscriptionId}`,
+      {
+        method: 'POST',
+        headers: cloudHeaders(cloudRoomId, { 'Content-Type': 'application/json' }),
+        body: JSON.stringify({ txHash }),
+        signal: AbortSignal.timeout(60000)
+      }
+    )
+    return res.json() as Promise<{ ok: boolean; currentPeriodEnd?: string; error?: string }>
+  } catch (err) {
+    return { ok: false, error: err instanceof Error ? err.message : String(err) }
+  }
+}
+
+// ─── Inter-room messaging ───────────────────────────────────
+
+export interface CloudRoomMessage {
+  id: number
+  fromRoomId: string
+  toRoomId: string
+  subject: string
+  body: string
+  status: string
+  createdAt: string
+}
+
+/**
+ * Send an inter-room message through cloud relay.
+ * Returns true on success.
+ */
+export async function sendCloudRoomMessage(
+  fromRoomId: string,
+  toRoomId: string,
+  subject: string,
+  body: string
+): Promise<boolean> {
+  try {
+    const res = await fetch(`${CLOUD_API}/rooms/message`, {
+      method: 'POST',
+      headers: cloudHeaders(fromRoomId, { 'Content-Type': 'application/json' }),
+      body: JSON.stringify({ fromRoomId, toRoomId, subject, body }),
+      signal: AbortSignal.timeout(10000)
+    })
+    return res.ok
+  } catch {
+    return false
+  }
+}
+
+/**
+ * Fetch pending inter-room messages for a room.
+ * Returns empty array on failure.
+ */
+export async function fetchCloudRoomMessages(roomId: string): Promise<CloudRoomMessage[]> {
+  try {
+    const res = await fetch(`${CLOUD_API}/rooms/${encodeURIComponent(roomId)}/messages`, {
+      headers: cloudHeaders(roomId),
+      signal: AbortSignal.timeout(10000)
+    })
+    if (!res.ok) return []
+    const data = await res.json() as { messages: CloudRoomMessage[] }
+    return data.messages ?? []
+  } catch {
+    return []
+  }
+}
+
 // ─── Cross-Room Learning ────────────────────────────────────
 
 export interface PublicRoom {

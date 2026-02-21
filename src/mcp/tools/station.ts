@@ -12,7 +12,11 @@ import {
   stopCloudStation,
   deleteCloudStation,
   cancelCloudStation,
+  getCloudCryptoPrices,
+  cryptoCheckoutStation,
+  cryptoRenewStation,
 } from '../../shared/cloud-sync'
+import { sendUSDC } from '../../shared/wallet'
 
 const CLOUD_BASE = 'https://quoroom.ai'
 
@@ -34,7 +38,8 @@ export function registerStationTools(server: McpServer): void {
     {
       title: 'Create Station',
       description: 'Rent a cloud server (station) for the room via quoroom.ai. '
-        + 'Returns a payment URL — open it in a browser to subscribe. '
+        + 'Returns a payment URL — open it in a browser to subscribe with Stripe. '
+        + 'For crypto payment (USDC), use quoroom_station_create_crypto instead. '
         + 'The station appears in ~30 seconds after payment. '
         + 'RESPONSE STYLE: Confirm briefly in 1 sentence, include the URL.',
       inputSchema: {
@@ -255,6 +260,154 @@ export function registerStationTools(server: McpServer): void {
             status: station.status, monthlyCost: station.monthlyCost,
             currentPeriodEnd: station.currentPeriodEnd, createdAt: station.createdAt
           }, null, 2)
+        }]
+      }
+    }
+  )
+
+  // ─── Crypto payment tools ──────────────────────────────────
+
+  server.registerTool(
+    'quoroom_station_create_crypto',
+    {
+      title: 'Create Station (Crypto)',
+      description: 'Pay for a new station with USDC from the room wallet. '
+        + 'Sends USDC to the Quoroom treasury and provisions the station automatically. '
+        + 'Requires the room to have a wallet with sufficient USDC balance. '
+        + 'Crypto prices are 1.5x Stripe prices (micro $7.50, small $22.50, medium $60, large $150). '
+        + 'RESPONSE STYLE: Confirm briefly in 1 sentence.',
+      inputSchema: {
+        roomId: z.number().describe('The room ID'),
+        name: z.string().min(1).max(100).describe('Station name (e.g., "web-server", "scraper-01")'),
+        tier: z.enum(['micro', 'small', 'medium', 'large']).describe(
+          'Station tier: micro ($7.50/mo crypto), small ($22.50/mo), medium ($60/mo), large ($150/mo)'
+        ),
+        encryptionKey: z.string().min(1).describe('Wallet encryption key for sending USDC'),
+        network: z.enum(['base', 'base-sepolia']).optional().describe('Network (default: base)')
+      }
+    },
+    async ({ roomId, name, tier, encryptionKey, network }) => {
+      await bootstrapRoomToken(roomId)
+      const cloudRoomId = getRoomCloudId(roomId)
+
+      // Step 1: Get crypto pricing from cloud
+      const pricing = await getCloudCryptoPrices(cloudRoomId)
+      if (!pricing) {
+        return { content: [{ type: 'text' as const, text: 'Crypto payments are not available.' }], isError: true }
+      }
+
+      const tierInfo = pricing.tiers.find(t => t.tier === tier)
+      if (!tierInfo) {
+        return { content: [{ type: 'text' as const, text: `Unknown tier: ${tier}` }], isError: true }
+      }
+
+      // Step 2: Send USDC to treasury
+      const db = getMcpDatabase()
+      let txHash: string
+      try {
+        txHash = await sendUSDC(
+          db, roomId, pricing.treasuryAddress,
+          tierInfo.cryptoPrice.toString(), encryptionKey,
+          (network as 'base' | 'base-sepolia') ?? 'base'
+        )
+      } catch (e) {
+        return {
+          content: [{ type: 'text' as const, text: `USDC transfer failed: ${(e as Error).message}` }],
+          isError: true
+        }
+      }
+
+      // Step 3: Submit tx hash to cloud for verification + provisioning
+      const result = await cryptoCheckoutStation(cloudRoomId, tier, name, txHash)
+      if (!result.ok) {
+        return {
+          content: [{
+            type: 'text' as const,
+            text: `USDC sent (tx: ${txHash}) but provisioning failed: ${result.error}. Contact support with this tx hash.`
+          }],
+          isError: true
+        }
+      }
+
+      return {
+        content: [{
+          type: 'text' as const,
+          text: `Station "${name}" (${tier}) provisioned via crypto. `
+            + `Paid ${tierInfo.cryptoPrice} USDC, tx: ${txHash}, expires: ${result.currentPeriodEnd}`
+        }]
+      }
+    }
+  )
+
+  server.registerTool(
+    'quoroom_station_renew_crypto',
+    {
+      title: 'Renew Station (Crypto)',
+      description: 'Renew a crypto-paid station subscription by sending USDC. '
+        + 'Only works for stations originally paid with crypto. '
+        + 'Extends the station by 30 days. '
+        + 'RESPONSE STYLE: Confirm briefly in 1 sentence.',
+      inputSchema: {
+        roomId: z.number().describe('The room ID'),
+        id: z.number().describe('The station subscription ID to renew'),
+        encryptionKey: z.string().min(1).describe('Wallet encryption key for sending USDC'),
+        network: z.enum(['base', 'base-sepolia']).optional().describe('Network (default: base)')
+      }
+    },
+    async ({ roomId, id, encryptionKey, network }) => {
+      await bootstrapRoomToken(roomId)
+      const cloudRoomId = getRoomCloudId(roomId)
+
+      // Get the station to find its tier
+      const stations = await listCloudStations(cloudRoomId)
+      const station = stations.find(s => s.id === id)
+      if (!station) {
+        return { content: [{ type: 'text' as const, text: `Station ${id} not found.` }], isError: true }
+      }
+
+      // Get crypto pricing
+      const pricing = await getCloudCryptoPrices(cloudRoomId)
+      if (!pricing) {
+        return { content: [{ type: 'text' as const, text: 'Crypto payments are not available.' }], isError: true }
+      }
+
+      const tierInfo = pricing.tiers.find(t => t.tier === station.tier)
+      if (!tierInfo) {
+        return { content: [{ type: 'text' as const, text: `Unknown tier: ${station.tier}` }], isError: true }
+      }
+
+      // Send USDC
+      const db = getMcpDatabase()
+      let txHash: string
+      try {
+        txHash = await sendUSDC(
+          db, roomId, pricing.treasuryAddress,
+          tierInfo.cryptoPrice.toString(), encryptionKey,
+          (network as 'base' | 'base-sepolia') ?? 'base'
+        )
+      } catch (e) {
+        return {
+          content: [{ type: 'text' as const, text: `USDC transfer failed: ${(e as Error).message}` }],
+          isError: true
+        }
+      }
+
+      // Submit renewal
+      const result = await cryptoRenewStation(cloudRoomId, id, txHash)
+      if (!result.ok) {
+        return {
+          content: [{
+            type: 'text' as const,
+            text: `USDC sent (tx: ${txHash}) but renewal failed: ${result.error}. Contact support with this tx hash.`
+          }],
+          isError: true
+        }
+      }
+
+      return {
+        content: [{
+          type: 'text' as const,
+          text: `Station ${id} renewed. Paid ${tierInfo.cryptoPrice} USDC, tx: ${txHash}, new expiry: ${result.currentPeriodEnd}`
         }]
       }
     }
