@@ -5,11 +5,11 @@ import { formatRelativeTime } from '../utils/time'
 import type { QuorumDecision, QuorumVote, Worker } from '@shared/types'
 
 const STATUS_COLORS: Record<string, string> = {
-  voting: 'bg-blue-100 text-blue-700',
-  approved: 'bg-green-100 text-green-700',
-  rejected: 'bg-red-100 text-red-700',
-  vetoed: 'bg-orange-100 text-orange-700',
-  expired: 'bg-gray-100 text-gray-500',
+  voting: 'bg-interactive-bg text-interactive',
+  approved: 'bg-status-success-bg text-status-success',
+  rejected: 'bg-status-error-bg text-status-error',
+  vetoed: 'bg-brand-100 text-brand-700',
+  expired: 'bg-surface-tertiary text-text-muted',
 }
 
 const TYPE_LABELS: Record<string, string> = {
@@ -21,9 +21,9 @@ const TYPE_LABELS: Record<string, string> = {
 }
 
 const VOTE_COLORS: Record<string, string> = {
-  yes: 'bg-green-100 text-green-700 border-green-200',
-  no: 'bg-red-100 text-red-700 border-red-200',
-  abstain: 'bg-gray-100 text-gray-500 border-gray-200',
+  yes: 'bg-status-success-bg text-status-success border-green-200',
+  no: 'bg-status-error-bg text-status-error border-red-200',
+  abstain: 'bg-surface-tertiary text-text-muted border-border-primary',
 }
 
 function formatTimeout(timeoutAt: string | null): string {
@@ -109,19 +109,19 @@ export function VotesPanel({ roomId, autonomyMode }: VotesPanelProps): React.JSX
 
   return (
     <div className="flex flex-col h-full">
-      <div className="px-3 py-1.5 border-b border-gray-200 flex items-center justify-between">
+      <div className="px-4 py-2 border-b border-border-primary flex items-center justify-between">
         <div className="flex items-center gap-2">
-          <span className="text-xs text-gray-500">
+          <span className="text-sm text-text-muted">
             {decisions ? `${decisions.length} decision(s)` : 'Loading...'}
           </span>
           {!roomId && (
-            <span className="text-xs text-gray-400">Select a room</span>
+            <span className="text-sm text-text-muted">Select a room</span>
           )}
         </div>
         {semi && (
           <button
             onClick={() => setShowCreate(!showCreate)}
-            className="text-xs text-blue-500 hover:text-blue-700 font-medium"
+            className="text-sm text-interactive hover:text-interactive-hover font-medium"
           >
             {showCreate ? 'Cancel' : '+ New Proposal'}
           </button>
@@ -129,26 +129,26 @@ export function VotesPanel({ roomId, autonomyMode }: VotesPanelProps): React.JSX
       </div>
 
       {semi && showCreate && (
-        <div className="p-3 border-b-2 border-blue-300 bg-blue-50/50 space-y-2">
+        <div className="p-4 border-b-2 border-blue-300 bg-interactive-bg/50 space-y-2">
           <textarea
             placeholder="What should the group decide on?"
             value={createProposal}
             onChange={(e) => setCreateProposal(e.target.value)}
             rows={2}
-            className="w-full px-2.5 py-1.5 text-xs border border-gray-300 rounded focus:outline-none focus:border-gray-500 bg-white resize-y"
+            className="w-full px-2.5 py-1.5 text-sm border border-border-primary rounded-lg focus:outline-none focus:border-gray-500 bg-surface-primary resize-y"
           />
           <div className="flex gap-2 items-center">
             <select
               value={createType}
               onChange={(e) => setCreateType(e.target.value)}
-              className="flex-1 px-2.5 py-1.5 text-xs border border-gray-300 rounded focus:outline-none focus:border-gray-500 bg-white"
+              className="flex-1 px-2.5 py-1.5 text-sm border border-border-primary rounded-lg focus:outline-none focus:border-gray-500 bg-surface-primary text-text-primary"
             >
               {Object.entries(TYPE_LABELS).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
             </select>
             <button
               onClick={handleCreate}
               disabled={!createProposal.trim()}
-              className="text-xs bg-blue-500 text-white px-3 py-1 rounded hover:bg-blue-600 disabled:opacity-50 disabled:cursor-not-allowed"
+              className="text-sm bg-interactive text-white px-4 py-2 rounded-lg hover:bg-interactive-hover disabled:opacity-50 disabled:cursor-not-allowed"
             >
               Submit
             </button>
@@ -158,9 +158,9 @@ export function VotesPanel({ roomId, autonomyMode }: VotesPanelProps): React.JSX
 
       <div className="flex-1 overflow-y-auto">
         {!roomId ? (
-          <div className="p-4 text-xs text-gray-400">Select a room to view decisions.</div>
+          <div className="p-4 text-sm text-text-muted">Select a room to view decisions.</div>
         ) : (decisions ?? []).length === 0 && decisions ? (
-          <div className="p-4 text-xs text-gray-400">
+          <div className="p-4 text-sm text-text-muted">
             {semi ? 'No decisions yet. Submit a proposal to get started.' : 'No decisions yet. Proposals are created by agents.'}
           </div>
         ) : (
@@ -168,10 +168,10 @@ export function VotesPanel({ roomId, autonomyMode }: VotesPanelProps): React.JSX
             {/* Active proposals */}
             {active.length > 0 && (
               <div>
-                <div className="px-3 py-1 text-[10px] font-medium text-gray-400 uppercase tracking-wide bg-gray-50 border-b border-gray-100">
+                <div className="px-3 py-1 text-xs font-medium text-text-muted uppercase tracking-wide bg-surface-secondary border-b border-border-primary">
                   Active Voting
                 </div>
-                <div className="divide-y divide-gray-100">
+                <div className="divide-y divide-border-primary">
                   {active.map(d => (
                     <DecisionRow
                       key={d.id}
@@ -197,10 +197,10 @@ export function VotesPanel({ roomId, autonomyMode }: VotesPanelProps): React.JSX
             {/* Resolved */}
             {resolved.length > 0 && (
               <div>
-                <div className="px-3 py-1 text-[10px] font-medium text-gray-400 uppercase tracking-wide bg-gray-50 border-b border-gray-100">
+                <div className="px-3 py-1 text-xs font-medium text-text-muted uppercase tracking-wide bg-surface-secondary border-b border-border-primary">
                   History
                 </div>
-                <div className="divide-y divide-gray-100">
+                <div className="divide-y divide-border-primary">
                   {resolved.map(d => (
                     <DecisionRow
                       key={d.id}
@@ -255,77 +255,77 @@ function DecisionRow({
   return (
     <div>
       <div
-        className="flex items-center gap-2 px-3 py-2 hover:bg-gray-50 cursor-pointer"
+        className="flex items-center gap-2 px-3 py-2 hover:bg-surface-hover cursor-pointer"
         onClick={onToggle}
       >
         <div className="min-w-0 flex-1">
-          <div className="flex items-center gap-1.5">
-            <span className="text-xs text-gray-800">{d.proposal}</span>
-            <span className={`px-1.5 py-0.5 rounded text-[10px] font-medium shrink-0 ${STATUS_COLORS[d.status] ?? 'bg-gray-100 text-gray-500'}`}>
+          <div className="flex items-center gap-2">
+            <span className="text-sm text-text-primary">{d.proposal}</span>
+            <span className={`px-1.5 py-0.5 rounded-lg text-xs font-medium shrink-0 ${STATUS_COLORS[d.status] ?? 'bg-surface-tertiary text-text-muted'}`}>
               {d.status}
             </span>
-            <span className="px-1.5 py-0.5 rounded text-[10px] bg-gray-100 text-gray-400 shrink-0">
+            <span className="px-1.5 py-0.5 rounded-lg text-xs bg-surface-tertiary text-text-muted shrink-0">
               {TYPE_LABELS[d.decisionType] ?? d.decisionType}
             </span>
           </div>
           <div className="flex items-center gap-2 mt-0.5">
-            <span className="text-[10px] text-gray-400">{formatRelativeTime(d.createdAt)}</span>
+            <span className="text-xs text-text-muted">{formatRelativeTime(d.createdAt)}</span>
             {isVoting && d.timeoutAt && (
-              <span className="text-[10px] text-orange-500">{formatTimeout(d.timeoutAt)}</span>
+              <span className="text-xs text-orange-500">{formatTimeout(d.timeoutAt)}</span>
             )}
             {d.proposerId && workerMap.has(d.proposerId) && (
-              <span className="text-[10px] text-gray-400">by {workerMap.get(d.proposerId)!.name}</span>
+              <span className="text-xs text-text-muted">by {workerMap.get(d.proposerId)!.name}</span>
             )}
             {d.result && (
-              <span className="text-[10px] text-gray-500 truncate">{d.result}</span>
+              <span className="text-xs text-text-muted truncate">{d.result}</span>
             )}
           </div>
         </div>
-        <span className="text-xs text-gray-300">{expanded ? '\u25BC' : '\u25B6'}</span>
+        <span className="text-sm text-text-muted">{expanded ? '\u25BC' : '\u25B6'}</span>
       </div>
 
       {expanded && (
-        <div className="px-3 pb-3 bg-gray-50 space-y-2">
+        <div className="px-3 pb-3 bg-surface-secondary space-y-2">
           {/* Vote buttons for active proposals */}
           {isVoting && (
-            <div className="space-y-1.5">
-              <div className="flex gap-1.5 items-center">
+            <div className="space-y-2">
+              <div className="flex gap-2 items-center">
                 <select
                   value={voteWorkerId}
                   onChange={(e) => onVoteWorkerChange(e.target.value ? Number(e.target.value) : '')}
-                  className="flex-1 px-2 py-1 text-xs border border-gray-300 rounded focus:outline-none focus:border-gray-500 bg-white"
+                  className="flex-1 px-2.5 py-1.5 text-sm border border-border-primary rounded-lg focus:outline-none focus:border-gray-500 bg-surface-primary text-text-primary"
                 >
                   <option value="">Vote as...</option>
                   {workers.map(w => <option key={w.id} value={w.id}>{w.name}</option>)}
                 </select>
               </div>
-              <div className="flex gap-1.5 items-center">
+              <div className="flex gap-2 items-center">
                 <input
                   value={voteReasoning}
                   onChange={(e) => onVoteReasoningChange(e.target.value)}
                   placeholder="Reasoning (optional)"
-                  className="flex-1 px-2 py-1 text-xs border border-gray-300 rounded focus:outline-none focus:border-gray-500 bg-white"
+                  className="flex-1 px-2.5 py-1.5 text-sm border border-border-primary rounded-lg focus:outline-none focus:border-gray-500 bg-surface-primary"
                 />
               </div>
-              <div className="flex gap-1.5">
+              <div className="flex gap-2">
                 <button
                   onClick={() => onVote('yes')}
                   disabled={!voteWorkerId}
-                  className="text-[10px] px-2.5 py-0.5 rounded border border-green-200 text-green-600 hover:bg-green-50 disabled:opacity-50"
+                  className="text-xs px-2.5 py-1.5 rounded-lg border border-green-200 text-status-success hover:bg-green-50 disabled:opacity-50"
                 >
                   Yes
                 </button>
                 <button
                   onClick={() => onVote('no')}
                   disabled={!voteWorkerId}
-                  className="text-[10px] px-2.5 py-0.5 rounded border border-red-200 text-red-600 hover:bg-red-50 disabled:opacity-50"
+                  className="text-xs px-2.5 py-1.5 rounded-lg border border-red-200 text-status-error hover:bg-red-50 disabled:opacity-50"
                 >
                   No
                 </button>
                 <button
                   onClick={() => onVote('abstain')}
                   disabled={!voteWorkerId}
-                  className="text-[10px] px-2.5 py-0.5 rounded border border-gray-200 text-gray-500 hover:bg-gray-100 disabled:opacity-50"
+                  className="text-xs px-2.5 py-1.5 rounded-lg border border-border-primary text-text-muted hover:bg-surface-hover disabled:opacity-50"
                 >
                   Abstain
                 </button>
@@ -334,13 +334,13 @@ function DecisionRow({
                     <div className="flex-1" />
                     <button
                       onClick={() => onResolve('approved')}
-                      className="text-[10px] px-2 py-0.5 rounded border border-emerald-200 text-emerald-600 hover:bg-emerald-50"
+                      className="text-xs px-2.5 py-1.5 rounded-lg border border-emerald-200 text-status-success hover:bg-emerald-50"
                     >
                       Approve
                     </button>
                     <button
                       onClick={() => onResolve('rejected')}
-                      className="text-[10px] px-2 py-0.5 rounded border border-red-200 text-red-600 hover:bg-red-50"
+                      className="text-xs px-2.5 py-1.5 rounded-lg border border-red-200 text-status-error hover:bg-red-50"
                     >
                       Reject
                     </button>
@@ -352,18 +352,18 @@ function DecisionRow({
 
           {/* Vote breakdown */}
           {votes && votes.length > 0 && (
-            <div className="space-y-1 pt-1 border-t border-gray-200">
-              <div className="text-[10px] font-medium text-gray-500">Votes</div>
+            <div className="space-y-2 pt-1 border-t border-border-primary">
+              <div className="text-xs font-medium text-text-muted">Votes</div>
               {votes.map(v => (
-                <div key={v.id} className="flex items-center gap-2 text-xs">
-                  <span className="text-gray-600 shrink-0">
+                <div key={v.id} className="flex items-center gap-2 text-sm">
+                  <span className="text-text-secondary shrink-0">
                     {workerMap.get(v.workerId)?.name ?? `Worker #${v.workerId}`}
                   </span>
-                  <span className={`px-1.5 py-0.5 rounded text-[10px] font-medium border ${VOTE_COLORS[v.vote] ?? 'bg-gray-100 text-gray-500'}`}>
+                  <span className={`px-1.5 py-0.5 rounded-lg text-xs font-medium border ${VOTE_COLORS[v.vote] ?? 'bg-surface-tertiary text-text-muted'}`}>
                     {v.vote}
                   </span>
                   {v.reasoning && (
-                    <span className="text-gray-400 truncate">{v.reasoning}</span>
+                    <span className="text-text-muted truncate">{v.reasoning}</span>
                   )}
                 </div>
               ))}
@@ -371,7 +371,7 @@ function DecisionRow({
           )}
 
           {/* Info */}
-          <div className="flex gap-3 text-[10px] text-gray-400 pt-1 border-t border-gray-200">
+          <div className="flex gap-3 text-xs text-text-muted pt-1 border-t border-border-primary">
             <span>Threshold: {d.threshold}</span>
             {d.resolvedAt && <span>Resolved: {formatRelativeTime(d.resolvedAt)}</span>}
           </div>

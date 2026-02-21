@@ -6,12 +6,12 @@ import { formatRelativeTime } from '../utils/time'
 const CLOUD_STATIONS_URL = 'https://quoroom.ai/stations'
 
 const STATUS_COLORS: Record<string, string> = {
-  active: 'bg-green-100 text-green-700',
-  pending: 'bg-amber-100 text-amber-700',
-  stopped: 'bg-gray-200 text-gray-600',
-  canceling: 'bg-orange-100 text-orange-700',
-  past_due: 'bg-red-100 text-red-700',
-  error: 'bg-red-100 text-red-700',
+  active: 'bg-status-success-bg text-status-success',
+  pending: 'bg-status-warning-bg text-status-warning',
+  stopped: 'bg-surface-tertiary text-text-secondary',
+  canceling: 'bg-brand-100 text-brand-700',
+  past_due: 'bg-status-error-bg text-status-error',
+  error: 'bg-status-error-bg text-status-error',
 }
 
 const STATUS_LABEL: Record<string, string> = {
@@ -127,24 +127,24 @@ export function StationsPanel({ roomId, autonomyMode }: StationsPanelProps): Rea
   }
 
   if (!roomId) {
-    return <div className="p-4 text-xs text-gray-400">Select a room to view stations.</div>
+    return <div className="p-4 text-sm text-text-muted">Select a room to view stations.</div>
   }
 
   const activeStations = (stations ?? []).filter(s => s.status === 'active')
   const totalMonthlyCost = activeStations.reduce((sum, s) => sum + s.monthlyCost, 0)
 
   return (
-    <div className="p-3 space-y-3">
+    <div className="p-4 space-y-3">
       <div className="flex items-center justify-between">
-        <h2 className="text-sm font-semibold text-gray-800">Stations</h2>
+        <h2 className="text-base font-semibold text-text-primary">Stations</h2>
         <div className="flex items-center gap-2">
           {totalMonthlyCost > 0 && (
-            <span className="text-[10px] text-gray-500">${totalMonthlyCost}/mo</span>
+            <span className="text-xs text-text-muted">${totalMonthlyCost}/mo</span>
           )}
           {cloudRoomId && (
             <button
               onClick={handleAddStation}
-              className="text-[10px] px-2 py-0.5 bg-indigo-600 text-white rounded hover:bg-indigo-700"
+              className="text-xs px-2.5 py-1.5 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700"
             >
               + Add Station
             </button>
@@ -153,25 +153,25 @@ export function StationsPanel({ roomId, autonomyMode }: StationsPanelProps): Rea
       </div>
 
       {(!stations || stations.length === 0) ? (
-        <div className="text-xs text-gray-400 py-4 text-center">
+        <div className="text-sm text-text-muted py-4 text-center">
           No stations. Click "Add Station" to rent a cloud server.
         </div>
       ) : (
-        <div className="space-y-1.5">
+        <div className="space-y-2">
           {stations.map(station => (
-            <div key={station.id} className="bg-gray-50 rounded-lg p-2.5">
+            <div key={station.id} className="bg-surface-secondary rounded-lg p-3 shadow-sm">
               <div className="flex items-center gap-2">
                 <div className="flex-1 min-w-0">
-                  <div className="text-xs font-medium text-gray-800">{station.stationName}</div>
-                  <div className="text-[10px] text-gray-400 flex gap-2 mt-0.5">
-                    <span className={`px-1 rounded ${STATUS_COLORS[station.status] ?? 'bg-gray-100 text-gray-500'}`}>
+                  <div className="text-sm font-medium text-text-primary">{station.stationName}</div>
+                  <div className="text-xs text-text-muted flex gap-2 mt-0.5">
+                    <span className={`px-1 rounded-lg ${STATUS_COLORS[station.status] ?? 'bg-surface-tertiary text-text-muted'}`}>
                       {STATUS_LABEL[station.status] ?? station.status}
                     </span>
                     <span>{station.tier}</span>
                     <span>{TIER_COSTS[station.tier] ?? `$${station.monthlyCost}/mo`}</span>
                   </div>
                 </div>
-                <div className="text-[10px] text-gray-400">
+                <div className="text-xs text-text-muted">
                   {station.status === 'canceling' && station.currentPeriodEnd
                     ? `ends ${formatRelativeTime(station.currentPeriodEnd)}`
                     : formatRelativeTime(station.createdAt)}
@@ -179,12 +179,12 @@ export function StationsPanel({ roomId, autonomyMode }: StationsPanelProps): Rea
               </div>
 
               {semi && (
-                <div className="flex gap-1.5 mt-2">
+                <div className="flex gap-2 mt-2">
                   {station.status === 'stopped' && (
                     <button
                       onClick={() => handleStart(station.id)}
                       disabled={busy === station.id}
-                      className="text-[10px] px-1.5 py-0.5 bg-green-100 text-green-700 rounded hover:bg-green-200 disabled:opacity-50"
+                      className="text-xs px-2.5 py-1.5 bg-status-success-bg text-status-success rounded-lg hover:bg-status-success-bg disabled:opacity-50"
                     >
                       Start
                     </button>
@@ -193,7 +193,7 @@ export function StationsPanel({ roomId, autonomyMode }: StationsPanelProps): Rea
                     <button
                       onClick={() => handleStop(station.id)}
                       disabled={busy === station.id}
-                      className="text-[10px] px-1.5 py-0.5 bg-amber-100 text-amber-700 rounded hover:bg-amber-200 disabled:opacity-50"
+                      className="text-xs px-2.5 py-1.5 bg-status-warning-bg text-status-warning rounded-lg hover:bg-status-warning-bg disabled:opacity-50"
                     >
                       Stop
                     </button>
@@ -205,13 +205,13 @@ export function StationsPanel({ roomId, autonomyMode }: StationsPanelProps): Rea
                           ? handleCancel(station.id)
                           : handleDelete(station.id)}
                         disabled={busy === station.id}
-                        className="text-[10px] px-1.5 py-0.5 bg-red-500 text-white rounded disabled:opacity-50"
+                        className="text-xs px-2.5 py-1.5 bg-status-error text-white rounded-lg disabled:opacity-50"
                       >
                         {confirmAction.action === 'cancel' ? 'Confirm cancel' : 'Confirm delete'}
                       </button>
                       <button
                         onClick={() => setConfirmAction(null)}
-                        className="text-[10px] px-1.5 py-0.5 bg-gray-200 rounded"
+                        className="text-xs px-2.5 py-1.5 bg-surface-tertiary rounded-lg"
                       >
                         Back
                       </button>
@@ -221,7 +221,7 @@ export function StationsPanel({ roomId, autonomyMode }: StationsPanelProps): Rea
                       {(station.status === 'active' || station.status === 'stopped') && (
                         <button
                           onClick={() => setConfirmAction({ id: station.id, action: 'cancel' })}
-                          className="text-[10px] text-orange-500 hover:text-orange-700"
+                          className="text-xs text-brand-700 hover:text-brand-700"
                           title="Cancel subscription at end of billing period"
                         >
                           Cancel sub
@@ -230,7 +230,7 @@ export function StationsPanel({ roomId, autonomyMode }: StationsPanelProps): Rea
                       {station.status !== 'canceled' && (
                         <button
                           onClick={() => setConfirmAction({ id: station.id, action: 'delete' })}
-                          className="text-[10px] text-red-400 hover:text-red-600"
+                          className="text-xs text-status-error hover:text-status-error"
                           title="Immediately destroy station and cancel subscription"
                         >
                           Delete

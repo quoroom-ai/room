@@ -71,7 +71,7 @@ function App(): React.JSX.Element {
   const [tab, setTab] = useState<Tab>(() => {
     const saved = localStorage.getItem('quoroom_tab')
     if (saved && ALL_TAB_IDS.includes(saved as Tab)) return saved as Tab
-    return 'status'
+    return 'swarm'
   })
   const [advancedMode, setAdvancedMode] = useState(false)
   const [autonomyMode, setAutonomyMode] = useState<'auto' | 'semi'>('auto')
@@ -181,25 +181,21 @@ function App(): React.JSX.Element {
 
   function syncRooms(r: Room[]): void {
     setRooms(r)
-    // Auto-select first room if none selected
     if (selectedRoomId === null && r.length > 0) {
       handleRoomChange(r[0].id)
       setExpandedRoomId(r[0].id)
     }
-    // Clear selection if room no longer exists
     if (selectedRoomId !== null && !r.find(room => room.id === selectedRoomId)) {
       const next = r.length > 0 ? r[0].id : null
       handleRoomChange(next)
       setExpandedRoomId(next)
     }
-    // Sync expandedRoomId on first load
     setExpandedRoomId(prev => {
       if (prev === null && selectedRoomId !== null && r.find(room => room.id === selectedRoomId)) {
         return selectedRoomId
       }
       return prev
     })
-    // Fetch queen running status for all rooms
     Promise.all(
       r.map(async room => {
         const q = await api.rooms.queenStatus(room.id).catch(() => null)
@@ -208,7 +204,6 @@ function App(): React.JSX.Element {
     ).then(entries => setQueenRunning(Object.fromEntries(entries))).catch(() => {})
   }
 
-  // Load rooms list and poll for updates
   useEffect(() => {
     if (!ready) return
     function loadRooms(): void {
@@ -219,7 +214,6 @@ function App(): React.JSX.Element {
     return () => clearInterval(interval)
   }, [ready]) // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Derive autonomyMode from selected room
   useEffect(() => {
     const room = rooms.find(r => r.id === selectedRoomId)
     if (room) setAutonomyMode(room.autonomyMode)
@@ -349,16 +343,14 @@ function App(): React.JSX.Element {
     }
   }
 
-  // Remote origin: probing localhost
   if (gate === 'probing') {
     return (
-      <div className="flex flex-col h-screen bg-white items-center justify-center">
-        <div className="text-gray-400 text-sm">Connecting to your local server...</div>
+      <div className="flex flex-col h-screen bg-surface-primary items-center justify-center">
+        <div className="text-text-muted text-sm">Connecting to your local server...</div>
       </div>
     )
   }
 
-  // Remote origin: server not reachable — show connect page
   if (gate === 'connect') {
     return (
       <ConnectPage
@@ -368,15 +360,14 @@ function App(): React.JSX.Element {
     )
   }
 
-  // Local origin: auth error
   if (error) {
     return (
-      <div className="flex flex-col h-screen bg-white items-center justify-center px-4">
-        <div className="text-red-500 text-sm mb-1">Connection failed</div>
-        <div className="text-gray-400 text-xs mb-3">{error}</div>
+      <div className="flex flex-col h-screen bg-surface-primary items-center justify-center px-4">
+        <div className="text-status-error text-sm mb-1">Connection failed</div>
+        <div className="text-text-muted text-xs mb-3">{error}</div>
         <button
           onClick={() => { setError(null); clearToken(); getToken().then(() => setReady(true)).catch((e) => setError(e instanceof Error ? e.message : 'Auth failed')) }}
-          className="text-xs text-blue-500 hover:text-blue-700"
+          className="text-sm text-interactive hover:text-interactive-hover transition-colors"
         >
           Retry
         </button>
@@ -384,11 +375,10 @@ function App(): React.JSX.Element {
     )
   }
 
-  // Local origin: loading
   if (!ready) {
     return (
-      <div className="flex flex-col h-screen bg-white items-center justify-center">
-        <div className="text-gray-400 text-sm">Connecting...</div>
+      <div className="flex flex-col h-screen bg-surface-primary items-center justify-center">
+        <div className="text-text-muted text-sm">Connecting...</div>
       </div>
     )
   }
@@ -396,20 +386,20 @@ function App(): React.JSX.Element {
   const visibleTabs = advancedMode ? mainTabs : mainTabs.filter(t => !t.advanced)
 
   return (
-    <div className="flex h-screen bg-white">
+    <div className="flex h-screen bg-surface-primary">
       {/* Left sidebar */}
-      <div data-testid="sidebar" className="w-40 flex-shrink-0 flex flex-col bg-gray-50 border-r border-gray-200 py-1.5 px-1.5">
+      <div data-testid="sidebar" className="w-48 flex-shrink-0 flex flex-col bg-surface-secondary border-r border-border-primary py-2 px-2">
         {/* Swarm link */}
-        <div className="pb-1.5 mb-1.5 border-b border-gray-200">
+        <div className="pb-2 mb-2 border-b border-border-primary">
           <button
             onClick={() => handleTabChange('swarm')}
-            className={`w-full px-2 py-1.5 text-xs text-left rounded transition-colors flex items-center gap-1.5 ${
+            className={`w-full px-3 py-2 text-sm text-left rounded-lg transition-colors flex items-center gap-2 ${
               tab === 'swarm'
-                ? 'bg-amber-50 text-amber-700 font-medium'
-                : 'text-gray-500 hover:text-gray-700 hover:bg-gray-100'
+                ? 'bg-interactive-bg text-interactive font-medium'
+                : 'text-text-muted hover:text-text-secondary hover:bg-surface-hover'
             }`}
           >
-            <svg width="12" height="12" viewBox="0 0 14 14" className="shrink-0">
+            <svg width="14" height="14" viewBox="0 0 14 14" className="shrink-0">
               <polygon points="7,1 12.5,4 12.5,10 7,13 1.5,10 1.5,4" fill="none" stroke="currentColor" strokeWidth="1.3"/>
             </svg>
             Swarm
@@ -417,20 +407,20 @@ function App(): React.JSX.Element {
         </div>
 
         {/* Create room */}
-        <div className="pb-1.5 mb-1.5 border-b border-gray-200">
+        <div className="pb-2 mb-2 border-b border-border-primary">
           <button
             onClick={toggleCreateRoomForm}
-            className="w-full px-2 py-1 text-xs text-left text-blue-500 hover:text-blue-700 rounded hover:bg-blue-50 transition-colors"
+            className="w-full px-3 py-1.5 text-sm text-left text-interactive hover:text-interactive-hover rounded-lg hover:bg-interactive-bg transition-colors"
           >
             {showCreateRoom ? 'Cancel' : '+ New Room'}
           </button>
           {showCreateRoom && (
-            <div className="mt-1 space-y-1 px-1">
+            <div className="mt-1.5 space-y-1.5 px-1">
               <input
                 value={createRoomName}
                 onChange={(e) => setCreateRoomName(e.target.value)}
                 placeholder="Room name"
-                className="w-full bg-white border border-gray-200 rounded px-1.5 py-1 text-[11px] text-gray-700"
+                className="w-full bg-surface-primary border border-border-primary rounded-lg px-2 py-1.5 text-sm text-text-primary placeholder:text-text-muted"
                 onKeyDown={(e) => {
                   if (e.key === 'Enter') void handleCreateRoom()
                 }}
@@ -439,7 +429,7 @@ function App(): React.JSX.Element {
                 value={createRoomGoal}
                 onChange={(e) => setCreateRoomGoal(e.target.value)}
                 placeholder="Goal (optional)"
-                className="w-full bg-white border border-gray-200 rounded px-1.5 py-1 text-[11px] text-gray-500"
+                className="w-full bg-surface-primary border border-border-primary rounded-lg px-2 py-1.5 text-sm text-text-secondary placeholder:text-text-muted"
                 onKeyDown={(e) => {
                   if (e.key === 'Enter') void handleCreateRoom()
                 }}
@@ -447,12 +437,12 @@ function App(): React.JSX.Element {
               <button
                 onClick={() => void handleCreateRoom()}
                 disabled={createRoomBusy || !createRoomName.trim()}
-                className="w-full px-2 py-1 text-[11px] rounded bg-blue-500 text-white hover:bg-blue-600 disabled:opacity-40"
+                className="w-full px-3 py-1.5 text-sm rounded-lg bg-interactive text-text-invert hover:bg-interactive-hover disabled:opacity-40 transition-colors"
               >
                 {createRoomBusy ? 'Creating...' : 'Create'}
               </button>
               {createRoomError && (
-                <p className="text-[10px] text-red-500 leading-tight">{createRoomError}</p>
+                <p className="text-xs text-status-error leading-tight">{createRoomError}</p>
               )}
             </div>
           )}
@@ -461,42 +451,40 @@ function App(): React.JSX.Element {
         {/* Room accordion — scrollable */}
         <div className="flex-1 overflow-y-auto min-h-0">
           {rooms.length === 0 && (
-            <p className="text-[10px] text-gray-400 text-center py-3 px-2">No rooms</p>
+            <p className="text-xs text-text-muted text-center py-4 px-2">No rooms</p>
           )}
           {rooms.map(r => {
             const isOpen = expandedRoomId === r.id
             const isSelected = selectedRoomId === r.id
             const running = r.status === 'active' && queenRunning[r.id]
             const paused = r.status === 'paused'
-            const dot = running ? 'bg-green-400' : paused ? 'bg-yellow-400' : 'bg-gray-300'
+            const dot = running ? 'bg-status-success' : paused ? 'bg-status-warning' : 'bg-text-muted'
             return (
               <div key={r.id}>
-                {/* Room row */}
                 <button
                   onClick={() => handleRoomToggle(r.id)}
-                  className={`flex items-center gap-1.5 w-full px-2 py-1.5 text-left rounded transition-colors hover:bg-gray-100 ${isSelected ? 'bg-gray-100' : ''}`}
+                  className={`flex items-center gap-2 w-full px-3 py-2 text-left rounded-lg transition-colors hover:bg-surface-hover ${isSelected ? 'bg-surface-hover' : ''}`}
                 >
                   <span className={`w-2 h-2 rounded-full flex-shrink-0 ${dot}`} />
-                  <span className="text-xs font-medium text-gray-700 truncate flex-1">{r.name}</span>
-                  <span className="text-[9px] text-gray-400 flex-shrink-0">{isOpen ? '▴' : '▾'}</span>
+                  <span className="text-sm font-medium text-text-primary truncate flex-1">{r.name}</span>
+                  <span className="text-xs text-text-muted flex-shrink-0">{isOpen ? '\u25B4' : '\u25BE'}</span>
                 </button>
-                {/* Submenu */}
                 {isOpen && (
-                  <div className="pl-3 flex flex-col gap-0.5 pb-1">
+                  <div className="pl-4 flex flex-col gap-0.5 pb-1">
                     {visibleTabs.map(t => (
                       <button
                         key={t.id}
                         onClick={() => handleRoomTabClick(r.id, t.id)}
-                        className={`px-2 py-1 text-xs text-left rounded transition-colors ${
+                        className={`px-3 py-1.5 text-sm text-left rounded-lg transition-colors ${
                           tab === t.id && isSelected
-                            ? 'bg-gray-200 text-gray-900 font-medium'
-                            : 'text-gray-500 hover:text-gray-700 hover:bg-gray-100'
+                            ? 'bg-surface-tertiary text-text-primary font-medium'
+                            : 'text-text-muted hover:text-text-secondary hover:bg-surface-hover'
                         }`}
                       >
-                        <span className="flex items-center gap-1">
+                        <span className="flex items-center gap-1.5">
                           {t.label}
                           {t.id === 'messages' && messagesUnread > 0 && (
-                            <span className="inline-flex items-center justify-center min-w-[14px] h-3.5 px-0.5 rounded-full bg-red-500 text-white text-[8px] font-bold leading-none">
+                            <span className="inline-flex items-center justify-center min-w-[16px] h-4 px-1 rounded-full bg-status-error text-white text-[10px] font-bold leading-none">
                               {messagesUnread}
                             </span>
                           )}
@@ -510,16 +498,14 @@ function App(): React.JSX.Element {
           })}
         </div>
 
-        {/* Bottom nav — Settings, Help */}
         <TabBar active={tab} onChange={handleTabChange} />
       </div>
 
       {/* Main content */}
       <div className="flex-1 flex flex-col min-w-0">
-        {/* Install banner */}
         {installPrompt.canInstall && !installPrompt.isInstalled && !installDismissed && (
-          <div className="flex items-center gap-2 px-3 py-1.5 bg-amber-50 border-b border-amber-200">
-            <span className="text-xs text-amber-800 flex-1">
+          <div className="flex items-center gap-3 px-4 py-2 bg-brand-50 border-b border-brand-200">
+            <span className="text-sm text-brand-700 flex-1">
               Install Quoroom as an app for quick access, Dock icon, and badge notifications.
             </span>
             <button
@@ -530,7 +516,7 @@ function App(): React.JSX.Element {
                   localStorage.setItem('quoroom_install_dismissed', 'true')
                 }
               }}
-              className="text-xs px-2.5 py-1 bg-amber-500 text-white rounded hover:bg-amber-600 shrink-0 font-medium"
+              className="text-sm px-4 py-1.5 bg-interactive text-text-invert rounded-lg hover:bg-interactive-hover shrink-0 font-medium transition-colors"
             >
               Install
             </button>
@@ -539,29 +525,28 @@ function App(): React.JSX.Element {
                 setInstallDismissed(true)
                 localStorage.setItem('quoroom_install_dismissed', 'true')
               }}
-              className="text-amber-400 hover:text-amber-600 text-sm leading-none shrink-0"
+              className="text-brand-400 hover:text-brand-600 text-lg leading-none shrink-0 transition-colors"
             >
               &times;
             </button>
           </div>
         )}
 
-        {/* Room context header */}
         {selectedRoom && tab !== 'swarm' && tab !== 'settings' && tab !== 'help' && (() => {
           const running = selectedRoom.status === 'active' && queenRunning[selectedRoom.id]
           const paused = selectedRoom.status === 'paused'
-          const dot = running ? 'bg-green-400' : paused ? 'bg-yellow-400' : 'bg-gray-300'
+          const dot = running ? 'bg-status-success' : paused ? 'bg-status-warning' : 'bg-text-muted'
           const statusLabel = running ? 'running' : paused ? 'paused' : 'idle'
-          const statusColor = running ? 'text-green-600' : paused ? 'text-yellow-600' : 'text-gray-400'
+          const statusColor = running ? 'text-status-success' : paused ? 'text-status-warning' : 'text-text-muted'
           return (
-            <div className="flex items-center gap-2 px-3 py-1.5 border-b border-gray-100 bg-white shrink-0">
+            <div className="flex items-center gap-2 px-4 py-2 border-b border-border-secondary bg-surface-primary shrink-0">
               <span className={`w-2 h-2 rounded-full flex-shrink-0 ${dot}`} />
-              <span className="text-xs font-semibold text-gray-800 truncate">{selectedRoom.name}</span>
-              <span className={`text-[10px] flex-shrink-0 ${statusColor}`}>{statusLabel}</span>
+              <span className="text-sm font-semibold text-text-primary truncate">{selectedRoom.name}</span>
+              <span className={`text-xs flex-shrink-0 ${statusColor}`}>{statusLabel}</span>
               {selectedRoom.goal && (
                 <>
-                  <span className="text-gray-300 flex-shrink-0">·</span>
-                  <span className="text-[11px] text-gray-400 truncate flex-1 min-w-0">{selectedRoom.goal}</span>
+                  <span className="text-text-muted flex-shrink-0">{'\u00B7'}</span>
+                  <span className="text-xs text-text-muted truncate flex-1 min-w-0">{selectedRoom.goal}</span>
                 </>
               )}
             </div>

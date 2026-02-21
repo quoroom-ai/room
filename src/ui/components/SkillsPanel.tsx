@@ -68,16 +68,16 @@ export function SkillsPanel({ roomId, autonomyMode }: SkillsPanelProps): React.J
 
   return (
     <div className="flex flex-col h-full" ref={containerRef}>
-      <div className="px-3 py-1.5 border-b border-gray-200 flex items-center justify-between">
+      <div className="px-4 py-2 border-b border-border-primary flex items-center justify-between">
         <div className="flex items-center gap-2">
-          <span className="text-xs text-gray-500">
+          <span className="text-sm text-text-muted">
             {skills ? `${skills.length} skill(s)` : 'Loading...'}
           </span>
         </div>
         {semi && (
           <button
             onClick={() => setShowCreate(!showCreate)}
-            className="text-xs text-blue-500 hover:text-blue-700 font-medium"
+            className="text-sm text-interactive hover:text-interactive-hover font-medium"
           >
             {showCreate ? 'Cancel' : '+ New Skill'}
           </button>
@@ -85,40 +85,40 @@ export function SkillsPanel({ roomId, autonomyMode }: SkillsPanelProps): React.J
       </div>
 
       {semi && showCreate && (
-        <div className="p-3 border-b-2 border-blue-300 bg-blue-50/50 space-y-2">
+        <div className="p-4 border-b-2 border-blue-300 bg-interactive-bg/50 space-y-2">
           <input
             placeholder="Skill name"
             value={createName}
             onChange={(e) => setCreateName(e.target.value)}
-            className="w-full px-2.5 py-1.5 text-xs border border-gray-300 rounded focus:outline-none focus:border-gray-500 bg-white"
+            className="w-full px-2.5 py-1.5 text-sm border border-border-primary rounded-lg focus:outline-none focus:border-gray-500 bg-surface-primary"
           />
           <textarea
             placeholder="Skill content (instructions, code, etc.)"
             value={createContent}
             onChange={(e) => setCreateContent(e.target.value)}
             rows={4}
-            className="w-full px-2.5 py-1.5 text-xs border border-gray-300 rounded focus:outline-none focus:border-gray-500 bg-white resize-y font-mono"
+            className="w-full px-2.5 py-1.5 text-sm border border-border-primary rounded-lg focus:outline-none focus:border-gray-500 bg-surface-primary resize-y font-mono"
           />
           <input
             placeholder="Activation contexts (comma-separated, optional)"
             value={createContexts}
             onChange={(e) => setCreateContexts(e.target.value)}
-            className="w-full px-2.5 py-1.5 text-xs border border-gray-300 rounded focus:outline-none focus:border-gray-500 bg-white"
+            className="w-full px-2.5 py-1.5 text-sm border border-border-primary rounded-lg focus:outline-none focus:border-gray-500 bg-surface-primary"
           />
           <div className="flex gap-2 items-center">
-            <label className="flex items-center gap-1.5 text-xs text-gray-600 cursor-pointer shrink-0">
+            <label className="flex items-center gap-2 text-sm text-text-secondary cursor-pointer shrink-0">
               <input
                 type="checkbox"
                 checked={createAutoActivate}
                 onChange={(e) => setCreateAutoActivate(e.target.checked)}
-                className="rounded border-gray-300"
+                className="rounded-lg border-border-primary"
               />
               Auto-activate
             </label>
             <button
               onClick={handleCreate}
               disabled={!createName.trim() || !createContent.trim()}
-              className="text-xs bg-blue-500 text-white px-3 py-1 rounded hover:bg-blue-600 disabled:opacity-50 disabled:cursor-not-allowed shrink-0"
+              className="text-sm bg-interactive text-white px-4 py-2 rounded-lg hover:bg-interactive-hover disabled:opacity-50 disabled:cursor-not-allowed shrink-0"
             >
               Create
             </button>
@@ -128,11 +128,11 @@ export function SkillsPanel({ roomId, autonomyMode }: SkillsPanelProps): React.J
 
       <div className="flex-1 overflow-y-auto">
         {(skills ?? []).length === 0 && skills ? (
-          <div className="p-4 text-xs text-gray-400">
+          <div className="p-4 text-sm text-text-muted">
             {semi ? 'No skills yet. Create one to get started.' : 'No skills yet. Skills are created by agents.'}
           </div>
         ) : isWide ? (
-          <div className="grid grid-cols-2 gap-2 p-2">
+          <div className="grid grid-cols-2 gap-2 p-3">
             {(skills ?? []).map(skill => (
               <SkillCard
                 key={skill.id}
@@ -148,7 +148,7 @@ export function SkillsPanel({ roomId, autonomyMode }: SkillsPanelProps): React.J
             ))}
           </div>
         ) : (
-          <div className="divide-y divide-gray-100">
+          <div className="divide-y divide-border-primary">
             {(skills ?? []).map(skill => (
               <SkillCard
                 key={skill.id}
@@ -184,66 +184,66 @@ function SkillCard({ skill, expanded, semi, confirmDelete, onToggle, onToggleAut
   return (
     <div>
       <div
-        className="flex items-center gap-2 px-3 py-2 hover:bg-gray-50 cursor-pointer"
+        className="flex items-center gap-2 px-3 py-2 hover:bg-surface-hover cursor-pointer"
         onClick={onToggle}
       >
         <div className="min-w-0 flex-1">
-          <div className="flex items-center gap-1.5">
-            <span className="text-xs font-medium text-gray-800">{skill.name}</span>
+          <div className="flex items-center gap-2">
+            <span className="text-sm font-medium text-text-primary">{skill.name}</span>
             {skill.agentCreated && (
-              <span className="px-1.5 py-0.5 rounded text-[10px] font-medium bg-purple-100 text-purple-600">agent</span>
+              <span className="px-1.5 py-0.5 rounded-lg text-xs font-medium bg-status-info-bg text-status-info">agent</span>
             )}
             {skill.autoActivate && (
-              <span className="px-1.5 py-0.5 rounded text-[10px] font-medium bg-green-100 text-green-600">auto</span>
+              <span className="px-1.5 py-0.5 rounded-lg text-xs font-medium bg-status-success-bg text-status-success">auto</span>
             )}
-            <span className="text-[10px] text-gray-300">v{skill.version}</span>
+            <span className="text-xs text-text-muted">v{skill.version}</span>
           </div>
           <div className="flex items-center gap-2 mt-0.5">
-            <span className="text-[10px] text-gray-400 truncate max-w-[200px]">
+            <span className="text-xs text-text-muted truncate max-w-[200px]">
               {skill.content.slice(0, 80)}{skill.content.length > 80 ? '...' : ''}
             </span>
           </div>
           {skill.activationContext && skill.activationContext.length > 0 && (
             <div className="flex gap-1 mt-1 flex-wrap">
               {skill.activationContext.map((ctx, i) => (
-                <span key={i} className="px-1.5 py-0.5 rounded text-[10px] bg-blue-50 text-blue-500 border border-blue-100">
+                <span key={i} className="px-1.5 py-0.5 rounded-lg text-xs bg-interactive-bg text-interactive border border-interactive-bg">
                   {ctx}
                 </span>
               ))}
             </div>
           )}
         </div>
-        <span className="text-xs text-gray-300">{expanded ? '\u25BC' : '\u25B6'}</span>
+        <span className="text-sm text-text-muted">{expanded ? '\u25BC' : '\u25B6'}</span>
       </div>
 
       {expanded && (
-        <div className="px-3 pb-3 bg-gray-50 space-y-2">
-          <pre className="text-[11px] text-gray-600 bg-white border border-gray-200 rounded p-2 overflow-x-auto whitespace-pre-wrap font-mono max-h-[200px] overflow-y-auto">
+        <div className="px-3 pb-3 bg-surface-secondary space-y-2">
+          <pre className="text-xs text-text-secondary bg-surface-primary border border-border-primary rounded-lg p-3 overflow-x-auto whitespace-pre-wrap font-mono max-h-[200px] overflow-y-auto">
             {skill.content}
           </pre>
           <div className="flex items-center gap-2">
             {semi ? (
-              <label className="flex items-center gap-1.5 text-xs text-gray-600 cursor-pointer">
+              <label className="flex items-center gap-2 text-sm text-text-secondary cursor-pointer">
                 <input
                   type="checkbox"
                   checked={skill.autoActivate}
                   onChange={onToggleAutoActivate}
-                  className="rounded border-gray-300"
+                  className="rounded-lg border-border-primary"
                 />
                 Auto-activate
               </label>
             ) : (
-              <span className="text-[10px] text-gray-400">
+              <span className="text-xs text-text-muted">
                 {skill.autoActivate ? 'Auto-activate enabled' : 'Manual activation'}
               </span>
             )}
             <div className="flex-1" />
-            <span className="text-[10px] text-gray-400">{formatRelativeTime(skill.updatedAt)}</span>
+            <span className="text-xs text-text-muted">{formatRelativeTime(skill.updatedAt)}</span>
             {semi && (
               <button
                 onClick={onDelete}
                 onBlur={onBlurDelete}
-                className="text-[10px] px-2 py-0.5 rounded border border-red-200 text-red-400 hover:text-red-600"
+                className="text-xs px-2.5 py-1.5 rounded-lg border border-red-200 text-status-error hover:text-red-600"
               >
                 {confirmDelete ? 'Confirm?' : 'Delete'}
               </button>

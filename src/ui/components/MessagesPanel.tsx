@@ -6,9 +6,9 @@ import { formatRelativeTime } from '../utils/time'
 import type { Escalation, Worker, RoomMessage } from '@shared/types'
 
 const STATUS_COLORS: Record<string, string> = {
-  pending: 'bg-amber-50 border-amber-200',
-  in_progress: 'bg-blue-50 border-blue-200',
-  resolved: 'bg-gray-100 border-transparent',
+  pending: 'bg-status-warning-bg border-amber-200',
+  in_progress: 'bg-interactive-bg border-blue-200',
+  resolved: 'bg-surface-tertiary border-transparent',
 }
 
 interface MessagesPanelProps {
@@ -108,20 +108,20 @@ export function MessagesPanel({ roomId, autonomyMode }: MessagesPanelProps): Rea
   return (
     <div className="flex flex-col h-full">
       {/* Header */}
-      <div className="px-3 py-1.5 border-b border-gray-200 flex items-center gap-2">
-        <div className="flex gap-1 bg-gray-100 rounded p-0.5">
+      <div className="px-4 py-2 border-b border-border-primary flex items-center gap-2">
+        <div className="flex gap-1 bg-surface-tertiary rounded-lg p-0.5">
           <button
             onClick={() => setViewSection('escalations')}
-            className={`px-2 py-0.5 rounded text-[10px] font-medium transition-colors ${
-              viewSection === 'escalations' ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-700'
+            className={`px-2.5 py-1.5 rounded-lg text-xs font-medium transition-colors ${
+              viewSection === 'escalations' ? 'bg-surface-primary text-text-primary shadow-sm' : 'text-text-muted hover:text-text-secondary'
             }`}
           >
             My Room{pending.length > 0 ? ` (${pending.length})` : ''}
           </button>
           <button
             onClick={() => setViewSection('rooms')}
-            className={`px-2 py-0.5 rounded text-[10px] font-medium transition-colors ${
-              viewSection === 'rooms' ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-700'
+            className={`px-2.5 py-1.5 rounded-lg text-xs font-medium transition-colors ${
+              viewSection === 'rooms' ? 'bg-surface-primary text-text-primary shadow-sm' : 'text-text-muted hover:text-text-secondary'
             }`}
           >
             Outside Rooms{unreadMessages.length > 0 ? ` (${unreadMessages.length})` : ''}
@@ -130,21 +130,21 @@ export function MessagesPanel({ roomId, autonomyMode }: MessagesPanelProps): Rea
         {((viewSection === 'escalations' && pending.length > 0) || (viewSection === 'rooms' && unreadMessages.length > 0)) && (
           <button
             onClick={handleMarkAllRead}
-            className="text-[10px] text-gray-400 hover:text-gray-600"
+            className="text-xs text-text-muted hover:text-text-secondary"
           >
             Mark all read
           </button>
         )}
         <button
           onClick={() => setCollapsed(c => { const next = !c; localStorage.setItem('quoroom_messages_collapsed', String(next)); return next })}
-          className="text-[10px] text-gray-400 hover:text-gray-600"
+          className="text-xs text-text-muted hover:text-text-secondary"
         >
           {collapsed ? 'Expand all' : 'Collapse all'}
         </button>
         {semi && roomId && viewSection === 'escalations' && (
           <button
             onClick={() => setShowCreateForm(!showCreateForm)}
-            className="text-xs text-blue-500 hover:text-blue-700 font-medium ml-auto"
+            className="text-sm text-interactive hover:text-interactive-hover font-medium ml-auto"
           >
             {showCreateForm ? 'Cancel' : '+ New'}
           </button>
@@ -153,12 +153,12 @@ export function MessagesPanel({ roomId, autonomyMode }: MessagesPanelProps): Rea
 
       {/* Create message form (semi-mode only) */}
       {semi && showCreateForm && roomId && (
-        <div className="p-3 border-b-2 border-blue-300 bg-blue-50/50 space-y-2">
+        <div className="p-4 border-b-2 border-blue-300 bg-interactive-bg/50 space-y-2">
           <div className="flex gap-2">
             <select
               value={fromAgentId}
               onChange={(e) => { setFromAgentId(e.target.value === '' ? '' : Number(e.target.value)); setCreateError(null) }}
-              className="flex-1 px-2.5 py-1.5 text-xs border border-gray-300 rounded focus:outline-none focus:border-gray-500 bg-white"
+              className="flex-1 px-2.5 py-1.5 text-sm border border-border-primary rounded-lg focus:outline-none focus:border-gray-500 bg-surface-primary text-text-primary"
             >
               <option value="">Send as worker...</option>
               {workerList.map(w => (
@@ -168,7 +168,7 @@ export function MessagesPanel({ roomId, autonomyMode }: MessagesPanelProps): Rea
             <select
               value={toAgentId}
               onChange={(e) => setToAgentId(e.target.value === '' ? '' : Number(e.target.value))}
-              className="flex-1 px-2.5 py-1.5 text-xs border border-gray-300 rounded focus:outline-none focus:border-gray-500 bg-white"
+              className="flex-1 px-2.5 py-1.5 text-sm border border-border-primary rounded-lg focus:outline-none focus:border-gray-500 bg-surface-primary text-text-primary"
             >
               <option value="">To worker (optional)</option>
               {workerList.map(w => (
@@ -182,16 +182,16 @@ export function MessagesPanel({ roomId, autonomyMode }: MessagesPanelProps): Rea
             onKeyDown={(e) => { if (e.key === 'Enter' && e.metaKey) { e.preventDefault(); handleCreateMessage() } }}
             rows={3}
             placeholder="Message body..."
-            className="w-full px-2.5 py-1.5 text-xs border border-gray-300 rounded focus:outline-none focus:border-gray-500 bg-white resize-y"
+            className="w-full px-2.5 py-1.5 text-sm border border-border-primary rounded-lg focus:outline-none focus:border-gray-500 bg-surface-primary resize-y"
             autoFocus
           />
           <div className="flex items-center justify-between">
-            {createError && <span className="text-xs text-red-500 truncate">{createError}</span>}
+            {createError && <span className="text-sm text-status-error truncate">{createError}</span>}
             <div className="flex-1" />
             <button
               onClick={handleCreateMessage}
               disabled={fromAgentId === '' || !messageBody.trim()}
-              className="text-xs bg-blue-500 text-white px-3 py-1 rounded hover:bg-blue-600 disabled:opacity-50 disabled:cursor-not-allowed"
+              className="text-sm bg-interactive text-white px-4 py-2 rounded-lg hover:bg-interactive-hover disabled:opacity-50 disabled:cursor-not-allowed"
             >
               Send
             </button>
@@ -202,14 +202,14 @@ export function MessagesPanel({ roomId, autonomyMode }: MessagesPanelProps): Rea
       {/* Messages list */}
       <div className="flex-1 overflow-y-auto">
         {!roomId ? (
-          <div className="p-4 text-xs text-gray-400">Select a room to view messages.</div>
+          <div className="p-4 text-sm text-text-muted">Select a room to view messages.</div>
         ) : viewSection === 'escalations' ? (
           (escalations ?? []).length === 0 && escalations ? (
-            <div className="p-4 text-xs text-gray-400">
+            <div className="p-4 text-sm text-text-muted">
               {semi ? 'No messages yet.' : 'No messages yet. Messages are created by agents.'}
             </div>
           ) : (
-            <div className="p-3 space-y-3">
+            <div className="p-4 space-y-3">
               {(escalations ?? []).map(esc => (
                 <MessageBubble
                   key={esc.id}
@@ -232,47 +232,47 @@ export function MessagesPanel({ roomId, autonomyMode }: MessagesPanelProps): Rea
         ) : (
           /* Room Messages (inter-room) */
           (roomMessages ?? []).length === 0 ? (
-            <div className="p-4 text-xs text-gray-400">
+            <div className="p-4 text-sm text-text-muted">
               No inter-room messages yet. Agents can send messages to other rooms.
             </div>
           ) : (
-            <div className="p-3 space-y-2">
+            <div className="p-4 space-y-2">
               {(roomMessages ?? []).map(msg => (
                 <div
                   key={msg.id}
-                  className={`rounded-lg p-2.5 border ${
+                  className={`rounded-lg p-3 border shadow-sm ${
                     msg.status === 'unread'
-                      ? 'bg-blue-50 border-blue-200'
+                      ? 'bg-interactive-bg border-blue-200'
                       : msg.status === 'replied'
-                      ? 'bg-gray-50 border-gray-200'
-                      : 'bg-gray-100 border-transparent'
+                      ? 'bg-surface-secondary border-border-primary'
+                      : 'bg-surface-tertiary border-transparent'
                   }`}
                 >
-                  <div className="flex items-center gap-1.5 mb-1">
-                    <span className={`px-1.5 py-0.5 rounded text-[10px] font-medium ${
+                  <div className="flex items-center gap-2 mb-1">
+                    <span className={`px-1.5 py-0.5 rounded-lg text-xs font-medium ${
                       msg.direction === 'inbound'
-                        ? 'bg-green-100 text-green-700'
-                        : 'bg-purple-100 text-purple-700'
+                        ? 'bg-status-success-bg text-status-success'
+                        : 'bg-status-info-bg text-status-info'
                     }`}>
                       {msg.direction}
                     </span>
                     {msg.fromRoomId && (
-                      <span className="text-[10px] text-gray-500">from {msg.fromRoomId}</span>
+                      <span className="text-xs text-text-muted">from {msg.fromRoomId}</span>
                     )}
                     {msg.toRoomId && (
-                      <span className="text-[10px] text-gray-500">to {msg.toRoomId}</span>
+                      <span className="text-xs text-text-muted">to {msg.toRoomId}</span>
                     )}
-                    <span className={`px-1 rounded text-[10px] ${
-                      msg.status === 'unread' ? 'bg-blue-100 text-blue-600' : 'text-gray-400'
+                    <span className={`px-1 rounded-lg text-xs ${
+                      msg.status === 'unread' ? 'bg-interactive-bg text-interactive' : 'text-text-muted'
                     }`}>
                       {msg.status}
                     </span>
-                    <span className="text-[10px] text-gray-400 ml-auto">
+                    <span className="text-xs text-text-muted ml-auto">
                       {formatRelativeTime(msg.createdAt)}
                     </span>
                   </div>
-                  <div className="text-xs font-medium text-gray-700">{msg.subject}</div>
-                  {!collapsed && <div className="text-xs text-gray-600 mt-0.5 whitespace-pre-wrap">{msg.body}</div>}
+                  <div className="text-sm font-medium text-text-secondary">{msg.subject}</div>
+                  {!collapsed && <div className="text-sm text-text-secondary mt-0.5 whitespace-pre-wrap">{msg.body}</div>}
                 </div>
               ))}
             </div>
@@ -307,38 +307,38 @@ function MessageBubble({
   const isPending = esc.status === 'pending'
 
   return (
-    <div className="space-y-1.5">
+    <div className="space-y-2">
       {/* Question bubble */}
-      <div className={`rounded-lg p-2.5 max-w-[85%] border ${STATUS_COLORS[esc.status] ?? 'bg-gray-100 border-transparent'}`}>
-        <div className="flex items-center gap-1.5 mb-1">
-          <span className="text-[10px] font-medium text-gray-700">
+      <div className={`rounded-lg p-3 max-w-[85%] border shadow-sm ${STATUS_COLORS[esc.status] ?? 'bg-surface-tertiary border-transparent'}`}>
+        <div className="flex items-center gap-2 mb-1">
+          <span className="text-xs font-medium text-text-secondary">
             {getWorkerName(esc.fromAgentId)}
           </span>
           {esc.toAgentId !== null && (
             <>
-              <span className="text-[10px] text-gray-400">&rarr;</span>
-              <span className="text-[10px] text-gray-500">
+              <span className="text-xs text-text-muted">&rarr;</span>
+              <span className="text-xs text-text-muted">
                 {getWorkerName(esc.toAgentId)}
               </span>
             </>
           )}
           {isPending && (
-            <span className="px-1.5 py-0.5 rounded text-[10px] font-medium bg-amber-100 text-amber-700">
+            <span className="px-1.5 py-0.5 rounded-lg text-xs font-medium bg-status-warning-bg text-status-warning">
               pending
             </span>
           )}
-          <span className="text-[10px] text-gray-400 ml-auto">
+          <span className="text-xs text-text-muted ml-auto">
             {formatRelativeTime(esc.createdAt)}
           </span>
         </div>
         {!collapsed && (
           <>
-            <div className="text-xs text-gray-800 whitespace-pre-wrap">{esc.question}</div>
+            <div className="text-sm text-text-primary whitespace-pre-wrap">{esc.question}</div>
             {/* Reply action for pending */}
             {isPending && (
               <button
                 onClick={onReplyToggle}
-                className="mt-1.5 text-[10px] text-blue-500 hover:text-blue-700 font-medium"
+                className="mt-1.5 text-xs text-interactive hover:text-interactive-hover font-medium"
               >
                 {isReplying ? 'Cancel' : 'Reply'}
               </button>
@@ -349,19 +349,19 @@ function MessageBubble({
 
       {/* Reply input */}
       {!collapsed && isPending && isReplying && (
-        <div className="flex gap-1.5 ml-4">
+        <div className="flex gap-2 ml-4">
           <input
             value={replyText}
             onChange={(e) => onReplyTextChange(e.target.value)}
             onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); onReplySubmit() } }}
             placeholder="Type your reply..."
-            className="flex-1 px-2 py-1 text-xs border border-gray-300 rounded focus:outline-none focus:border-blue-400 bg-white"
+            className="flex-1 px-2.5 py-1.5 text-sm border border-border-primary rounded-lg focus:outline-none focus:border-blue-400 bg-surface-primary"
             autoFocus
           />
           <button
             onClick={onReplySubmit}
             disabled={!replyText.trim()}
-            className="text-xs bg-blue-500 text-white px-2.5 py-1 rounded hover:bg-blue-600 disabled:opacity-50"
+            className="text-sm bg-interactive text-white px-2.5 py-1.5 rounded-lg hover:bg-interactive-hover disabled:opacity-50"
           >
             Send
           </button>
@@ -370,18 +370,18 @@ function MessageBubble({
 
       {/* Answer bubble */}
       {!collapsed && esc.answer && (
-        <div className="ml-8 rounded-lg p-2.5 max-w-[80%] bg-blue-50 border border-blue-100">
-          <div className="flex items-center gap-1.5 mb-1">
-            <span className="text-[10px] font-medium text-blue-700">
+        <div className="ml-8 rounded-lg p-3 max-w-[80%] bg-interactive-bg border border-interactive-bg shadow-sm">
+          <div className="flex items-center gap-2 mb-1">
+            <span className="text-xs font-medium text-interactive">
               {esc.toAgentId !== null ? getWorkerName(esc.toAgentId) : 'Reply'}
             </span>
             {esc.resolvedAt && (
-              <span className="text-[10px] text-gray-400 ml-auto">
+              <span className="text-xs text-text-muted ml-auto">
                 {formatRelativeTime(esc.resolvedAt)}
               </span>
             )}
           </div>
-          <div className="text-xs text-gray-800 whitespace-pre-wrap">{esc.answer}</div>
+          <div className="text-sm text-text-primary whitespace-pre-wrap">{esc.answer}</div>
         </div>
       )}
     </div>

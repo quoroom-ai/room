@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { useContainerWidth } from '../hooks/useContainerWidth'
+import { useTheme } from '../hooks/useTheme'
 import { api } from '../lib/client'
 import { API_BASE, clearToken, getToken } from '../lib/auth'
 import * as notif from '../lib/notifications'
@@ -42,6 +43,7 @@ export function SettingsPanel({ advancedMode, onAdvancedModeChange, installPromp
   const [claudePlan, setClaudePlan] = useState<'pro' | 'max' | 'api' | null>(null)
   const [queenModel, setQueenModel] = useState<string | null>(null)
   const [telemetryEnabled, setTelemetryEnabled] = useState<boolean | null>(null)
+  const { theme, setTheme } = useTheme()
 
   async function handleCheckForUpdates(): Promise<void> {
     setUpdateChecking(true)
@@ -130,27 +132,27 @@ export function SettingsPanel({ advancedMode, onAdvancedModeChange, installPromp
   ): React.JSX.Element {
     const loading = value === null
     return (
-      <div className="py-1">
-        <div className="flex items-center justify-between text-xs">
-          <span className="text-gray-600">{label}</span>
+      <div className="py-1.5">
+        <div className="flex items-center justify-between text-sm">
+          <span className="text-text-secondary">{label}</span>
           <button
             onClick={onChange}
             disabled={loading}
-            className={`w-8 h-4 rounded-full transition-colors relative ${
-              loading ? 'bg-gray-200' : value ? 'bg-green-500' : 'bg-gray-300'
+            className={`w-9 h-5 rounded-full transition-colors relative ${
+              loading ? 'bg-surface-tertiary' : value ? 'bg-interactive' : 'bg-text-muted'
             }`}
           >
             {!loading && (
               <span
-                className={`absolute top-0.5 w-3 h-3 bg-white rounded-full transition-transform ${
-                  value ? 'left-4' : 'left-0.5'
+                className={`absolute top-0.5 w-4 h-4 bg-white rounded-full transition-transform shadow-sm ${
+                  value ? 'left-4.5' : 'left-0.5'
                 }`}
               />
             )}
           </button>
         </div>
         {description && (
-          <p className="text-[10px] text-gray-400 mt-0.5 leading-tight">{description}</p>
+          <p className="text-xs text-text-muted mt-0.5 leading-tight">{description}</p>
         )}
       </div>
     )
@@ -158,56 +160,81 @@ export function SettingsPanel({ advancedMode, onAdvancedModeChange, installPromp
 
   function row(label: string, value: string | null): React.JSX.Element {
     return (
-      <div className="flex flex-col py-1.5">
-        <span className="text-xs font-medium text-gray-600">{label}</span>
-        <span className="text-xs text-gray-400 truncate selectable">{value ?? '\u2014'}</span>
+      <div className="flex flex-col py-2">
+        <span className="text-sm font-medium text-text-secondary">{label}</span>
+        <span className="text-xs text-text-muted truncate selectable">{value ?? '\u2014'}</span>
       </div>
     )
   }
 
+  const themeOptions: Array<{ value: 'light' | 'dark' | 'system'; label: string; icon: string }> = [
+    { value: 'light', label: 'Light', icon: '\u2600' },
+    { value: 'dark', label: 'Dark', icon: '\u263E' },
+    { value: 'system', label: 'Auto', icon: '\u2699' },
+  ]
+
   return (
-    <div ref={containerRef} className={`p-4 ${wide ? 'grid grid-cols-2 gap-4' : 'space-y-4'}`}>
+    <div ref={containerRef} className={`p-5 ${wide ? 'grid grid-cols-2 gap-5' : 'space-y-5'}`}>
       {/* Preferences */}
       <div>
-        <h3 className="text-xs font-semibold text-gray-700 mb-1">Preferences</h3>
-        <div className="bg-gray-50 rounded-lg p-2 space-y-1">
+        <h3 className="text-sm font-semibold text-text-primary mb-2">Preferences</h3>
+        <div className="bg-surface-secondary rounded-lg p-3 space-y-1 shadow-sm">
+          {/* Theme toggle */}
+          <div className="py-1.5">
+            <div className="flex items-center justify-between text-sm">
+              <span className="text-text-secondary">Theme</span>
+              <div className="flex rounded-lg overflow-hidden border border-border-primary">
+                {themeOptions.map((opt) => (
+                  <button
+                    key={opt.value}
+                    onClick={() => setTheme(opt.value)}
+                    className={`px-2.5 py-1 text-xs font-medium transition-colors ${
+                      theme === opt.value
+                        ? 'bg-interactive text-text-invert'
+                        : 'bg-surface-primary text-text-muted hover:bg-surface-tertiary'
+                    }`}
+                  >{opt.icon} {opt.label}</button>
+                ))}
+              </div>
+            </div>
+          </div>
           {toggle('Notifications', notifications, toggleNotifications, 'Notify when workers or queen send messages')}
           {notifDenied && (
-            <p className="text-[10px] text-red-400 mt-0.5 leading-tight">Permission denied by browser. Allow notifications in browser settings.</p>
+            <p className="text-xs text-status-error mt-0.5 leading-tight">Permission denied by browser. Allow notifications in browser settings.</p>
           )}
           {toggle('Advanced mode', advancedMode, toggleAdvancedMode, 'Show memory, watches, results tabs and extra controls')}
           {toggle('Telemetry', telemetryEnabled, toggleTelemetry, 'Send heartbeats to quoroom.ai (room appears in online counter and leaderboard)')}
-          <div className="py-1">
-            <div className="flex items-center justify-between text-xs">
-              <span className="text-gray-600">Claude plan</span>
-              <div className="flex rounded overflow-hidden border border-gray-200">
+          <div className="py-1.5">
+            <div className="flex items-center justify-between text-sm">
+              <span className="text-text-secondary">Claude plan</span>
+              <div className="flex rounded-lg overflow-hidden border border-border-primary">
                 <button
                   onClick={() => setClaudePlanSetting(null)}
-                  className={`px-2 py-0.5 text-[10px] font-medium transition-colors ${
+                  className={`px-2.5 py-1 text-xs font-medium transition-colors ${
                     claudePlan === null
-                      ? 'bg-gray-400 text-white'
-                      : 'bg-white text-gray-400 hover:bg-gray-50'
+                      ? 'bg-text-muted text-text-invert'
+                      : 'bg-surface-primary text-text-muted hover:bg-surface-tertiary'
                   }`}
-                >—</button>
+                >{'\u2014'}</button>
                 {(['pro', 'max', 'api'] as const).map((p) => (
                   <button
                     key={p}
                     onClick={() => setClaudePlanSetting(p)}
-                    className={`px-2 py-0.5 text-[10px] font-medium transition-colors ${
+                    className={`px-2.5 py-1 text-xs font-medium transition-colors ${
                       claudePlan === p
-                        ? 'bg-blue-500 text-white'
-                        : 'bg-white text-gray-500 hover:bg-gray-50'
+                        ? 'bg-interactive text-text-invert'
+                        : 'bg-surface-primary text-text-muted hover:bg-surface-tertiary'
                     }`}
                   >{p === 'api' ? 'API' : p.charAt(0).toUpperCase() + p.slice(1)}</button>
                 ))}
               </div>
             </div>
-            <p className="text-[10px] text-gray-400 mt-0.5 leading-tight">Optimizes queen cycle gap and max turns for your plan's token limits</p>
+            <p className="text-xs text-text-muted mt-0.5 leading-tight">Optimizes queen cycle gap and max turns for your plan's token limits</p>
           </div>
-          <div className="py-1">
-            <div className="flex items-center justify-between text-xs">
-              <span className="text-gray-600">Queen model</span>
-              <div className="flex rounded overflow-hidden border border-gray-200">
+          <div className="py-1.5">
+            <div className="flex items-center justify-between text-sm">
+              <span className="text-text-secondary">Queen model</span>
+              <div className="flex rounded-lg overflow-hidden border border-border-primary">
                 {([
                   ['claude', 'Claude'],
                   ['codex', 'Codex'],
@@ -217,45 +244,45 @@ export function SettingsPanel({ advancedMode, onAdvancedModeChange, installPromp
                   <button
                     key={id}
                     onClick={() => setQueenModelSetting(id)}
-                    className={`px-2 py-0.5 text-[10px] font-medium transition-colors ${
+                    className={`px-2.5 py-1 text-xs font-medium transition-colors ${
                       (queenModel ?? 'claude') === id
-                        ? 'bg-blue-500 text-white'
-                        : 'bg-white text-gray-500 hover:bg-gray-50'
+                        ? 'bg-interactive text-text-invert'
+                        : 'bg-surface-primary text-text-muted hover:bg-surface-tertiary'
                     }`}
                   >{label}</button>
                 ))}
               </div>
             </div>
-            <p className="text-[10px] text-gray-400 mt-0.5 leading-tight">Default queen provider for new rooms. API modes require key in room credentials or env.</p>
+            <p className="text-xs text-text-muted mt-0.5 leading-tight">Default queen provider for new rooms. API modes require key in room credentials or env.</p>
           </div>
         </div>
       </div>
 
       {/* Connection */}
       <div>
-        <h3 className="text-xs font-semibold text-gray-700 mb-1">Connection</h3>
-        <div className="bg-gray-50 rounded-lg p-2 space-y-1">
-          <div className="flex items-center justify-between text-xs">
-            <span className="text-gray-600">API Server</span>
+        <h3 className="text-sm font-semibold text-text-primary mb-2">Connection</h3>
+        <div className="bg-surface-secondary rounded-lg p-3 space-y-1.5 shadow-sm">
+          <div className="flex items-center justify-between text-sm">
+            <span className="text-text-secondary">API Server</span>
             <span className="flex items-center gap-1.5">
-              <span className={`w-1.5 h-1.5 rounded-full ${serverStatus ? 'bg-green-500' : 'bg-red-400'}`} />
-              <span className={serverStatus ? 'text-green-600' : 'text-red-500'}>
+              <span className={`w-2 h-2 rounded-full ${serverStatus ? 'bg-status-success' : 'bg-status-error'}`} />
+              <span className={serverStatus ? 'text-status-success' : 'text-status-error'}>
                 {serverStatus ? 'Connected' : 'Disconnected'}
               </span>
             </span>
           </div>
-          <div className="flex items-center justify-between text-xs">
-            <span className="text-gray-600">Server URL</span>
-            <span className="text-gray-400 font-mono text-[10px]">{API_BASE || location.origin}</span>
+          <div className="flex items-center justify-between text-sm">
+            <span className="text-text-secondary">Server URL</span>
+            <span className="text-text-muted font-mono text-xs">{API_BASE || location.origin}</span>
           </div>
           {API_BASE && API_BASE.includes('localhost') && (
-            <div className="flex items-center justify-between text-xs">
-              <span className="text-gray-600">Port</span>
+            <div className="flex items-center justify-between text-sm">
+              <span className="text-text-secondary">Port</span>
               <div className="flex items-center gap-1">
                 <input
                   type="number"
                   defaultValue={localStorage.getItem('quoroom_port') || '3700'}
-                  className="w-16 px-1.5 py-0.5 text-[10px] border border-gray-200 rounded text-center font-mono"
+                  className="w-16 px-2 py-1 text-xs border border-border-primary rounded text-center font-mono bg-surface-primary text-text-primary"
                   onKeyDown={(e) => {
                     if (e.key === 'Enter') {
                       localStorage.setItem('quoroom_port', (e.target as HTMLInputElement).value)
@@ -267,15 +294,15 @@ export function SettingsPanel({ advancedMode, onAdvancedModeChange, installPromp
               </div>
             </div>
           )}
-          <div className="flex items-center justify-between text-xs">
-            <span className="text-gray-600">Claude Code</span>
+          <div className="flex items-center justify-between text-sm">
+            <span className="text-text-secondary">Claude Code</span>
             <span className="flex items-center gap-1.5">
               {claudePlan && (
-                <span className="px-1 py-0.5 rounded text-[9px] font-medium bg-blue-100 text-blue-600 uppercase tracking-wide">
+                <span className="px-1.5 py-0.5 rounded text-xs font-medium bg-interactive-bg text-interactive uppercase tracking-wide">
                   {claudePlan}
                 </span>
               )}
-              <span className={serverStatus?.claude.available ? 'text-green-600' : 'text-gray-400'}>
+              <span className={serverStatus?.claude.available ? 'text-status-success' : 'text-text-muted'}>
                 {serverStatus === null
                   ? '...'
                   : serverStatus.claude.available
@@ -284,9 +311,9 @@ export function SettingsPanel({ advancedMode, onAdvancedModeChange, installPromp
               </span>
             </span>
           </div>
-          <div className="flex items-center justify-between text-xs">
-            <span className="text-gray-600">Codex</span>
-            <span className={serverStatus?.codex.available ? 'text-green-600' : 'text-gray-400'}>
+          <div className="flex items-center justify-between text-sm">
+            <span className="text-text-secondary">Codex</span>
+            <span className={serverStatus?.codex.available ? 'text-status-success' : 'text-text-muted'}>
               {serverStatus === null
                 ? '...'
                 : serverStatus.codex.available
@@ -294,9 +321,9 @@ export function SettingsPanel({ advancedMode, onAdvancedModeChange, installPromp
                   : 'Not found'}
             </span>
           </div>
-          <div className="flex items-center justify-between text-xs">
-            <span className="text-gray-600">Ollama</span>
-            <span className={serverStatus?.ollama?.available ? 'text-green-600' : 'text-gray-400'}>
+          <div className="flex items-center justify-between text-sm">
+            <span className="text-text-secondary">Ollama</span>
+            <span className={serverStatus?.ollama?.available ? 'text-status-success' : 'text-text-muted'}>
               {serverStatus === null
                 ? '...'
                 : serverStatus.ollama?.available
@@ -305,23 +332,23 @@ export function SettingsPanel({ advancedMode, onAdvancedModeChange, installPromp
             </span>
           </div>
           {serverStatus?.ollama?.available && serverStatus.ollama.models.length > 0 && (
-            <div className="text-[10px] text-gray-400 pl-2 leading-tight">
-              {serverStatus.ollama.models.map(m => m.name).join(' · ')}
+            <div className="text-xs text-text-muted pl-2 leading-tight">
+              {serverStatus.ollama.models.map(m => m.name).join(' \u00B7 ')}
             </div>
           )}
           {serverStatus?.resources && (
-            <div className="flex items-center justify-between text-xs">
-              <span className="text-gray-600">Load</span>
-              <span className={serverStatus.resources.memUsedPct > 85 || serverStatus.resources.loadAvg1m > serverStatus.resources.cpuCount * 0.8 ? 'text-amber-600' : 'text-gray-400'}>
+            <div className="flex items-center justify-between text-sm">
+              <span className="text-text-secondary">Load</span>
+              <span className={serverStatus.resources.memUsedPct > 85 || serverStatus.resources.loadAvg1m > serverStatus.resources.cpuCount * 0.8 ? 'text-status-warning' : 'text-text-muted'}>
                 CPU {Math.round(serverStatus.resources.loadAvg1m / serverStatus.resources.cpuCount * 100)}%
-                · RAM {serverStatus.resources.memUsedPct}%
+                {' \u00B7 '}RAM {serverStatus.resources.memUsedPct}%
               </span>
             </div>
           )}
           {serverStatus && (
-            <div className="flex items-center justify-between text-xs">
-              <span className="text-gray-600">Uptime</span>
-              <span className="text-gray-400">{formatUptime(serverStatus.uptime)}</span>
+            <div className="flex items-center justify-between text-sm">
+              <span className="text-text-secondary">Uptime</span>
+              <span className="text-text-muted">{formatUptime(serverStatus.uptime)}</span>
             </div>
           )}
         </div>
@@ -330,27 +357,27 @@ export function SettingsPanel({ advancedMode, onAdvancedModeChange, installPromp
 
       {/* App */}
       <div>
-        <h3 className="text-xs font-semibold text-gray-700 mb-1">App</h3>
-        <div className="bg-gray-50 rounded-lg p-2 space-y-1">
-          <div className="flex items-center justify-between text-xs">
-            <span className="text-gray-600">Installation</span>
+        <h3 className="text-sm font-semibold text-text-primary mb-2">App</h3>
+        <div className="bg-surface-secondary rounded-lg p-3 space-y-1.5 shadow-sm">
+          <div className="flex items-center justify-between text-sm">
+            <span className="text-text-secondary">Installation</span>
             {installPrompt.isInstalled ? (
               <span className="flex items-center gap-1.5">
-                <span className="w-1.5 h-1.5 rounded-full bg-green-500" />
-                <span className="text-green-600">Installed</span>
+                <span className="w-2 h-2 rounded-full bg-status-success" />
+                <span className="text-status-success">Installed</span>
               </span>
             ) : installPrompt.canInstall ? (
               <button
                 onClick={installPrompt.install}
-                className="text-xs px-2 py-0.5 bg-amber-500 text-white rounded hover:bg-amber-600 font-medium"
+                className="text-sm px-3 py-1 bg-interactive text-text-invert rounded-lg hover:bg-interactive-hover font-medium transition-colors"
               >
                 Install
               </button>
             ) : (
-              <button onClick={() => onNavigate?.('help')} className="text-blue-500 hover:text-blue-700">Help tab &rarr;</button>
+              <button onClick={() => onNavigate?.('help')} className="text-interactive hover:text-interactive-hover transition-colors">Help tab &rarr;</button>
             )}
           </div>
-          <p className="text-[10px] text-gray-400 leading-tight">
+          <p className="text-xs text-text-muted leading-tight">
             Standalone app with Dock/taskbar icon and badge notifications.
           </p>
         </div>
@@ -358,22 +385,22 @@ export function SettingsPanel({ advancedMode, onAdvancedModeChange, installPromp
 
       {/* Server */}
       <div>
-        <h3 className="text-xs font-semibold text-gray-700 mb-1">Server</h3>
-        <div className="bg-gray-50 rounded-lg p-2 divide-y divide-gray-100">
-          <div className="flex items-center justify-between text-xs py-1.5">
-            <span className="font-medium text-gray-600">Version</span>
+        <h3 className="text-sm font-semibold text-text-primary mb-2">Server</h3>
+        <div className="bg-surface-secondary rounded-lg p-3 divide-y divide-border-secondary shadow-sm">
+          <div className="flex items-center justify-between text-sm py-2">
+            <span className="font-medium text-text-secondary">Version</span>
             <div className="flex items-center gap-2">
-              <span className="text-gray-400">{serverStatus?.version ?? '...'}</span>
+              <span className="text-text-muted">{serverStatus?.version ?? '...'}</span>
               {(() => {
                 const ui = serverStatus?.updateInfo
                 const hasUpdate = ui && serverStatus && semverGt(ui.latestVersion, serverStatus.version)
                 if (hasUpdate) return null
-                if (updateChecking) return <span className="text-gray-400">Checking...</span>
-                if (updateChecked) return <span className="text-green-600">Up to date</span>
+                if (updateChecking) return <span className="text-text-muted">Checking...</span>
+                if (updateChecked) return <span className="text-status-success">Up to date</span>
                 return (
                   <button
                     onClick={() => void handleCheckForUpdates()}
-                    className="text-blue-500 hover:text-blue-700"
+                    className="text-interactive hover:text-interactive-hover transition-colors"
                   >
                     Check
                   </button>
@@ -386,8 +413,8 @@ export function SettingsPanel({ advancedMode, onAdvancedModeChange, installPromp
             if (!ui || !serverStatus) return null
             if (!semverGt(ui.latestVersion, serverStatus.version)) return null
             return (
-              <div className="flex items-center justify-between text-xs py-1.5">
-                <span className="font-medium text-green-600">v{ui.latestVersion} available</span>
+              <div className="flex items-center justify-between text-sm py-2">
+                <span className="font-medium text-status-success">v{ui.latestVersion} available</span>
                 <button
                   onClick={async () => {
                     const token = await getToken()
@@ -397,7 +424,7 @@ export function SettingsPanel({ advancedMode, onAdvancedModeChange, installPromp
                     a.click()
                     document.body.removeChild(a)
                   }}
-                  className="px-2 py-0.5 bg-green-500 text-white rounded hover:bg-green-600 transition-colors"
+                  className="px-3 py-1 bg-interactive text-white rounded-lg hover:bg-interactive-hover transition-colors"
                 >
                   Download
                 </button>
@@ -410,28 +437,28 @@ export function SettingsPanel({ advancedMode, onAdvancedModeChange, installPromp
       </div>
 
       {/* Actions */}
-      <div className={`${wide ? 'col-span-2 grid grid-cols-2 gap-2' : 'space-y-2'}`}>
+      <div className={`${wide ? 'col-span-2 grid grid-cols-2 gap-3' : 'space-y-3'}`}>
         <button
           onClick={() => window.open('https://github.com/quoroom-ai/room/issues/new')}
-          className="w-full py-1.5 text-xs text-blue-500 hover:text-blue-700 border border-blue-200 hover:border-blue-300 rounded transition-colors"
+          className="w-full py-2 text-sm text-interactive hover:text-interactive-hover border border-border-primary hover:border-interactive rounded-lg transition-colors"
         >
           Report Bug
         </button>
         <button
           onClick={() => window.open('mailto:hello@quoroom.ai')}
-          className="w-full py-1.5 text-xs text-blue-500 hover:text-blue-700 border border-blue-200 hover:border-blue-300 rounded transition-colors"
+          className="w-full py-2 text-sm text-interactive hover:text-interactive-hover border border-border-primary hover:border-interactive rounded-lg transition-colors"
         >
           Email Developer
         </button>
         <button
           onClick={() => window.open('https://github.com/quoroom-ai/room')}
-          className="w-full py-1.5 text-xs text-amber-700 hover:text-amber-800 border border-amber-300 hover:border-amber-400 rounded transition-colors"
+          className="w-full py-2 text-sm text-brand-600 hover:text-brand-700 border border-brand-200 hover:border-brand-400 rounded-lg transition-colors"
         >
           Star on GitHub
         </button>
         <button
           onClick={() => window.open('mailto:hello@quoroom.ai?subject=Subscribe&body=Subscribe me for Quoroom updates')}
-          className="w-full py-1.5 text-xs text-green-600 hover:text-green-700 border border-green-200 hover:border-green-300 rounded transition-colors"
+          className="w-full py-2 text-sm text-status-success hover:opacity-80 border border-border-primary hover:border-status-success rounded-lg transition-colors"
         >
           Subscribe for Updates
         </button>

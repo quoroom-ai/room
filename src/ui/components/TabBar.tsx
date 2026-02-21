@@ -29,14 +29,14 @@ interface TabBarProps {
 
 export function TabBar({ active, onChange }: TabBarProps): React.JSX.Element {
   const btnClass = (id: Tab) =>
-    `px-3 py-1.5 text-xs font-medium transition-colors text-left rounded ${
+    `px-3 py-2 text-sm font-medium transition-colors text-left rounded-lg ${
       active === id
-        ? 'bg-gray-200 text-gray-900'
-        : 'text-gray-500 hover:text-gray-700 hover:bg-gray-100'
+        ? 'bg-surface-tertiary text-text-primary'
+        : 'text-text-muted hover:text-text-secondary hover:bg-surface-hover'
     }`
 
   return (
-    <div className="flex flex-col gap-0.5 border-t border-gray-200 pt-1.5 mt-1.5">
+    <div className="flex flex-col gap-0.5 border-t border-border-primary pt-2 mt-2">
       {bottomTabs.map((tab) => (
         <button key={tab.id} onClick={() => onChange(tab.id)} className={btnClass(tab.id)}>
           {tab.label}

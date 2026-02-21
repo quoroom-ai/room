@@ -184,12 +184,12 @@ export function RoomSettingsPanel({ roomId }: RoomSettingsPanelProps): React.JSX
   }
 
   if (roomId === null) {
-    return <p className="p-4 text-xs text-gray-400">Select a room to view its settings.</p>
+    return <p className="p-4 text-sm text-text-muted">Select a room to view its settings.</p>
   }
 
   const rawRoom = rooms?.find(r => r.id === roomId)
   if (!rawRoom) {
-    return <p className="p-4 text-xs text-gray-400">Loading...</p>
+    return <p className="p-4 text-sm text-text-muted">Loading...</p>
   }
 
   const room = { ...rawRoom, ...roomOverrides[rawRoom.id] }
@@ -198,8 +198,8 @@ export function RoomSettingsPanel({ roomId }: RoomSettingsPanelProps): React.JSX
 
   function row(label: string, children: React.ReactNode): React.JSX.Element {
     return (
-      <div className="flex items-center justify-between text-xs py-1.5">
-        <span className="text-gray-600">{label}</span>
+      <div className="flex items-center justify-between text-sm py-2">
+        <span className="text-text-secondary">{label}</span>
         <div>{children}</div>
       </div>
     )
@@ -207,17 +207,17 @@ export function RoomSettingsPanel({ roomId }: RoomSettingsPanelProps): React.JSX
 
   function toggleRow(label: string, value: boolean, onChange: () => void, description?: string): React.JSX.Element {
     return (
-      <div className="py-1.5">
-        <div className="flex items-center justify-between text-xs">
-          <span className="text-gray-600">{label}</span>
+      <div className="py-2">
+        <div className="flex items-center justify-between text-sm">
+          <span className="text-text-secondary">{label}</span>
           <button
             onClick={onChange}
-            className={`w-8 h-4 rounded-full transition-colors relative ${value ? 'bg-green-500' : 'bg-gray-300'}`}
+            className={`w-9 h-5 rounded-full transition-colors relative ${value ? 'bg-interactive' : 'bg-surface-tertiary'}`}
           >
             <span className={`absolute top-0.5 w-3 h-3 bg-white rounded-full transition-transform ${value ? 'left-4' : 'left-0.5'}`} />
           </button>
         </div>
-        {description && <p className="text-[10px] text-gray-400 mt-0.5 leading-tight">{description}</p>}
+        {description && <p className="text-xs text-text-muted mt-0.5 leading-tight">{description}</p>}
       </div>
     )
   }
@@ -228,22 +228,22 @@ export function RoomSettingsPanel({ roomId }: RoomSettingsPanelProps): React.JSX
         <div className="space-y-4">
           {/* Queen */}
           <div>
-            <h3 className="text-xs font-semibold text-gray-700 mb-1">Queen</h3>
-            <div className="bg-gray-50 rounded-lg p-2 divide-y divide-gray-100">
+            <h3 className="text-sm font-semibold text-text-secondary mb-1">Queen</h3>
+            <div className="bg-surface-secondary shadow-sm rounded-lg p-3 divide-y divide-border-primary">
 
               {/* Autonomy mode */}
               {row('Control',
-                <div className="flex rounded overflow-hidden border border-gray-200">
+                <div className="flex rounded-lg overflow-hidden border border-border-primary">
                   <button
                     onClick={() => handleSetAutonomy(room, 'auto')}
-                    className={`px-3 py-1 text-xs font-medium transition-colors ${
-                      room.autonomyMode === 'auto' ? 'bg-amber-500 text-white' : 'bg-white text-gray-500 hover:bg-gray-100'
+                    className={`px-4 py-2 text-sm font-medium transition-colors ${
+                      room.autonomyMode === 'auto' ? 'bg-interactive text-white' : 'bg-surface-primary text-text-muted hover:bg-surface-hover'
                     }`}
                   >Auto</button>
                   <button
                     onClick={() => handleSetAutonomy(room, 'semi')}
-                    className={`px-3 py-1 text-xs font-medium transition-colors ${
-                      room.autonomyMode === 'semi' ? 'bg-blue-500 text-white' : 'bg-white text-gray-500 hover:bg-gray-100'
+                    className={`px-4 py-2 text-sm font-medium transition-colors ${
+                      room.autonomyMode === 'semi' ? 'bg-interactive text-white' : 'bg-surface-primary text-text-muted hover:bg-surface-hover'
                     }`}
                   >Semi</button>
                 </div>
@@ -254,7 +254,7 @@ export function RoomSettingsPanel({ roomId }: RoomSettingsPanelProps): React.JSX
                 <select
                   value={queenModel[room.id] ?? 'claude'}
                   onChange={(e) => handleSetQueenModel(room, e.target.value)}
-                  className="text-[10px] border border-gray-200 rounded px-1.5 py-0.5 bg-white text-gray-600"
+                  className="text-sm border border-border-primary rounded-lg px-2.5 py-1.5 bg-surface-primary text-text-secondary"
                 >
                   <option value="claude">Claude Code (subscription)</option>
                   <option value="claude-opus-4-6">Opus</option>
@@ -268,15 +268,15 @@ export function RoomSettingsPanel({ roomId }: RoomSettingsPanelProps): React.JSX
 
               {activeQueenAuth?.mode === 'api' && (
                 row('API key',
-                  <div className="flex items-center gap-1.5">
-                    <span className={`text-[10px] ${activeQueenAuth.ready ? 'text-green-600' : 'text-amber-600'}`}>
+                  <div className="flex items-center gap-2">
+                    <span className={`text-xs ${activeQueenAuth.ready ? 'text-status-success' : 'text-status-warning'}`}>
                       {activeQueenAuth.ready
                         ? activeQueenAuth.hasCredential ? 'Saved' : `Env (${activeQueenAuth.envVar ?? 'set'})`
                         : 'Missing'}
                     </span>
                     <button
                       onClick={() => handleSetQueenApiKey(room, activeQueenAuth)}
-                      className="text-[10px] px-1.5 py-0.5 rounded border border-gray-200 text-gray-600 hover:bg-gray-100"
+                      className="text-xs px-2.5 py-1.5 rounded-lg border border-border-primary text-text-secondary hover:bg-surface-hover"
                     >
                       {activeQueenAuth.hasCredential ? 'Update' : 'Set'}
                     </button>
@@ -290,13 +290,13 @@ export function RoomSettingsPanel({ roomId }: RoomSettingsPanelProps): React.JSX
                   <button
                     onClick={() => handleChangeMaxTasks(room, -1)}
                     disabled={room.maxConcurrentTasks <= 1}
-                    className="w-5 h-5 rounded bg-gray-200 hover:bg-gray-300 disabled:opacity-30 text-xs font-medium text-gray-600"
+                    className="w-5 h-5 rounded-lg bg-surface-tertiary hover:bg-surface-tertiary disabled:opacity-30 text-sm font-medium text-text-secondary"
                   >-</button>
-                  <span className="w-5 text-center text-xs tabular-nums">{room.maxConcurrentTasks}</span>
+                  <span className="w-5 text-center text-sm tabular-nums">{room.maxConcurrentTasks}</span>
                   <button
                     onClick={() => handleChangeMaxTasks(room, 1)}
                     disabled={room.maxConcurrentTasks >= 10}
-                    className="w-5 h-5 rounded bg-gray-200 hover:bg-gray-300 disabled:opacity-30 text-xs font-medium text-gray-600"
+                    className="w-5 h-5 rounded-lg bg-surface-tertiary hover:bg-surface-tertiary disabled:opacity-30 text-sm font-medium text-text-secondary"
                   >+</button>
                 </div>
               )}
@@ -306,7 +306,7 @@ export function RoomSettingsPanel({ roomId }: RoomSettingsPanelProps): React.JSX
                 <select
                   value={room.queenCycleGapMs}
                   onChange={(e) => handleSetCycleGap(room, Number(e.target.value))}
-                  className="text-[10px] border border-gray-200 rounded px-1.5 py-0.5 bg-white text-gray-600"
+                  className="text-sm border border-border-primary rounded-lg px-2.5 py-1.5 bg-surface-primary text-text-secondary"
                 >
                   <option value={10000}>10s</option>
                   <option value={30000}>30s</option>
@@ -325,19 +325,19 @@ export function RoomSettingsPanel({ roomId }: RoomSettingsPanelProps): React.JSX
                   <button
                     onClick={() => handleSetMaxTurns(room, -1)}
                     disabled={room.queenMaxTurns <= 1}
-                    className="w-5 h-5 rounded bg-gray-200 hover:bg-gray-300 disabled:opacity-30 text-xs font-medium text-gray-600"
+                    className="w-5 h-5 rounded-lg bg-surface-tertiary hover:bg-surface-tertiary disabled:opacity-30 text-sm font-medium text-text-secondary"
                   >-</button>
-                  <span className="w-5 text-center text-xs tabular-nums">{room.queenMaxTurns}</span>
+                  <span className="w-5 text-center text-sm tabular-nums">{room.queenMaxTurns}</span>
                   <button
                     onClick={() => handleSetMaxTurns(room, 1)}
                     disabled={room.queenMaxTurns >= 50}
-                    className="w-5 h-5 rounded bg-gray-200 hover:bg-gray-300 disabled:opacity-30 text-xs font-medium text-gray-600"
+                    className="w-5 h-5 rounded-lg bg-surface-tertiary hover:bg-surface-tertiary disabled:opacity-30 text-sm font-medium text-text-secondary"
                   >+</button>
                 </div>
               )}
 
               {/* Quiet hours */}
-              <div className="py-1.5 space-y-1">
+              <div className="py-2 space-y-2">
                 {toggleRow('Quiet hours', quietEnabled, () => handleToggleQuietHours(room), 'Pause the queen during off-hours')}
                 {quietEnabled && (
                   <div className="flex items-center gap-2 pl-0">
@@ -345,31 +345,31 @@ export function RoomSettingsPanel({ roomId }: RoomSettingsPanelProps): React.JSX
                       type="time"
                       value={room.queenQuietFrom ?? '22:00'}
                       onChange={(e) => handleSetQuietHours(room, e.target.value, room.queenQuietUntil ?? '08:00')}
-                      className="text-[10px] border border-gray-200 rounded px-1.5 py-0.5 bg-white text-gray-600"
+                      className="text-sm border border-border-primary rounded-lg px-2.5 py-1.5 bg-surface-primary text-text-secondary"
                     />
-                    <span className="text-gray-400 text-xs">–</span>
+                    <span className="text-text-muted text-sm">–</span>
                     <input
                       type="time"
                       value={room.queenQuietUntil ?? '08:00'}
                       onChange={(e) => handleSetQuietHours(room, room.queenQuietFrom ?? '22:00', e.target.value)}
-                      className="text-[10px] border border-gray-200 rounded px-1.5 py-0.5 bg-white text-gray-600"
+                      className="text-sm border border-border-primary rounded-lg px-2.5 py-1.5 bg-surface-primary text-text-secondary"
                     />
                   </div>
                 )}
               </div>
 
               {/* Queen start/stop */}
-              <div className="pt-1.5 flex gap-1.5">
+              <div className="pt-2 flex gap-2">
                 {room.status === 'active' && (
                   queenRunning[room.id] ? (
                     <button
                       onClick={() => handleQueenStop(room.id)}
-                      className="text-xs px-2 py-1 rounded border text-orange-600 border-orange-200 hover:border-orange-300 transition-colors"
+                      className="text-sm px-2.5 py-1.5 rounded-lg border text-orange-600 border-orange-200 hover:border-orange-300 transition-colors"
                     >Stop Queen</button>
                   ) : (
                     <button
                       onClick={() => handleQueenStart(room.id)}
-                      className="text-xs px-2 py-1 rounded border text-green-600 border-green-200 hover:border-green-300 transition-colors"
+                      className="text-sm px-2.5 py-1.5 rounded-lg border text-status-success border-green-200 hover:border-green-300 transition-colors"
                     >Start Queen</button>
                   )
                 )}
@@ -381,37 +381,37 @@ export function RoomSettingsPanel({ roomId }: RoomSettingsPanelProps): React.JSX
         <div className="space-y-4">
           {/* Wallet */}
           <div>
-            <h3 className="text-xs font-semibold text-gray-700 mb-1">Wallet</h3>
-            <div className="bg-gray-50 rounded-lg p-2">
+            <h3 className="text-sm font-semibold text-text-secondary mb-1">Wallet</h3>
+            <div className="bg-surface-secondary shadow-sm rounded-lg p-3">
               {!wallet ? (
-                <p className="text-[11px] text-gray-400 py-1">Wallet not found for this room.</p>
+                <p className="text-sm text-text-muted py-1">Wallet not found for this room.</p>
               ) : (
-                <div className="space-y-1.5">
-                  {row('Chain', <span className="text-[11px] text-gray-500">{wallet.chain}</span>)}
+                <div className="space-y-2">
+                  {row('Chain', <span className="text-sm text-text-muted">{wallet.chain}</span>)}
                   <div className="py-1">
-                    <p className="text-xs text-gray-600 mb-1">Address</p>
-                    <div className="flex items-center gap-1.5">
-                      <code className="text-[10px] text-gray-500 bg-white border border-gray-200 rounded px-1.5 py-1 truncate flex-1" title={wallet.address}>
+                    <p className="text-sm text-text-secondary mb-1">Address</p>
+                    <div className="flex items-center gap-2">
+                      <code className="text-xs text-text-muted bg-surface-primary border border-border-primary rounded-lg px-2 py-1 truncate flex-1" title={wallet.address}>
                         {wallet.address}
                       </code>
                       <button
                         onClick={() => copyWalletAddress(wallet.address)}
-                        className="text-[10px] px-2 py-1 rounded border border-gray-200 text-gray-600 hover:bg-gray-100 transition-colors"
+                        className="text-xs px-2.5 py-1.5 rounded-lg border border-border-primary text-text-secondary hover:bg-surface-hover transition-colors"
                       >
                         Copy
                       </button>
                     </div>
                     {copyState === 'ok' && (
-                      <p className="text-[10px] text-green-600 mt-1">Copied.</p>
+                      <p className="text-xs text-status-success mt-1">Copied.</p>
                     )}
                     {copyState === 'error' && (
-                      <p className="text-[10px] text-red-500 mt-1">Copy failed.</p>
+                      <p className="text-xs text-status-error mt-1">Copy failed.</p>
                     )}
                     {revenueSummary && (
-                      <div className="flex gap-3 text-xs mt-1">
-                        <span className="text-green-600">+${revenueSummary.totalIncome.toFixed(2)}</span>
-                        <span className="text-red-500">-${revenueSummary.totalExpenses.toFixed(2)}</span>
-                        <span className={revenueSummary.netProfit >= 0 ? 'text-blue-600' : 'text-amber-600'}>
+                      <div className="flex gap-3 text-sm mt-1">
+                        <span className="text-status-success">+${revenueSummary.totalIncome.toFixed(2)}</span>
+                        <span className="text-status-error">-${revenueSummary.totalExpenses.toFixed(2)}</span>
+                        <span className={revenueSummary.netProfit >= 0 ? 'text-interactive' : 'text-status-warning'}>
                           net ${revenueSummary.netProfit.toFixed(2)}
                         </span>
                       </div>
@@ -424,26 +424,26 @@ export function RoomSettingsPanel({ roomId }: RoomSettingsPanelProps): React.JSX
 
           {/* Workers */}
           <div>
-            <h3 className="text-xs font-semibold text-gray-700 mb-1">Workers</h3>
-            <div className="bg-gray-50 rounded-lg p-2 space-y-1">
+            <h3 className="text-sm font-semibold text-text-secondary mb-1">Workers</h3>
+            <div className="bg-surface-secondary shadow-sm rounded-lg p-3 space-y-2">
               {row('Model',
-                <div className="flex rounded overflow-hidden border border-gray-200">
+                <div className="flex rounded-lg overflow-hidden border border-border-primary">
                   <button
                     onClick={() => handleSetWorkerModel(room, false)}
-                    className={`px-3 py-1 text-xs font-medium transition-colors ${
-                      !(room.workerModel ?? 'claude').startsWith('ollama:') ? 'bg-blue-500 text-white' : 'bg-white text-gray-500 hover:bg-gray-100'
+                    className={`px-4 py-2 text-sm font-medium transition-colors ${
+                      !(room.workerModel ?? 'claude').startsWith('ollama:') ? 'bg-interactive text-white' : 'bg-surface-primary text-text-muted hover:bg-surface-hover'
                     }`}
                   >Claude</button>
                   <button
                     onClick={() => handleSetWorkerModel(room, true)}
-                    className={`px-3 py-1 text-xs font-medium transition-colors ${
-                      (room.workerModel ?? 'claude').startsWith('ollama:') ? 'bg-green-500 text-white' : 'bg-white text-gray-500 hover:bg-gray-100'
+                    className={`px-4 py-2 text-sm font-medium transition-colors ${
+                      (room.workerModel ?? 'claude').startsWith('ollama:') ? 'bg-interactive text-white' : 'bg-surface-primary text-text-muted hover:bg-surface-hover'
                     }`}
                   >Ollama</button>
                 </div>
               )}
               {(room.workerModel ?? 'claude').startsWith('ollama:') && (
-                <p className="text-[10px] text-green-600 leading-tight pl-0">
+                <p className="text-xs text-status-success leading-tight pl-0">
                   Free local LLM — model: {room.workerModel.replace('ollama:', '')}. Requires Ollama running locally.
                 </p>
               )}
@@ -452,17 +452,17 @@ export function RoomSettingsPanel({ roomId }: RoomSettingsPanelProps): React.JSX
 
           {/* Visibility */}
           <div>
-            <h3 className="text-xs font-semibold text-gray-700 mb-1">Visibility</h3>
-            <div className="bg-gray-50 rounded-lg p-2">
-              <div className="flex items-center justify-between text-xs py-1">
+            <h3 className="text-sm font-semibold text-text-secondary mb-1">Visibility</h3>
+            <div className="bg-surface-secondary shadow-sm rounded-lg p-3">
+              <div className="flex items-center justify-between text-sm py-1">
                 <div>
-                  <span className="text-gray-600">Public room</span>
-                  <p className="text-[10px] text-gray-400 mt-0.5 leading-tight">Visible on the public leaderboard at quoroom.ai</p>
+                  <span className="text-text-secondary">Public room</span>
+                  <p className="text-xs text-text-muted mt-0.5 leading-tight">Visible on the public leaderboard at quoroom.ai</p>
                 </div>
                 <button
                   onClick={() => handleToggleVisibility(room)}
                   className={`w-8 h-4 rounded-full transition-colors relative ml-3 flex-shrink-0 ${
-                    room.visibility === 'public' ? 'bg-green-500' : 'bg-gray-300'
+                    room.visibility === 'public' ? 'bg-interactive' : 'bg-surface-tertiary'
                   }`}
                 >
                   <span className={`absolute top-0.5 w-3 h-3 bg-white rounded-full transition-transform ${

@@ -74,20 +74,20 @@ export function WatchesPanel({ roomId, autonomyMode }: WatchesPanelProps): React
   }
 
   if (isLoading && !watches) {
-    return <div className="p-4 text-xs text-gray-400">Loading...</div>
+    return <div className="p-4 text-sm text-text-muted">Loading...</div>
   }
   if (!watches) {
-    return <div className="p-4 text-xs text-red-500">{error ?? 'Failed to load watches.'}</div>
+    return <div className="p-4 text-sm text-status-error">{error ?? 'Failed to load watches.'}</div>
   }
 
   return (
     <div className="flex flex-col h-full">
-      <div className="px-3 py-1.5 border-b border-gray-200 flex items-center justify-between">
-        <span className="text-xs text-gray-500">{watches.length} watch(es)</span>
+      <div className="px-4 py-2 border-b border-border-primary flex items-center justify-between">
+        <span className="text-sm text-text-muted">{watches.length} watch(es)</span>
         {semi && (
           <button
             onClick={() => setShowCreateForm(!showCreateForm)}
-            className="text-xs text-blue-500 hover:text-blue-700 font-medium"
+            className="text-sm text-interactive hover:text-interactive-hover font-medium"
           >
             {showCreateForm ? 'Cancel' : '+ New Watch'}
           </button>
@@ -95,35 +95,35 @@ export function WatchesPanel({ roomId, autonomyMode }: WatchesPanelProps): React
       </div>
 
       {semi && showCreateForm && (
-        <div className="p-3 border-b-2 border-blue-300 bg-blue-50/50 space-y-2">
+        <div className="p-4 border-b-2 border-blue-300 bg-interactive-bg/50 space-y-2">
           <input
             type="text"
             value={path}
             onChange={(e) => { setPath(e.target.value); setCreateError(null) }}
             placeholder="Absolute path (e.g. /Users/me/Downloads)"
-            className="w-full px-2.5 py-1.5 text-xs border border-gray-300 rounded focus:outline-none focus:border-gray-500 bg-white"
+            className="w-full px-2.5 py-1.5 text-sm border border-border-primary rounded-lg focus:outline-none focus:border-gray-500 bg-surface-primary"
           />
           <input
             type="text"
             value={description}
             onChange={(e) => setDescription(e.target.value)}
             placeholder="Description (optional)"
-            className="w-full px-2.5 py-1.5 text-xs border border-gray-300 rounded focus:outline-none focus:border-gray-500 bg-white"
+            className="w-full px-2.5 py-1.5 text-sm border border-border-primary rounded-lg focus:outline-none focus:border-gray-500 bg-surface-primary"
           />
           <textarea
             value={actionPrompt}
             onChange={(e) => setActionPrompt(e.target.value)}
             rows={3}
             placeholder="Action prompt (optional)"
-            className="w-full px-2.5 py-1.5 text-xs border border-gray-300 rounded focus:outline-none focus:border-gray-500 bg-white resize-y"
+            className="w-full px-2.5 py-1.5 text-sm border border-border-primary rounded-lg focus:outline-none focus:border-gray-500 bg-surface-primary resize-y"
           />
           <div className="flex items-center justify-between">
-            {createError && <span className="text-xs text-red-500 truncate">{createError}</span>}
+            {createError && <span className="text-sm text-status-error truncate">{createError}</span>}
             <div className="flex-1" />
             <button
               onClick={createWatch}
               disabled={!path.trim()}
-              className="text-xs bg-blue-500 text-white px-3 py-1 rounded hover:bg-blue-600 disabled:opacity-50 disabled:cursor-not-allowed"
+              className="text-sm bg-interactive text-white px-4 py-2 rounded-lg hover:bg-interactive-hover disabled:opacity-50 disabled:cursor-not-allowed"
             >
               Add Watch
             </button>
@@ -132,45 +132,45 @@ export function WatchesPanel({ roomId, autonomyMode }: WatchesPanelProps): React
       )}
 
       {error && (
-        <div className="px-3 py-2 text-xs text-yellow-700 bg-yellow-50">
+        <div className="px-4 py-2 text-sm text-status-warning bg-status-warning-bg">
           Temporary refresh issue: {error}
         </div>
       )}
 
-      <div className="flex-1 overflow-y-auto divide-y divide-gray-100">
+      <div className="flex-1 overflow-y-auto divide-y divide-border-primary">
         {watches.length === 0 && (
-          <div className="p-4 text-center text-xs text-gray-400">
+          <div className="p-4 text-center text-sm text-text-muted">
             {semi ? 'No watches yet.' : 'No watches yet. Watches are created by agents.'}
           </div>
         )}
         {watches.map((watch: Watch) => (
-          <div key={watch.id} className={`px-3 py-2 ${watch.status === 'paused' ? 'opacity-60' : ''}`}>
+          <div key={watch.id} className={`px-4 py-2 ${watch.status === 'paused' ? 'opacity-60' : ''}`}>
             <div className={semi ? 'flex items-center justify-between gap-2' : ''}>
               <div className={`min-w-0${semi ? ' flex-1' : ''}`}>
-                <div className="text-xs font-medium text-gray-800 truncate">
+                <div className="text-sm font-medium text-text-primary truncate">
                   {watch.path}
                   {watch.status === 'paused' && (
-                    <span className="ml-1.5 text-[10px] font-medium text-yellow-700 bg-yellow-100 px-1 py-0.5 rounded">Paused</span>
+                    <span className="ml-1.5 text-xs font-medium text-status-warning bg-status-warning-bg px-1 py-0.5 rounded">Paused</span>
                   )}
                 </div>
-                <div className="text-xs text-gray-400">{watch.description ?? 'No description'}</div>
+                <div className="text-sm text-text-muted">{watch.description ?? 'No description'}</div>
               </div>
               {semi && (
                 <div className="flex items-center gap-2 shrink-0">
-                  <button onClick={() => togglePause(watch)} className="text-xs text-yellow-600 hover:text-yellow-800">
+                  <button onClick={() => togglePause(watch)} className="text-sm text-status-warning hover:text-yellow-800">
                     {watch.status === 'paused' ? 'Resume' : 'Pause'}
                   </button>
                   <button
                     onClick={() => deleteWatch(watch.id)}
                     onBlur={() => setConfirmDeleteId(null)}
-                    className={`text-xs ${confirmDeleteId === watch.id ? 'text-red-600 font-medium' : 'text-red-400 hover:text-red-600'}`}
+                    className={`text-sm ${confirmDeleteId === watch.id ? 'text-red-600 font-medium' : 'text-status-error hover:text-red-600'}`}
                   >
                     {confirmDeleteId === watch.id ? 'Confirm?' : 'Delete'}
                   </button>
                 </div>
               )}
             </div>
-            <div className="mt-1 text-xs text-gray-400">
+            <div className="mt-1 text-sm text-text-muted">
               Triggered {watch.triggerCount} time(s)
               {watch.lastTriggered && <span> &middot; last {formatRelativeTime(watch.lastTriggered)}</span>}
             </div>

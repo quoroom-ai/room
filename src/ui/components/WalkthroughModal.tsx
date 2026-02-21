@@ -49,51 +49,47 @@ export function WalkthroughModal({ onClose }: WalkthroughModalProps): React.JSX.
       className="fixed inset-0 z-50 flex items-center justify-center bg-black/50"
       onClick={(e) => { if (e.target === e.currentTarget) onClose() }}
     >
-      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md mx-4 p-8 relative">
-        {/* Close */}
+      <div className="bg-surface-primary rounded-2xl shadow-2xl w-full max-w-md mx-4 p-8 relative">
         <button
           onClick={onClose}
-          className="absolute top-4 right-4 text-gray-300 hover:text-gray-500 text-lg leading-none transition-colors"
+          className="absolute top-4 right-4 text-text-muted hover:text-text-secondary text-lg leading-none transition-colors"
           aria-label="Close"
         >
-          ✕
+          {'\u2715'}
         </button>
 
-        {/* Dots */}
         <div className="flex gap-1.5 mb-6">
           {steps.map((_, i) => (
             <button
               key={i}
               onClick={() => setStep(i)}
-              className={`w-2 h-2 rounded-full transition-colors ${
-                i === step ? 'bg-amber-500' : 'bg-gray-200 hover:bg-gray-300'
+              className={`w-2.5 h-2.5 rounded-full transition-colors ${
+                i === step ? 'bg-interactive' : 'bg-surface-tertiary hover:bg-border-primary'
               }`}
               aria-label={`Step ${i + 1}`}
             />
           ))}
         </div>
 
-        {/* Content */}
-        <h2 className="text-2xl font-bold text-gray-900 mb-3 leading-tight">
+        <h2 className="text-2xl font-bold text-text-primary mb-3 leading-tight">
           {steps[step].title}
         </h2>
-        <p className="text-gray-500 text-base leading-relaxed mb-8">
+        <p className="text-text-muted text-base leading-relaxed mb-8">
           {steps[step].body}
         </p>
 
-        {/* Footer */}
         <div className="flex justify-end gap-2">
           {step > 0 && (
             <button
               onClick={() => setStep(step - 1)}
-              className="px-4 py-2 text-sm text-gray-500 hover:text-gray-700 border border-gray-200 rounded-lg transition-colors"
+              className="px-4 py-2 text-sm text-text-muted hover:text-text-secondary border border-border-primary rounded-lg transition-colors"
             >
               Back
             </button>
           )}
           <button
             onClick={handleNext}
-            className="px-5 py-2 text-sm font-medium text-white bg-amber-500 hover:bg-amber-600 rounded-lg transition-colors"
+            className="px-5 py-2 text-sm font-medium text-text-invert bg-interactive hover:bg-interactive-hover rounded-lg transition-colors"
           >
             {isLast ? 'Got it' : 'Next'}
           </button>

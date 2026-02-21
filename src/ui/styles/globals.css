@@ -1,7 +1,167 @@
 @import "tailwindcss";
 
+/* ─── Quoroom Theme: Gold/Amber brand derived from logo ─── */
+
+@theme {
+  /* Brand palette (gold/amber) */
+  --color-brand-50: var(--brand-50);
+  --color-brand-100: var(--brand-100);
+  --color-brand-200: var(--brand-200);
+  --color-brand-300: var(--brand-300);
+  --color-brand-400: var(--brand-400);
+  --color-brand-500: var(--brand-500);
+  --color-brand-600: var(--brand-600);
+  --color-brand-700: var(--brand-700);
+  --color-brand-800: var(--brand-800);
+  --color-brand-900: var(--brand-900);
+
+  /* Surfaces */
+  --color-surface-primary: var(--surface-primary);
+  --color-surface-secondary: var(--surface-secondary);
+  --color-surface-tertiary: var(--surface-tertiary);
+  --color-surface-invert: var(--surface-invert);
+  --color-surface-hover: var(--surface-hover);
+
+  /* Text */
+  --color-text-primary: var(--text-primary);
+  --color-text-secondary: var(--text-secondary);
+  --color-text-muted: var(--text-muted);
+  --color-text-invert: var(--text-invert);
+
+  /* Borders */
+  --color-border-primary: var(--border-primary);
+  --color-border-secondary: var(--border-secondary);
+
+  /* Interactive (gold-based actions) */
+  --color-interactive: var(--interactive);
+  --color-interactive-hover: var(--interactive-hover);
+  --color-interactive-bg: var(--interactive-bg);
+
+  /* Status */
+  --color-status-success: var(--status-success);
+  --color-status-success-bg: var(--status-success-bg);
+  --color-status-warning: var(--status-warning);
+  --color-status-warning-bg: var(--status-warning-bg);
+  --color-status-error: var(--status-error);
+  --color-status-error-bg: var(--status-error-bg);
+  --color-status-info: var(--status-info);
+  --color-status-info-bg: var(--status-info-bg);
+
+  /* Console (stays dark in both modes) */
+  --color-console-bg: var(--console-bg);
+  --color-console-text: var(--console-text);
+  --color-console-muted: var(--console-muted);
+}
+
+/* ─── Light Mode ─── */
+:root {
+  /* Brand (gold/amber) */
+  --brand-50: #FDF8EF;
+  --brand-100: #FBF0D9;
+  --brand-200: #F5DBA8;
+  --brand-300: #EFC477;
+  --brand-400: #E8A840;
+  --brand-500: #D4A040;
+  --brand-600: #B8862E;
+  --brand-700: #8F6723;
+  --brand-800: #6B4D1A;
+  --brand-900: #3D2C0F;
+
+  /* Surfaces */
+  --surface-primary: #FFFFFF;
+  --surface-secondary: #F9FAFB;
+  --surface-tertiary: #F3F4F6;
+  --surface-invert: #111827;
+  --surface-hover: #F3F4F6;
+
+  /* Text */
+  --text-primary: #111827;
+  --text-secondary: #4B5563;
+  --text-muted: #9CA3AF;
+  --text-invert: #FFFFFF;
+
+  /* Borders */
+  --border-primary: #E5E7EB;
+  --border-secondary: #F3F4F6;
+
+  /* Interactive (gold) */
+  --interactive: #D4A040;
+  --interactive-hover: #B8862E;
+  --interactive-bg: #FDF8EF;
+
+  /* Status */
+  --status-success: #16A34A;
+  --status-success-bg: #DCFCE7;
+  --status-warning: #D97706;
+  --status-warning-bg: #FEF3C7;
+  --status-error: #DC2626;
+  --status-error-bg: #FEE2E2;
+  --status-info: #2563EB;
+  --status-info-bg: #DBEAFE;
+
+  /* Console */
+  --console-bg: #111827;
+  --console-text: #E5E7EB;
+  --console-muted: #6B7280;
+}
+
+/* ─── Dark Mode ─── */
+.dark {
+  /* Brand (gold glows brighter on dark) */
+  --brand-50: #2A2520;
+  --brand-100: #3D3226;
+  --brand-200: #56432E;
+  --brand-300: #7A5D35;
+  --brand-400: #B8862E;
+  --brand-500: #D4A040;
+  --brand-600: #E8A840;
+  --brand-700: #EFC477;
+  --brand-800: #F5DBA8;
+  --brand-900: #FBF0D9;
+
+  /* Surfaces */
+  --surface-primary: #0F1117;
+  --surface-secondary: #1A1B2E;
+  --surface-tertiary: #252640;
+  --surface-invert: #FFFFFF;
+  --surface-hover: #252640;
+
+  /* Text */
+  --text-primary: #F3F4F6;
+  --text-secondary: #9CA3AF;
+  --text-muted: #6B7280;
+  --text-invert: #111827;
+
+  /* Borders */
+  --border-primary: #2D2E42;
+  --border-secondary: #1F2037;
+
+  /* Interactive (gold, brighter for dark bg) */
+  --interactive: #E8A840;
+  --interactive-hover: #EFC477;
+  --interactive-bg: #2A2520;
+
+  /* Status (adjusted for dark backgrounds) */
+  --status-success: #4ADE80;
+  --status-success-bg: #14532D;
+  --status-warning: #FBBF24;
+  --status-warning-bg: #451A03;
+  --status-error: #F87171;
+  --status-error-bg: #450A0A;
+  --status-info: #60A5FA;
+  --status-info-bg: #172554;
+
+  /* Console */
+  --console-bg: #0C0D14;
+  --console-text: #E5E7EB;
+  --console-muted: #6B7280;
+}
+
+/* ─── Base ─── */
 body {
   overflow: hidden;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
 }
 
 .selectable {
@@ -9,6 +169,7 @@ body {
   user-select: text;
 }
 
+/* ─── Scrollbar ─── */
 ::-webkit-scrollbar {
   width: 6px;
 }
@@ -22,6 +183,11 @@ body {
   border-radius: 3px;
 }
 
+.dark ::-webkit-scrollbar-thumb {
+  background-color: rgba(255, 255, 255, 0.15);
+}
+
+/* ─── Animations ─── */
 @keyframes hex-pulse {
   0%, 100% { opacity: 1; }
   50% { opacity: 0.7; }

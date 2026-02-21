@@ -82,52 +82,204 @@ function fmtMoney(n: number): string {
 // ─── Status → color maps ───────────────────────────────────
 
 function roomColors(room: Room, running: boolean): { fill: string; stroke: string } {
-  if (running) return { fill: '#dcfce7', stroke: '#22c55e' }
-  if (room.status === 'paused') return { fill: '#fef3c7', stroke: '#f59e0b' }
-  if (room.status === 'stopped') return { fill: '#f3f4f6', stroke: '#d1d5db' }
-  return { fill: '#f3f4f6', stroke: '#9ca3af' }
+  if (running) return { fill: 'var(--status-success-bg)', stroke: 'var(--status-success)' }
+  if (room.status === 'paused') return { fill: 'var(--status-warning-bg)', stroke: 'var(--status-warning)' }
+  if (room.status === 'stopped') return { fill: 'var(--surface-tertiary)', stroke: 'var(--border-primary)' }
+  return { fill: 'var(--surface-tertiary)', stroke: 'var(--border-secondary)' }
 }
 
 function workerColor(state: string): string {
   switch (state) {
-    case 'thinking': return '#bfdbfe'
-    case 'acting': return '#bbf7d0'
-    case 'voting': return '#fde68a'
-    case 'rate_limited': return '#fed7aa'
-    case 'blocked': return '#fecaca'
-    default: return '#e5e7eb'
+    case 'thinking': return 'var(--status-info-bg)'
+    case 'acting': return 'var(--status-success-bg)'
+    case 'voting': return 'var(--status-warning-bg)'
+    case 'rate_limited': return 'var(--brand-100)'
+    case 'blocked': return 'var(--status-error-bg)'
+    default: return 'var(--surface-tertiary)'
   }
 }
 
 function stationColor(status: string): string {
   switch (status) {
-    case 'active': return '#bbf7d0'
-    case 'pending': return '#fde68a'
-    case 'error': return '#fecaca'
-    default: return '#e5e7eb'
+    case 'active': return 'var(--status-success-bg)'
+    case 'pending': return 'var(--status-warning-bg)'
+    case 'error': return 'var(--status-error-bg)'
+    default: return 'var(--surface-tertiary)'
   }
 }
 
 // ─── Share as image ────────────────────────────────────────
+
+const VAR_RE = /var\(--([^)]+)\)/g
+
+/** Resolve all CSS var(--...) references to computed hex values */
+function resolveVars(svgClone: SVGSVGElement): void {
+  const style = getComputedStyle(document.documentElement)
+  const cache: Record<string, string> = {}
+  function resolve(val: string): string {
+    return val.replace(VAR_RE, (_, name) => {
+      if (!cache[name]) cache[name] = style.getPropertyValue(`--${name}`).trim() || val
+      return cache[name]
+    })
+  }
+  const COLOR_ATTRS = ['fill', 'stroke', 'color', 'stop-color', 'flood-color']
+  svgClone.querySelectorAll('*').forEach(el => {
+    for (const attr of COLOR_ATTRS) {
+      const v = el.getAttribute(attr)
+      if (v && v.includes('var(')) el.setAttribute(attr, resolve(v))
+    }
+  })
+}
+
+/** QUOROOM wordmark: Q,O,O,O are hexagons; U,R,M are geometric strokes */
+function addBrandFooter(svgClone: SVGSVGElement): void {
+  const w = Number(svgClone.getAttribute('width') || 400)
+  const h = Number(svgClone.getAttribute('height') || 400)
+  const footerH = 70
+  svgClone.setAttribute('height', String(h + footerH))
+
+  const NS = 'http://www.w3.org/2000/svg'
+  const g = document.createElementNS(NS, 'g')
+  const COLOR = '#f59542'
+  const muted = '#6B7280'
+  const FONT = "'Segoe UI', -apple-system, system-ui, sans-serif"
+
+  // Matched to landing: font-size drives cap height → hex radius
+  const fs = 28
+  const capH = fs * 0.72 // approximate cap height for weight 200
+  const hexR = capH / Math.sqrt(3)
+  const hexW = hexR * 2
+  const SP = fs * 0.06
+  const OO_SP = fs * 0.18 // extra gap between the two O's (index 4→5)
+  const lw = Math.max(2, capH * 0.08)
+
+  const cy = h + footerH / 2
+
+  // Hex path centered at (cx, cy)
+  function makeHex(cx: number, cy: number): SVGPolygonElement {
+    const pts: string[] = []
+    for (let i = 0; i < 6; i++) {
+      const a = (Math.PI / 3) * i
+      pts.push(`${cx + hexR * Math.cos(a)},${cy + hexR * Math.sin(a)}`)
+    }
+    const poly = document.createElementNS(NS, 'polygon')
+    poly.setAttribute('points', pts.join(' '))
+    poly.setAttribute('fill', 'none')
+    poly.setAttribute('stroke', COLOR)
+    poly.setAttribute('stroke-width', String(lw))
+    return poly
+  }
+
+  // Q = hex + diagonal tail from lower-right outward (matches landing exactly)
+  function makeQ(cx: number, cy: number): SVGGElement {
+    const qg = document.createElementNS(NS, 'g')
+    qg.appendChild(makeHex(cx, cy))
+    const tail = document.createElementNS(NS, 'line')
+    const tx = cx + hexR * 0.3
+    const ty = cy + hexR * 0.3
+    const tx2 = cx + hexR * 1.05
+    const ty2 = cy + hexR * 1.05
+    tail.setAttribute('x1', String(tx))
+    tail.setAttribute('y1', String(ty))
+    tail.setAttribute('x2', String(tx2))
+    tail.setAttribute('y2', String(ty2))
+    tail.setAttribute('stroke', COLOR)
+    tail.setAttribute('stroke-width', String(lw))
+    qg.appendChild(tail)
+    return qg
+  }
+
+  // Text letter (U, R, M)
+  function makeLetter(ch: string, x: number, baseline: number): SVGTextElement {
+    const t = document.createElementNS(NS, 'text')
+    t.setAttribute('x', String(x))
+    t.setAttribute('y', String(baseline))
+    t.setAttribute('fill', COLOR)
+    t.setAttribute('font-size', String(fs))
+    t.setAttribute('font-weight', '200')
+    t.setAttribute('font-family', FONT)
+    t.textContent = ch
+    return t
+  }
+
+  // Word layout: Q U O R O O M
+  // Approximate text widths for weight-200 at this size
+  const uW = fs * 0.52
+  const rW = fs * 0.42
+  const mW = fs * 0.62
+  const word = ['Q', 'U', 'O', 'R', 'O', 'O', 'M'] as const
+  const types = word.map(c => (c === 'Q' ? 'hexQ' : c === 'O' ? 'hex' : 'letter'))
+  const widths = word.map((c, i) =>
+    types[i] === 'hex' || types[i] === 'hexQ' ? hexW : c === 'U' ? uW : c === 'R' ? rW : mW,
+  )
+  function gapAt(i: number) { return i === 4 ? OO_SP : SP }
+
+  let totalW = 0
+  word.forEach((_, i) => {
+    totalW += widths[i]
+    if (i < word.length - 1) totalW += gapAt(i)
+  })
+
+  const baseline = cy + capH / 2
+  let x = 20 // left padding
+
+  word.forEach((ch, i) => {
+    if (types[i] === 'hexQ') {
+      g.appendChild(makeQ(x + hexW / 2, cy))
+      x += hexW
+    } else if (types[i] === 'hex') {
+      g.appendChild(makeHex(x + hexW / 2, cy))
+      x += hexW
+    } else {
+      g.appendChild(makeLetter(ch, x, baseline))
+      x += widths[i]
+    }
+    if (i < word.length - 1) x += gapAt(i)
+  })
+
+  // "RESEARCH" to the right of the wordmark
+  const sub = document.createElementNS(NS, 'text')
+  sub.setAttribute('x', String(x + 10))
+  sub.setAttribute('y', String(cy + 4))
+  sub.setAttribute('fill', muted)
+  sub.setAttribute('font-size', '10')
+  sub.setAttribute('font-family', FONT)
+  sub.setAttribute('letter-spacing', '3')
+  sub.textContent = 'RESEARCH'
+  g.appendChild(sub)
+
+  // "quoroom.ai" domain on right
+  const domain = document.createElementNS(NS, 'text')
+  domain.setAttribute('x', String(w - 20))
+  domain.setAttribute('y', String(cy + 4))
+  domain.setAttribute('text-anchor', 'end')
+  domain.setAttribute('fill', muted)
+  domain.setAttribute('font-size', '13')
+  domain.setAttribute('font-family', FONT)
+  domain.textContent = 'quoroom.ai'
+  g.appendChild(domain)
+
+  svgClone.appendChild(g)
+}
 
 async function svgToBlob(svgEl: SVGSVGElement, hideMoney: boolean, scale = 2): Promise<Blob> {
   const clone = svgEl.cloneNode(true) as SVGSVGElement
   if (hideMoney) {
     clone.querySelectorAll('[data-money]').forEach(el => el.remove())
   }
+
+  // Resolve CSS variables → actual colors (canvas can't read CSS vars)
+  resolveVars(clone)
+
+  // Dark background
   const bg = document.createElementNS('http://www.w3.org/2000/svg', 'rect')
   bg.setAttribute('width', '100%')
-  bg.setAttribute('height', '100%')
-  bg.setAttribute('fill', '#ffffff')
+  bg.setAttribute('height', '200%') // oversized to cover footer too
+  bg.setAttribute('fill', '#0F1117')
   clone.insertBefore(bg, clone.firstChild)
-  const wm = document.createElementNS('http://www.w3.org/2000/svg', 'text')
-  wm.setAttribute('x', '20')
-  wm.setAttribute('y', String(Number(clone.getAttribute('height') || '400') - 16))
-  wm.setAttribute('fill', '#d1d5db')
-  wm.setAttribute('font-size', '14')
-  wm.setAttribute('font-family', 'system-ui, sans-serif')
-  wm.textContent = 'quoroom.ai'
-  clone.appendChild(wm)
+
+  // Brand footer
+  addBrandFooter(clone)
 
   const data = new XMLSerializer().serializeToString(clone)
   const svgBlob = new Blob([data], { type: 'image/svg+xml;charset=utf-8' })
@@ -288,10 +440,10 @@ export function SwarmPanel({ rooms, queenRunning, onNavigateToRoom }: SwarmPanel
     return (
       <div className="flex flex-col items-center justify-center h-full text-center py-12">
         <svg width="72" height="72" viewBox="0 0 72 72" className="mb-3">
-          <polygon points={hexPoints(36, 36, 30)} fill="none" stroke="#e5e7eb" strokeWidth="2" />
+          <polygon points={hexPoints(36, 36, 30)} fill="none" stroke="var(--border-primary)" strokeWidth="2" />
         </svg>
-        <p className="text-sm text-gray-400">No rooms in the swarm yet.</p>
-        <p className="text-xs text-gray-300 mt-1">Create a room to see it here.</p>
+        <p className="text-sm text-text-muted">No rooms in the swarm yet.</p>
+        <p className="text-xs text-text-muted mt-1">Create a room to see it here.</p>
       </div>
     )
   }
@@ -301,29 +453,29 @@ export function SwarmPanel({ rooms, queenRunning, onNavigateToRoom }: SwarmPanel
   return (
     <div ref={containerRef} className="flex flex-col h-full">
       {/* Header */}
-      <div className="flex items-center justify-between px-4 py-2.5 border-b border-gray-100 shrink-0">
+      <div className="flex items-center justify-between px-4 py-2.5 border-b border-border-primary shrink-0">
         <div className="flex items-center gap-2">
-          <svg width="16" height="16" viewBox="0 0 16 16" className="text-amber-500 shrink-0">
+          <svg width="16" height="16" viewBox="0 0 16 16" className="text-interactive shrink-0">
             <polygon points={hexPoints(8, 8, 7)} fill="none" stroke="currentColor" strokeWidth="1.3" />
           </svg>
-          <span className="text-xs font-semibold text-gray-700">Swarm</span>
+          <span className="text-sm font-semibold text-text-secondary">Swarm</span>
         </div>
         <div className="flex items-center gap-3">
-          <span className="text-[10px] text-gray-400">{rooms.length} room{rooms.length !== 1 ? 's' : ''}</span>
-          <span className="text-[10px] text-gray-400">{(allWorkers ?? []).filter(w => w.roomId !== null).length} workers</span>
-          <span className="text-[10px] text-gray-400">{Object.values(stationMap ?? {}).flat().length} stations</span>
+          <span className="text-xs text-text-muted">{rooms.length} room{rooms.length !== 1 ? 's' : ''}</span>
+          <span className="text-xs text-text-muted">{(allWorkers ?? []).filter(w => w.roomId !== null).length} workers</span>
+          <span className="text-xs text-text-muted">{Object.values(stationMap ?? {}).flat().length} stations</span>
 
           {showMoney && revenueMap && (
             <>
-              <span className="text-[10px] text-green-500">{fmtMoney(totalIncome)} in</span>
-              <span className="text-[10px] text-red-400">{fmtMoney(totalExpenses)} out</span>
+              <span className="text-xs text-status-success">{fmtMoney(totalIncome)} in</span>
+              <span className="text-xs text-status-error">{fmtMoney(totalExpenses)} out</span>
             </>
           )}
 
           <button
             onClick={toggleMoney}
-            className={`px-1.5 py-0.5 text-[10px] rounded transition-colors ${
-              showMoney ? 'bg-green-50 text-green-600 hover:bg-green-100' : 'bg-gray-50 text-gray-400 hover:bg-gray-100'
+            className={`px-2 py-1 text-xs rounded-lg transition-colors ${
+              showMoney ? 'bg-status-success-bg text-status-success hover:opacity-80' : 'bg-surface-tertiary text-text-muted hover:bg-surface-hover'
             }`}
             title={showMoney ? 'Hide financials' : 'Show financials'}
           >$</button>
@@ -331,7 +483,7 @@ export function SwarmPanel({ rooms, queenRunning, onNavigateToRoom }: SwarmPanel
           <div className="relative">
             <button
               onClick={() => setShareOpen(!shareOpen)}
-              className="px-2 py-1 text-[10px] rounded border border-gray-200 text-gray-500 hover:text-gray-700 hover:bg-gray-50 transition-colors flex items-center gap-1"
+              className="px-4 py-2 text-sm font-medium rounded-lg bg-interactive text-white hover:bg-interactive-hover transition-colors flex items-center gap-1.5 shadow-sm"
             >
               <svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" className="shrink-0">
                 <path d="M4 8h8M8 4l4 4-4 4" strokeLinecap="round" strokeLinejoin="round"/>
@@ -339,24 +491,24 @@ export function SwarmPanel({ rooms, queenRunning, onNavigateToRoom }: SwarmPanel
               Share
             </button>
             {shareOpen && (
-              <div className="absolute right-0 top-full mt-1 bg-white border border-gray-200 rounded-lg shadow-lg py-1 z-20 w-40">
-                <button onClick={() => void handleShare('twitter')} className="w-full px-3 py-1.5 text-left text-xs text-gray-600 hover:bg-gray-50 flex items-center gap-2">
+              <div className="absolute right-0 top-full mt-1 bg-surface-primary border border-border-primary rounded-lg shadow-lg py-1 z-20 w-40">
+                <button onClick={() => void handleShare('twitter')} className="w-full px-3 py-2 text-left text-sm text-text-secondary hover:bg-surface-hover flex items-center gap-2">
                   <span className="w-4 text-center text-sm">{'\ud835\udd4f'}</span> Twitter / X
                 </button>
-                <button onClick={() => void handleShare('instagram')} className="w-full px-3 py-1.5 text-left text-xs text-gray-600 hover:bg-gray-50 flex items-center gap-2">
+                <button onClick={() => void handleShare('instagram')} className="w-full px-3 py-2 text-left text-sm text-text-secondary hover:bg-surface-hover flex items-center gap-2">
                   <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.2" className="shrink-0">
                     <rect x="2" y="2" width="12" height="12" rx="3"/><circle cx="8" cy="8" r="3"/><circle cx="12" cy="4" r="0.8" fill="currentColor"/>
                   </svg>
                   Instagram
                 </button>
-                <button onClick={() => void handleShare('tiktok')} className="w-full px-3 py-1.5 text-left text-xs text-gray-600 hover:bg-gray-50 flex items-center gap-2">
+                <button onClick={() => void handleShare('tiktok')} className="w-full px-3 py-2 text-left text-sm text-text-secondary hover:bg-surface-hover flex items-center gap-2">
                   <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.2" className="shrink-0">
                     <path d="M10 2v8a3 3 0 1 1-2-2.8"/><path d="M10 2c1.5 0 3 1 3.5 2.5"/>
                   </svg>
                   TikTok
                 </button>
-                <div className="border-t border-gray-100 mt-0.5 pt-0.5">
-                  <button onClick={() => void handleShare('download')} className="w-full px-3 py-1.5 text-left text-xs text-gray-600 hover:bg-gray-50 flex items-center gap-2">
+                <div className="border-t border-border-primary mt-0.5 pt-0.5">
+                  <button onClick={() => void handleShare('download')} className="w-full px-3 py-2 text-left text-sm text-text-secondary hover:bg-surface-hover flex items-center gap-2">
                     <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.2" className="shrink-0">
                       <path d="M8 2v9M5 8l3 3 3-3M3 13h10" strokeLinecap="round" strokeLinejoin="round"/>
                     </svg>
@@ -370,7 +522,7 @@ export function SwarmPanel({ rooms, queenRunning, onNavigateToRoom }: SwarmPanel
       </div>
 
       {shareStatus && (
-        <div className="px-4 py-1.5 bg-gray-50 border-b border-gray-100 text-[10px] text-gray-500 shrink-0">{shareStatus}</div>
+        <div className="px-4 py-2 bg-surface-secondary border-b border-border-primary text-xs text-text-muted shrink-0">{shareStatus}</div>
       )}
 
       {/* Honeycomb */}
@@ -438,7 +590,7 @@ export function SwarmPanel({ rooms, queenRunning, onNavigateToRoom }: SwarmPanel
                     dominantBaseline="middle"
                     fontSize={li === 0 ? '14' : '13'}
                     fontWeight={li === 0 ? '600' : '400'}
-                    fill={room.goal ? '#374151' : '#b0b0b0'}
+                    fill={room.goal ? 'var(--text-primary)' : 'var(--text-muted)'}
                     style={{ pointerEvents: 'none' }}
                   >
                     {line}
@@ -452,7 +604,7 @@ export function SwarmPanel({ rooms, queenRunning, onNavigateToRoom }: SwarmPanel
                   textAnchor="middle"
                   dominantBaseline="middle"
                   fontSize="12"
-                  fill="#6b7280"
+                  fill="var(--text-secondary)"
                   style={{ pointerEvents: 'none' }}
                 >
                   {workers.length}w{busyWorkers > 0 ? ` (${busyWorkers} active)` : ''}
@@ -468,30 +620,30 @@ export function SwarmPanel({ rooms, queenRunning, onNavigateToRoom }: SwarmPanel
                     dominantBaseline="middle"
                     fontSize="13"
                     fontWeight="500"
-                    fill="#9ca3af"
+                    fill="var(--text-muted)"
                     style={{ pointerEvents: 'none' }}
                     data-money="true"
                   >
-                    <tspan fill="#16a34a">{fmtMoney(revenue?.totalIncome ?? 0)} in</tspan>
-                    <tspan fill="#9ca3af">{' / '}</tspan>
-                    <tspan fill="#dc2626">{fmtMoney(revenue?.totalExpenses ?? 0)} out</tspan>
+                    <tspan fill="var(--status-success)">{fmtMoney(revenue?.totalIncome ?? 0)} in</tspan>
+                    <tspan fill="var(--text-muted)">{' / '}</tspan>
+                    <tspan fill="var(--status-error)">{fmtMoney(revenue?.totalExpenses ?? 0)} out</tspan>
                     {(revenue?.stationCosts ?? 0) > 0 && (
-                      <tspan fill="#9ca3af">{' \u00b7 '}</tspan>
+                      <tspan fill="var(--text-muted)">{' \u00b7 '}</tspan>
                     )}
                     {(revenue?.stationCosts ?? 0) > 0 && (
-                      <tspan fill="#f59e0b">{fmtMoney(revenue!.stationCosts)} srv</tspan>
+                      <tspan fill="var(--status-warning)">{fmtMoney(revenue!.stationCosts)} srv</tspan>
                     )}
                   </text>
                 )}
 
                 {/* Queen running indicator */}
                 {running && (
-                  <circle cx={cx + ROOM_R - 20} cy={cy - ROOM_R * 0.42} r={6} fill="#22c55e" className="hex-pulse" />
+                  <circle cx={cx + ROOM_R - 20} cy={cy - ROOM_R * 0.42} r={6} fill="var(--status-success)" className="hex-pulse" />
                 )}
 
                 {/* Status dot (paused) */}
                 {room.status === 'paused' && (
-                  <circle cx={cx + ROOM_R - 20} cy={cy - ROOM_R * 0.42} r={6} fill="#f59e0b" />
+                  <circle cx={cx + ROOM_R - 20} cy={cy - ROOM_R * 0.42} r={6} fill="var(--status-warning)" />
                 )}
 
                 {/* Worker satellites */}
@@ -503,7 +655,7 @@ export function SwarmPanel({ rooms, queenRunning, onNavigateToRoom }: SwarmPanel
                       key={`w-${w.id}`}
                       points={hexPoints(pos[0], pos[1], SAT_R)}
                       fill={workerColor(w.agentState)}
-                      stroke="#d1d5db"
+                      stroke="var(--border-primary)"
                       strokeWidth={0.8}
                       style={{ transition: 'fill 300ms' }}
                     />
@@ -519,7 +671,7 @@ export function SwarmPanel({ rooms, queenRunning, onNavigateToRoom }: SwarmPanel
                       <polygon
                         points={hexPoints(pos[0], pos[1], SAT_R)}
                         fill={stationColor(s.status)}
-                        stroke="#d1d5db"
+                        stroke="var(--border-primary)"
                         strokeWidth={0.8}
                       />
                       <rect
@@ -529,7 +681,7 @@ export function SwarmPanel({ rooms, queenRunning, onNavigateToRoom }: SwarmPanel
                         height={6}
                         rx={1.5}
                         fill="none"
-                        stroke="#9ca3af"
+                        stroke="var(--text-muted)"
                         strokeWidth={0.8}
                         style={{ pointerEvents: 'none' }}
                       />
@@ -541,38 +693,49 @@ export function SwarmPanel({ rooms, queenRunning, onNavigateToRoom }: SwarmPanel
           })}
         </svg>
 
+        {/* Legend */}
+        <div className="px-6 pb-6 pt-2 space-y-3 text-xs text-text-muted max-w-xl mx-auto">
+          <div className="flex flex-wrap gap-x-5 gap-y-1.5">
+            <span className="flex items-center gap-1.5"><span className="inline-block w-2.5 h-2.5 rounded-full bg-status-success" /> Active (queen running)</span>
+            <span className="flex items-center gap-1.5"><span className="inline-block w-2.5 h-2.5 rounded-full bg-status-warning" /> Paused</span>
+            <span className="flex items-center gap-1.5"><span className="inline-block w-2.5 h-2.5 rounded-full bg-surface-tertiary" /> Idle / stopped</span>
+          </div>
+          <p>Each large hexagon is a <strong className="text-text-secondary">room</strong> — an autonomous agent collective with a queen, workers, and optional stations. Small hexagons on the border are <strong className="text-text-secondary">workers</strong> (agents) and <strong className="text-text-secondary">stations</strong> (cloud compute). Click a room to open it.</p>
+          <p>Toggle the <strong className="text-text-secondary">$</strong> button to show or hide financial info. Use <strong className="text-text-secondary">Share</strong> to export your swarm as an image.</p>
+        </div>
+
         {/* Tooltip — shows name + details on hover */}
         {hoveredRoom && (
           <div
-            className="absolute z-10 bg-white border border-gray-200 rounded-lg shadow-sm p-3 pointer-events-none max-w-72"
+            className="absolute z-10 bg-surface-primary border border-border-primary rounded-lg shadow-lg p-3 pointer-events-none max-w-72"
             style={{ left: tooltipPos.x, top: tooltipPos.y }}
           >
-            <div className="text-sm font-semibold text-gray-700">{hoveredRoom.name}</div>
+            <div className="text-sm font-semibold text-text-primary">{hoveredRoom.name}</div>
             {hoveredRoom.goal && (
-              <div className="text-xs text-gray-400 mt-0.5">{hoveredRoom.goal}</div>
+              <div className="text-xs text-text-muted mt-0.5">{hoveredRoom.goal}</div>
             )}
-            <div className="text-xs text-gray-500 mt-2 space-y-0.5">
+            <div className="text-sm text-text-secondary mt-2 space-y-0.5">
               {(workersPerRoom[hoveredRoom.id] ?? []).length > 0 && (
                 <div>
-                  <span className="text-gray-400">Workers: </span>
+                  <span className="text-text-muted">Workers: </span>
                   {(workersPerRoom[hoveredRoom.id] ?? []).map(w => w.name).join(', ')}
                 </div>
               )}
               {((stationMap ?? {})[hoveredRoom.id] ?? []).length > 0 && (
                 <div>
-                  <span className="text-gray-400">Stations: </span>
+                  <span className="text-text-muted">Stations: </span>
                   {((stationMap ?? {})[hoveredRoom.id] ?? []).map(s => `${s.name} (${s.tier})`).join(', ')}
                 </div>
               )}
               {showMoney && (revenueMap ?? {})[hoveredRoom.id] && (() => {
                 const rev = (revenueMap ?? {})[hoveredRoom.id]!
                 return (
-                  <div className="pt-1 border-t border-gray-100 mt-1">
-                    <span className="text-green-600">{fmtMoney(rev.totalIncome)} income</span>
-                    <span className="text-gray-300 mx-1">/</span>
-                    <span className="text-red-500">{fmtMoney(rev.totalExpenses)} expenses</span>
-                    <span className="text-gray-300 mx-1">/</span>
-                    <span className={rev.netProfit >= 0 ? 'text-green-600 font-medium' : 'text-red-500 font-medium'}>
+                  <div className="pt-1 border-t border-border-primary mt-1">
+                    <span className="text-status-success">{fmtMoney(rev.totalIncome)} income</span>
+                    <span className="text-text-muted mx-1">/</span>
+                    <span className="text-status-error">{fmtMoney(rev.totalExpenses)} expenses</span>
+                    <span className="text-text-muted mx-1">/</span>
+                    <span className={rev.netProfit >= 0 ? 'text-status-success font-medium' : 'text-status-error font-medium'}>
                       {rev.netProfit >= 0 ? '+' : ''}{fmtMoney(rev.netProfit)} net
                     </span>
                   </div>

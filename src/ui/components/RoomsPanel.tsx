@@ -7,9 +7,9 @@ import type { Room, Wallet } from '@shared/types'
 import { ROOM_TEMPLATES } from '@shared/room-templates'
 
 const STATUS_COLORS: Record<string, string> = {
-  active: 'bg-green-100 text-green-700',
-  paused: 'bg-yellow-100 text-yellow-700',
-  stopped: 'bg-gray-100 text-gray-500',
+  active: 'bg-status-success-bg text-status-success',
+  paused: 'bg-status-warning-bg text-status-warning',
+  stopped: 'bg-surface-tertiary text-text-muted',
 }
 
 interface RoomsPanelProps {
@@ -110,13 +110,13 @@ export function RoomsPanel({ selectedRoomId, onSelectRoom }: RoomsPanelProps): R
   }
 
   return (
-    <div ref={containerRef} className="p-4 space-y-3">
+    <div ref={containerRef} className="p-4 space-y-4">
       {/* Header */}
       <div className="flex items-center justify-between">
-        <h3 className="text-xs font-semibold text-gray-700">Rooms</h3>
+        <h3 className="text-sm font-semibold text-text-secondary">Rooms</h3>
         <button
           onClick={() => setShowCreate(!showCreate)}
-          className="text-xs text-blue-500 hover:text-blue-700"
+          className="text-sm text-interactive hover:text-interactive-hover"
         >
           {showCreate ? 'Cancel' : '+ New Room'}
         </button>
@@ -124,7 +124,7 @@ export function RoomsPanel({ selectedRoomId, onSelectRoom }: RoomsPanelProps): R
 
       {/* Create form */}
       {showCreate && (
-        <div className="bg-gray-50 rounded-lg p-3 space-y-2">
+        <div className="bg-surface-secondary shadow-sm rounded-lg p-4 space-y-2">
           <select
             value={selectedTemplate ?? ''}
             onChange={(e) => {
@@ -139,7 +139,7 @@ export function RoomsPanel({ selectedRoomId, onSelectRoom }: RoomsPanelProps): R
                 setCreateGoal('')
               }
             }}
-            className="w-full bg-white border border-gray-200 rounded px-2 py-1 text-xs text-gray-600"
+            className="w-full bg-surface-primary border border-border-primary rounded-lg px-2.5 py-1.5 text-sm text-text-secondary"
           >
             <option value="">Custom room...</option>
             {ROOM_TEMPLATES.map(t => (
@@ -150,20 +150,20 @@ export function RoomsPanel({ selectedRoomId, onSelectRoom }: RoomsPanelProps): R
             value={createName}
             onChange={(e) => setCreateName(e.target.value)}
             placeholder="Room name..."
-            className="w-full bg-white border border-gray-200 rounded px-2 py-1 text-xs text-gray-700"
+            className="w-full bg-surface-primary border border-border-primary rounded-lg px-2.5 py-1.5 text-sm text-text-primary"
             onKeyDown={(e) => e.key === 'Enter' && handleCreate()}
           />
           <input
             value={createGoal}
             onChange={(e) => setCreateGoal(e.target.value)}
             placeholder="Goal (optional)..."
-            className="w-full bg-white border border-gray-200 rounded px-2 py-1 text-xs text-gray-400"
+            className="w-full bg-surface-primary border border-border-primary rounded-lg px-2.5 py-1.5 text-sm text-text-muted"
             onKeyDown={(e) => e.key === 'Enter' && handleCreate()}
           />
           <button
             onClick={handleCreate}
             disabled={!createName.trim()}
-            className="text-xs px-3 py-1 bg-blue-500 text-white rounded hover:bg-blue-600 disabled:opacity-40"
+            className="text-sm px-4 py-2 bg-interactive text-white rounded-lg hover:bg-interactive-hover disabled:opacity-40"
           >
             Create
           </button>
@@ -172,7 +172,7 @@ export function RoomsPanel({ selectedRoomId, onSelectRoom }: RoomsPanelProps): R
 
       {/* Room list */}
       {!rooms || rooms.length === 0 ? (
-        <p className="text-xs text-gray-400 py-4 text-center">No rooms yet. Create one to get started.</p>
+        <p className="text-sm text-text-muted py-4 text-center">No rooms yet. Create one to get started.</p>
       ) : (
         <div className={isWide ? 'grid grid-cols-2 gap-3' : 'space-y-3'}>
           {rooms.map(room => {
@@ -180,36 +180,36 @@ export function RoomsPanel({ selectedRoomId, onSelectRoom }: RoomsPanelProps): R
             return (
               <div
                 key={room.id}
-                className={`rounded-lg p-3 border transition-colors cursor-pointer ${
+                className={`rounded-lg p-4 border transition-colors cursor-pointer ${
                   isSelected
-                    ? 'border-blue-300 bg-blue-50'
-                    : 'border-gray-200 bg-gray-50 hover:border-gray-300'
+                    ? 'border-blue-300 bg-interactive-bg'
+                    : 'border-border-primary bg-surface-secondary shadow-sm hover:border-border-primary'
                 }`}
                 onClick={() => onSelectRoom(isSelected ? null : room.id)}
               >
                 {/* Room header */}
-                <div className="flex items-center justify-between mb-1.5">
-                  <span className="text-xs font-medium text-gray-700 truncate">{room.name}</span>
-                  <div className="flex items-center gap-1.5">
+                <div className="flex items-center justify-between mb-2">
+                  <span className="text-sm font-medium text-text-secondary truncate">{room.name}</span>
+                  <div className="flex items-center gap-2">
                     <span
                       title={queenRunning[room.id] ? 'Queen running' : 'Queen stopped'}
-                      className={`w-1.5 h-1.5 rounded-full ${queenRunning[room.id] ? 'bg-green-400' : 'bg-gray-300'}`}
+                      className={`w-1.5 h-1.5 rounded-full ${queenRunning[room.id] ? 'bg-status-success' : 'bg-surface-tertiary'}`}
                     />
-                    <span className={`px-1.5 py-0.5 rounded text-[10px] font-medium ${STATUS_COLORS[room.status] || 'bg-gray-100 text-gray-500'}`}>
+                    <span className={`px-1.5 py-0.5 rounded text-xs font-medium ${STATUS_COLORS[room.status] || 'bg-surface-tertiary text-text-muted'}`}>
                       {room.status}
                     </span>
                   </div>
                 </div>
 
                 {/* Goal */}
-                <div className="text-xs mb-2" onClick={(e) => e.stopPropagation()}>
-                  <span className="text-gray-500">Goal: </span>
+                <div className="text-sm mb-2" onClick={(e) => e.stopPropagation()}>
+                  <span className="text-text-muted">Goal: </span>
                   {editingGoalId === room.id ? (
                     <div className="mt-1 flex gap-1">
                       <input
                         value={editGoalText}
                         onChange={(e) => setEditGoalText(e.target.value)}
-                        className="flex-1 bg-white border border-gray-200 rounded px-1.5 py-0.5 text-xs text-gray-600"
+                        className="flex-1 bg-surface-primary border border-border-primary rounded-lg px-2.5 py-1.5 text-sm text-text-secondary"
                         placeholder="Set room goal..."
                         onKeyDown={(e) => {
                           if (e.key === 'Enter') handleSaveGoal(room.id)
@@ -217,12 +217,12 @@ export function RoomsPanel({ selectedRoomId, onSelectRoom }: RoomsPanelProps): R
                         }}
                         autoFocus
                       />
-                      <button onClick={() => handleSaveGoal(room.id)} className="text-blue-500 hover:text-blue-700 text-xs">Save</button>
-                      <button onClick={() => setEditingGoalId(null)} className="text-gray-400 hover:text-gray-600 text-xs">Cancel</button>
+                      <button onClick={() => handleSaveGoal(room.id)} className="text-interactive hover:text-interactive-hover text-sm">Save</button>
+                      <button onClick={() => setEditingGoalId(null)} className="text-text-muted hover:text-text-secondary text-sm">Cancel</button>
                     </div>
                   ) : (
                     <span
-                      className="text-gray-400 cursor-pointer hover:text-gray-600"
+                      className="text-text-muted cursor-pointer hover:text-text-secondary"
                       onClick={() => { setEditingGoalId(room.id); setEditGoalText(room.goal || '') }}
                     >
                       {room.goal || 'Click to set...'}
@@ -231,40 +231,40 @@ export function RoomsPanel({ selectedRoomId, onSelectRoom }: RoomsPanelProps): R
                 </div>
 
                 {/* Meta */}
-                <div className="text-[10px] text-gray-400 mb-2">
+                <div className="text-xs text-text-muted mb-2">
                   Created {formatRelativeTime(room.createdAt)}
                   {wallets?.[room.id] && (
-                    <span className="ml-2 font-mono text-gray-500" title={wallets[room.id].address}>
+                    <span className="ml-2 font-mono text-text-muted" title={wallets[room.id].address}>
                       {wallets[room.id].chain} {wallets[room.id].address.slice(0, 6)}...{wallets[room.id].address.slice(-4)}
                     </span>
                   )}
                 </div>
 
                 {/* Actions */}
-                <div className="flex gap-1.5" onClick={(e) => e.stopPropagation()}>
+                <div className="flex gap-2" onClick={(e) => e.stopPropagation()}>
                   {room.status === 'active' ? (
                     <>
                       {queenRunning[room.id] ? (
                         <button
                           onClick={() => handleQueenStop(room.id)}
-                          className="text-xs px-2 py-0.5 rounded border text-orange-600 border-orange-200 hover:border-orange-300 transition-colors"
+                          className="text-sm px-2.5 py-1.5 rounded-lg border text-orange-600 border-orange-200 hover:border-orange-300 transition-colors"
                         >
                           Stop Queen
                         </button>
                       ) : (
                         <button
                           onClick={() => handleQueenStart(room.id)}
-                          className="text-xs px-2 py-0.5 rounded border text-green-600 border-green-200 hover:border-green-300 transition-colors"
+                          className="text-sm px-2.5 py-1.5 rounded-lg border text-status-success border-green-200 hover:border-green-300 transition-colors"
                         >
                           Start Queen
                         </button>
                       )}
                       <button
                         onClick={() => handlePause(room.id)}
-                        className={`text-xs px-2 py-0.5 rounded border transition-colors ${
+                        className={`text-sm px-2.5 py-1.5 rounded-lg border transition-colors ${
                           confirmStopId === room.id
                             ? 'text-red-600 border-red-300 bg-red-50 hover:bg-red-100'
-                            : 'text-gray-400 border-gray-200 hover:border-gray-300 hover:text-gray-600'
+                            : 'text-text-muted border-border-primary hover:border-border-primary hover:text-text-secondary'
                         }`}
                       >
                         {confirmStopId === room.id ? 'Confirm Pause' : 'Pause'}
@@ -273,7 +273,7 @@ export function RoomsPanel({ selectedRoomId, onSelectRoom }: RoomsPanelProps): R
                   ) : room.status === 'paused' ? (
                     <button
                       onClick={() => handleRestart(room.id)}
-                      className="text-xs px-2 py-0.5 rounded border text-blue-600 border-blue-200 hover:border-blue-300 transition-colors"
+                      className="text-sm px-2.5 py-1.5 rounded-lg border text-blue-600 border-blue-200 hover:border-blue-300 transition-colors"
                     >
                       Restart
                     </button>
@@ -281,10 +281,10 @@ export function RoomsPanel({ selectedRoomId, onSelectRoom }: RoomsPanelProps): R
 
                   <button
                     onClick={() => handleDelete(room.id)}
-                    className={`text-xs px-2 py-0.5 rounded border transition-colors ${
+                    className={`text-sm px-2.5 py-1.5 rounded-lg border transition-colors ${
                       confirmDeleteId === room.id
                         ? 'text-red-600 border-red-300 bg-red-50 hover:bg-red-100'
-                        : 'text-gray-400 border-gray-200 hover:border-gray-300 hover:text-gray-600'
+                        : 'text-text-muted border-border-primary hover:border-border-primary hover:text-text-secondary'
                     }`}
                   >
                     {confirmDeleteId === room.id ? 'Confirm Delete' : 'Delete'}

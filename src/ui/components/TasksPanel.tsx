@@ -21,9 +21,9 @@ function FilterPill({
   onClick: () => void
   colorClass?: string
 }): React.JSX.Element {
-  const base = 'px-1.5 py-0.5 rounded text-xs cursor-pointer transition-colors'
-  const activeStyle = colorClass ?? 'bg-gray-700 text-white'
-  const inactiveStyle = 'bg-gray-100 text-gray-500 hover:bg-gray-200'
+  const base = 'px-2.5 py-1.5 rounded-lg text-sm cursor-pointer transition-colors'
+  const activeStyle = colorClass ?? 'bg-surface-invert text-white'
+  const inactiveStyle = 'bg-surface-tertiary text-text-muted hover:bg-surface-hover'
   return (
     <button
       onClick={onClick}
@@ -36,14 +36,14 @@ function FilterPill({
 
 function statusBadge(task: Task): React.JSX.Element {
   const colors: Record<string, string> = {
-    active: 'bg-green-100 text-green-700',
-    paused: 'bg-yellow-100 text-yellow-700',
-    completed: 'bg-blue-100 text-blue-700',
-    error: 'bg-red-100 text-red-700'
+    active: 'bg-status-success-bg text-status-success',
+    paused: 'bg-status-warning-bg text-status-warning',
+    completed: 'bg-interactive-bg text-interactive',
+    error: 'bg-status-error-bg text-status-error'
   }
-  const cls = colors[task.status] ?? 'bg-gray-100 text-gray-600'
+  const cls = colors[task.status] ?? 'bg-surface-tertiary text-text-secondary'
   return (
-    <span className={`px-1.5 py-0.5 rounded text-xs ${cls}`}>
+    <span className={`px-2.5 py-1.5 rounded-lg text-sm ${cls}`}>
       {task.status}
       {task.errorCount > 0 && ` (${task.errorCount})`}
     </span>
@@ -168,19 +168,19 @@ function ProgressBar({ run }: { run: TaskRun }): React.JSX.Element {
   return (
     <div className="mt-1">
       <div className="flex items-center gap-2">
-        <div className="flex-1 h-1.5 bg-gray-200 rounded-full overflow-hidden">
+        <div className="flex-1 h-1.5 bg-surface-tertiary rounded-full overflow-hidden">
           {run.progress != null ? (
             <div
-              className="h-full bg-blue-500 rounded-full transition-all duration-500"
+              className="h-full bg-interactive rounded-full transition-all duration-500"
               style={{ width: `${Math.round(run.progress * 100)}%` }}
             />
           ) : (
-            <div className="h-full bg-blue-400 rounded-full animate-pulse w-full" />
+            <div className="h-full bg-interactive rounded-full animate-pulse w-full" />
           )}
         </div>
       </div>
       {run.progressMessage && (
-        <div className="text-xs text-blue-500 mt-0.5 truncate">
+        <div className="text-sm text-interactive mt-0.5 truncate">
           {run.progressMessage}
         </div>
       )}
@@ -191,7 +191,7 @@ function ProgressBar({ run }: { run: TaskRun }): React.JSX.Element {
 const CONSOLE_ENTRY_COLORS: Record<string, string> = {
   tool_call: 'text-yellow-400',
   assistant_text: 'text-green-300',
-  tool_result: 'text-gray-400',
+  tool_result: 'text-console-text',
   result: 'text-blue-400',
   error: 'text-red-400'
 }
@@ -230,15 +230,15 @@ function ConsoleView({ runId }: { runId: number }): React.JSX.Element {
   return (
     <div
       ref={scrollRef}
-      className="max-h-48 overflow-y-auto bg-gray-900 rounded p-2 mt-1 font-mono text-xs leading-relaxed"
+      className="max-h-48 overflow-y-auto bg-console-bg rounded-lg p-3 mt-1 font-mono text-sm leading-relaxed"
     >
       {entries.map((e) => (
-        <div key={e.seq} className={CONSOLE_ENTRY_COLORS[e.entryType] ?? 'text-gray-300'}>
+        <div key={e.seq} className={CONSOLE_ENTRY_COLORS[e.entryType] ?? 'text-console-text'}>
           {e.content}
         </div>
       ))}
       {entries.length === 0 && (
-        <div className="text-gray-500">Waiting for output...</div>
+        <div className="text-text-muted">Waiting for output...</div>
       )}
     </div>
   )
@@ -291,32 +291,32 @@ function CreateTaskForm({ workers, onCreated, roomId }: { workers: Worker[] | nu
   }
 
   return (
-    <div className="p-3 border-b-2 border-blue-300 bg-blue-50/50 space-y-2">
+    <div className="p-4 border-b-2 border-interactive bg-interactive-bg/50 space-y-2">
       <textarea
         value={prompt}
         onChange={(e) => { setPrompt(e.target.value); setCreateError(null) }}
         rows={3}
         placeholder="Task prompt (what should the agent do?)"
-        className="w-full px-2.5 py-1.5 text-xs border border-gray-300 rounded focus:outline-none focus:border-gray-500 bg-white resize-y"
+        className="w-full bg-surface-primary border border-border-primary rounded-lg px-2.5 py-1.5 text-sm text-text-primary focus:outline-none focus:border-text-muted resize-y"
       />
       <input
         type="text"
         value={name}
         onChange={(e) => setName(e.target.value)}
         placeholder="Name (optional)"
-        className="w-full px-2.5 py-1.5 text-xs border border-gray-300 rounded focus:outline-none focus:border-gray-500 bg-white"
+        className="w-full bg-surface-primary border border-border-primary rounded-lg px-2.5 py-1.5 text-sm text-text-primary focus:outline-none focus:border-text-muted"
       />
-      <div className="space-y-1.5">
-        <div className="flex items-center gap-1">
-          <span className="text-[10px] text-gray-400">Schedule:</span>
+      <div className="space-y-2">
+        <div className="flex items-center gap-2">
+          <span className="text-xs text-text-muted">Schedule:</span>
           {(['manual', 'preset', 'custom'] as const).map((mode) => (
             <button
               key={mode}
               onClick={() => setScheduleMode(mode)}
-              className={`text-[10px] font-medium px-1.5 py-0.5 rounded cursor-pointer transition-colors ${
+              className={`text-xs font-medium px-2.5 py-1.5 rounded-lg cursor-pointer transition-colors ${
                 scheduleMode === mode
-                  ? 'bg-gray-700 text-white'
-                  : 'bg-gray-100 text-gray-500 hover:bg-gray-200'
+                  ? 'bg-surface-invert text-white'
+                  : 'bg-surface-tertiary text-text-muted hover:bg-surface-hover'
               }`}
             >
               {mode === 'manual' ? 'On-demand' : mode === 'preset' ? 'Schedule' : 'Custom'}
@@ -327,7 +327,7 @@ function CreateTaskForm({ workers, onCreated, roomId }: { workers: Worker[] | nu
           <select
             value={selectedPreset}
             onChange={(e) => setSelectedPreset(Number(e.target.value))}
-            className="w-full text-xs border border-gray-300 rounded px-2.5 py-1.5 bg-white focus:outline-none focus:border-gray-500"
+            className="w-full bg-surface-primary border border-border-primary rounded-lg px-2.5 py-1.5 text-sm text-text-primary focus:outline-none focus:border-text-muted"
           >
             {SCHEDULE_PRESETS.map((p, i) => (
               <option key={i} value={i}>{p.label}</option>
@@ -340,7 +340,7 @@ function CreateTaskForm({ workers, onCreated, roomId }: { workers: Worker[] | nu
             value={customCron}
             onChange={(e) => setCustomCron(e.target.value)}
             placeholder="Cron expression (e.g. 0 9 * * 1-5 = weekdays 9 AM)"
-            className="w-full px-2.5 py-1.5 text-xs border border-gray-300 rounded focus:outline-none focus:border-gray-500 bg-white"
+            className="w-full bg-surface-primary border border-border-primary rounded-lg px-2.5 py-1.5 text-sm text-text-primary focus:outline-none focus:border-text-muted"
           />
         )}
       </div>
@@ -349,7 +349,7 @@ function CreateTaskForm({ workers, onCreated, roomId }: { workers: Worker[] | nu
           <select
             value={workerId}
             onChange={(e) => setWorkerId(e.target.value ? Number(e.target.value) : '')}
-            className="text-xs border border-gray-300 rounded px-2 py-1.5 bg-white focus:outline-none focus:border-gray-500"
+            className="bg-surface-primary border border-border-primary rounded-lg px-2.5 py-1.5 text-sm text-text-primary focus:outline-none focus:border-text-muted"
           >
             <option value="">No worker</option>
             {workers.map((w) => (
@@ -357,8 +357,8 @@ function CreateTaskForm({ workers, onCreated, roomId }: { workers: Worker[] | nu
             ))}
           </select>
         )}
-        <div className="flex items-center gap-1">
-          <span className="text-[10px] text-gray-400">Runs:</span>
+        <div className="flex items-center gap-2">
+          <span className="text-xs text-text-muted">Runs:</span>
           <input
             type="text"
             inputMode="numeric"
@@ -368,17 +368,17 @@ function CreateTaskForm({ workers, onCreated, roomId }: { workers: Worker[] | nu
               if (v === '' || /^\d+$/.test(v)) setMaxRuns(v)
             }}
             placeholder="No limit"
-            className="w-16 text-xs text-center border border-gray-300 rounded px-1.5 py-0.5 bg-white focus:outline-none focus:border-gray-500"
+            className="w-16 bg-surface-primary border border-border-primary rounded-lg px-2.5 py-1.5 text-sm text-text-primary text-center focus:outline-none focus:border-text-muted"
           />
         </div>
         <div className="flex-1" />
         {createError && (
-          <span className="text-xs text-red-500 truncate">{createError}</span>
+          <span className="text-sm text-status-error truncate">{createError}</span>
         )}
         <button
           onClick={handleCreate}
           disabled={!prompt.trim()}
-          className="text-xs bg-blue-500 text-white px-3 py-1 rounded hover:bg-blue-600 disabled:opacity-50 disabled:cursor-not-allowed"
+          className="text-sm bg-interactive text-white px-4 py-2 rounded-lg hover:bg-interactive-hover disabled:opacity-50 disabled:cursor-not-allowed"
         >
           Create Task
         </button>
@@ -500,10 +500,10 @@ export function TasksPanel({ roomId, autonomyMode }: { roomId?: number | null; a
   }
 
   if (isLoading && !tasks) {
-    return <div className="p-4 text-xs text-gray-400">Loading...</div>
+    return <div className="p-4 text-sm text-text-muted">Loading...</div>
   }
   if (!tasks) {
-    return <div className="p-4 text-xs text-red-500">{tasksError ?? 'Failed to load tasks.'}</div>
+    return <div className="p-4 text-sm text-status-error">{tasksError ?? 'Failed to load tasks.'}</div>
   }
 
   const taskCounts = {
@@ -516,14 +516,14 @@ export function TasksPanel({ roomId, autonomyMode }: { roomId?: number | null; a
 
   return (
     <div className="flex flex-col h-full">
-      <div className="px-3 py-1.5 border-b border-gray-200 flex items-center justify-between">
-        <span className="text-xs text-gray-500">
+      <div className="px-3 py-1.5 border-b border-border-primary flex items-center justify-between">
+        <span className="text-sm text-text-muted">
           {tasks.length} task(s)
         </span>
         {semi && (
           <button
             onClick={() => setShowCreateForm(!showCreateForm)}
-            className="text-xs text-blue-500 hover:text-blue-700 font-medium"
+            className="text-sm text-interactive hover:text-interactive-hover font-medium"
           >
             {showCreateForm ? 'Cancel' : '+ New Task'}
           </button>
@@ -538,8 +538,8 @@ export function TasksPanel({ roomId, autonomyMode }: { roomId?: number | null; a
         />
       )}
 
-      <div className="px-3 py-2 border-b border-gray-200">
-        <div className="flex items-center gap-1">
+      <div className="px-3 py-2 border-b border-border-primary">
+        <div className="flex items-center gap-2">
           <FilterPill
             label={`All (${taskCounts.all})`}
             active={filter === 'all'}
@@ -549,43 +549,43 @@ export function TasksPanel({ roomId, autonomyMode }: { roomId?: number | null; a
             label={`Active (${taskCounts.active})`}
             active={filter === 'active'}
             onClick={() => updateFilter('active')}
-            colorClass="bg-green-100 text-green-700"
+            colorClass="bg-status-success-bg text-status-success"
           />
           <FilterPill
             label={`Paused (${taskCounts.paused})`}
             active={filter === 'paused'}
             onClick={() => updateFilter('paused')}
-            colorClass="bg-yellow-100 text-yellow-700"
+            colorClass="bg-status-warning-bg text-status-warning"
           />
           <FilterPill
             label={`Done (${taskCounts.completed})`}
             active={filter === 'completed'}
             onClick={() => updateFilter('completed')}
-            colorClass="bg-blue-100 text-blue-700"
+            colorClass="bg-interactive-bg text-interactive"
           />
         </div>
       </div>
 
       {tasksError && (
-        <div className="px-3 py-2 text-xs text-yellow-700 bg-yellow-50">
+        <div className="px-3 py-2 text-sm text-status-warning bg-status-warning-bg">
           Temporary refresh issue: {tasksError}
         </div>
       )}
       {actionError && (
-        <div className="px-3 py-2 text-xs text-red-500 bg-red-50">
+        <div className="px-3 py-2 text-sm text-status-error bg-status-error-bg">
           Action failed: {actionError}
         </div>
       )}
 
       <div ref={containerRef} className="flex-1 overflow-y-auto">
       {filteredTasks.length === 0 ? (
-        <div className="p-4 text-center text-xs text-gray-400">
+        <div className="p-4 text-center text-sm text-text-muted">
           {filter !== 'all' ? (
             <>
               No tasks match filter.{' '}
               <button
                 onClick={() => updateFilter('all')}
-                className="text-blue-500 hover:text-blue-700"
+                className="text-interactive hover:text-interactive-hover"
               >
                 Clear filter
               </button>
@@ -597,9 +597,9 @@ export function TasksPanel({ roomId, autonomyMode }: { roomId?: number | null; a
           )}
         </div>
       ) : wide ? (
-        <table className="w-full text-xs">
+        <table className="w-full text-sm">
           <thead>
-            <tr className="text-left text-[10px] text-gray-400 uppercase tracking-wider border-b border-gray-200">
+            <tr className="text-left text-xs text-text-muted uppercase tracking-wider border-b border-border-primary">
               <th className="px-3 py-1.5 font-medium">Name</th>
               <th className="px-3 py-1.5 font-medium">Schedule</th>
               <th className="px-3 py-1.5 font-medium">Last Run</th>
@@ -614,16 +614,16 @@ export function TasksPanel({ roomId, autonomyMode }: { roomId?: number | null; a
             const source = sourceLabel(task)
             const worker = task.workerId != null ? workerMap.get(task.workerId) : undefined
             return (
-              <tr key={task.id} className="group border-b border-gray-50 hover:bg-gray-50/50">
+              <tr key={task.id} className="group border-b border-border-secondary hover:bg-surface-hover">
                 <td className="px-3 py-2 max-w-[200px]">
-                  <div className="font-medium text-gray-800 truncate">{task.name}</div>
-                  <div className="text-[10px] text-gray-400 flex items-center gap-1 mt-0.5">
+                  <div className="font-medium text-text-primary truncate">{task.name}</div>
+                  <div className="text-xs text-text-muted flex items-center gap-2 mt-0.5">
                     {source && <span>via {source}</span>}
                     {semi && workers && workers.length > 0 ? (
                       <select
                         value={task.workerId ?? ''}
                         onChange={(e) => assignWorker(task.id, e.target.value ? Number(e.target.value) : null)}
-                        className="text-[10px] text-purple-400 bg-transparent border-none p-0 cursor-pointer focus:outline-none"
+                        className="text-xs text-purple-400 bg-transparent border-none p-0 cursor-pointer focus:outline-none"
                       >
                         <option value="">No worker</option>
                         {workers.map((w) => (
@@ -634,7 +634,7 @@ export function TasksPanel({ roomId, autonomyMode }: { roomId?: number | null; a
                       worker && <span className="text-purple-400">{worker.name}</span>
                     )}
                     {task.sessionContinuity && (
-                      <span className="px-1 py-0.5 rounded bg-violet-100 text-violet-600 leading-none">cont</span>
+                      <span className="px-1 py-0.5 rounded-lg bg-violet-100 text-violet-600 leading-none">cont</span>
                     )}
                   </div>
                   {activeRun && <ProgressBar run={activeRun} />}
@@ -642,13 +642,13 @@ export function TasksPanel({ roomId, autonomyMode }: { roomId?: number | null; a
                     <ConsoleView runId={activeRun.id} />
                   )}
                 </td>
-                <td className="px-3 py-2 text-gray-500 whitespace-nowrap">
+                <td className="px-3 py-2 text-text-muted whitespace-nowrap">
                   {triggerLabel(task)}
                   {task.maxRuns != null && (
-                    <div className="text-[10px] text-gray-400">{task.runCount}/{task.maxRuns} runs</div>
+                    <div className="text-xs text-text-muted">{task.runCount}/{task.maxRuns} runs</div>
                   )}
                 </td>
-                <td className="px-3 py-2 text-gray-400 whitespace-nowrap">
+                <td className="px-3 py-2 text-text-muted whitespace-nowrap">
                   {formatRelativeTime(task.lastRun)}
                 </td>
                 <td className="px-3 py-2">{statusBadge(task)}</td>
@@ -658,7 +658,7 @@ export function TasksPanel({ roomId, autonomyMode }: { roomId?: number | null; a
                       {activeRun && (
                         <button
                           onClick={() => setConsoleTaskId(consoleTaskId === task.id ? null : task.id)}
-                          className="text-xs text-gray-500 hover:text-gray-700"
+                          className="text-sm text-text-muted hover:text-text-secondary"
                         >
                           {consoleTaskId === task.id ? 'Hide' : 'Console'}
                         </button>
@@ -666,7 +666,7 @@ export function TasksPanel({ roomId, autonomyMode }: { roomId?: number | null; a
                       <button
                         onClick={() => runNow(task.id)}
                         disabled={busy}
-                        className="text-xs text-blue-500 hover:text-blue-700 disabled:text-blue-300 disabled:cursor-not-allowed"
+                        className="text-sm text-interactive hover:text-interactive-hover disabled:opacity-40 disabled:cursor-not-allowed"
                       >
                         {busy ? 'Running' : 'Run'}
                       </button>
@@ -674,7 +674,7 @@ export function TasksPanel({ roomId, autonomyMode }: { roomId?: number | null; a
                         <button
                           onClick={() => togglePause(task)}
                           disabled={busy}
-                          className="text-xs text-yellow-600 hover:text-yellow-800 disabled:text-yellow-300 disabled:cursor-not-allowed"
+                          className="text-sm text-status-warning hover:text-status-warning disabled:opacity-40 disabled:cursor-not-allowed"
                         >
                           {task.status === 'paused' ? 'Resume' : 'Pause'}
                         </button>
@@ -682,7 +682,7 @@ export function TasksPanel({ roomId, autonomyMode }: { roomId?: number | null; a
                       <button
                         onClick={() => deleteTask(task.id)}
                         disabled={busy}
-                        className="text-xs text-red-400 hover:text-red-600 disabled:text-red-200 disabled:cursor-not-allowed"
+                        className="text-sm text-status-error hover:text-status-error disabled:opacity-40 disabled:cursor-not-allowed"
                       >
                         Delete
                       </button>
@@ -695,7 +695,7 @@ export function TasksPanel({ roomId, autonomyMode }: { roomId?: number | null; a
           </tbody>
         </table>
       ) : (
-        <div className="divide-y divide-gray-100">
+        <div className="divide-y divide-border-primary">
         {filteredTasks.map((task) => {
           const activeRun = runningByTaskId.get(task.id)
           const busy = !!activeRun || pendingRuns.has(task.id)
@@ -704,21 +704,21 @@ export function TasksPanel({ roomId, autonomyMode }: { roomId?: number | null; a
           return (
             <div key={task.id} className="px-3 py-2">
               <div className="flex items-center justify-between mb-1">
-                <span className="text-xs font-medium text-gray-800 truncate">{task.name}</span>
+                <span className="text-sm font-medium text-text-primary truncate">{task.name}</span>
                 {statusBadge(task)}
               </div>
-              <div className="text-xs text-gray-400 mb-1">
+              <div className="text-sm text-text-muted mb-1">
                 {triggerLabel(task)}
                 {task.maxRuns != null && (
-                  <span className="ml-1.5 text-gray-500">{task.runCount}/{task.maxRuns} runs</span>
+                  <span className="ml-1.5 text-text-muted">{task.runCount}/{task.maxRuns} runs</span>
                 )}
-                {source && <span className="ml-1.5 text-gray-300">via {source}</span>}
+                {source && <span className="ml-1.5 text-text-muted">via {source}</span>}
                 {worker && <span className="ml-1.5 text-purple-400">{worker.name}</span>}
                 {task.sessionContinuity && (
-                  <span className="ml-1.5 px-1 py-0.5 rounded bg-violet-100 text-violet-600">continuous</span>
+                  <span className="ml-1.5 px-1 py-0.5 rounded-lg bg-violet-100 text-violet-600">continuous</span>
                 )}
               </div>
-              <div className="text-xs text-gray-400 mb-1.5">
+              <div className="text-sm text-text-muted mb-1.5">
                 Last run: {formatRelativeTime(task.lastRun)}
               </div>
               {activeRun && <ProgressBar run={activeRun} />}
@@ -730,7 +730,7 @@ export function TasksPanel({ roomId, autonomyMode }: { roomId?: number | null; a
                   <button
                     onClick={() => runNow(task.id)}
                     disabled={busy}
-                    className="text-xs text-blue-500 hover:text-blue-700 disabled:text-blue-300 disabled:cursor-not-allowed"
+                    className="text-sm text-interactive hover:text-interactive-hover disabled:opacity-40 disabled:cursor-not-allowed"
                   >
                     {busy ? 'Running' : 'Run Now'}
                   </button>
@@ -738,7 +738,7 @@ export function TasksPanel({ roomId, autonomyMode }: { roomId?: number | null; a
                     <button
                       onClick={() => togglePause(task)}
                       disabled={busy}
-                      className="text-xs text-yellow-600 hover:text-yellow-800 disabled:text-yellow-300 disabled:cursor-not-allowed"
+                      className="text-sm text-status-warning hover:text-status-warning disabled:opacity-40 disabled:cursor-not-allowed"
                     >
                       {task.status === 'paused' ? 'Resume' : 'Pause'}
                     </button>
@@ -746,24 +746,24 @@ export function TasksPanel({ roomId, autonomyMode }: { roomId?: number | null; a
                   <button
                     onClick={() => deleteTask(task.id)}
                     disabled={busy}
-                    className="text-xs text-red-400 hover:text-red-600 disabled:text-red-200 disabled:cursor-not-allowed"
+                    className="text-sm text-status-error hover:text-status-error disabled:opacity-40 disabled:cursor-not-allowed"
                   >
                     Delete
                   </button>
                   {activeRun && (
                     <button
                       onClick={() => setConsoleTaskId(consoleTaskId === task.id ? null : task.id)}
-                      className="text-xs text-gray-500 hover:text-gray-700"
+                      className="text-sm text-text-muted hover:text-text-secondary"
                     >
                       {consoleTaskId === task.id ? 'Hide Console' : 'Console'}
                     </button>
                   )}
                   {semi && workers && workers.length > 0 && (
-                    <div className="ml-auto flex items-center gap-1">
+                    <div className="ml-auto flex items-center gap-2">
                       <select
                         value={task.workerId ?? ''}
                         onChange={(e) => assignWorker(task.id, e.target.value ? Number(e.target.value) : null)}
-                        className="text-[10px] text-purple-400 bg-transparent border border-gray-200 rounded px-1 py-0.5 cursor-pointer focus:outline-none"
+                        className="text-xs text-purple-400 bg-transparent border border-border-primary rounded-lg px-2.5 py-1.5 cursor-pointer focus:outline-none"
                       >
                         <option value="">No worker</option>
                         {workers.map((w) => (

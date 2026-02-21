@@ -72,71 +72,71 @@ export function ConnectPage({ port, onRetry }: ConnectPageProps): React.JSX.Elem
   }
 
   return (
-    <div className="flex flex-col h-screen bg-white items-center justify-center px-4 overflow-y-auto">
-      <div className="max-w-sm w-full py-8 space-y-5 text-center">
+    <div className="flex flex-col h-screen bg-surface-primary items-center justify-center px-4 overflow-y-auto">
+      <div className="max-w-sm w-full py-8 space-y-6 text-center">
         {/* Title */}
         <div>
-          <h1 className="text-lg font-semibold text-gray-800">Quoroom</h1>
-          <p className="text-xs text-gray-400 mt-0.5">Autonomous AI agent collective engine</p>
+          <h1 className="text-xl font-bold text-text-primary">Quoroom</h1>
+          <p className="text-sm text-text-muted mt-1">Autonomous AI agent collective engine</p>
         </div>
 
         {/* Status */}
-        <div className="bg-gray-50 rounded-lg p-3 space-y-1.5">
-          <div className="flex items-center justify-center gap-1.5">
-            <span className="w-1.5 h-1.5 rounded-full bg-red-400" />
-            <span className="text-xs text-red-500 font-medium">Local server not reachable</span>
+        <div className="bg-surface-secondary rounded-lg p-4 space-y-2 shadow-sm">
+          <div className="flex items-center justify-center gap-2">
+            <span className="w-2 h-2 rounded-full bg-status-error" />
+            <span className="text-sm text-status-error font-medium">Local server not reachable</span>
           </div>
-          <p className="text-[10px] text-gray-400">
+          <p className="text-xs text-text-muted">
             Quoroom runs entirely on your machine. Download and start it to continue.
           </p>
         </div>
 
         {/* Download — primary action */}
-        <div className="space-y-2">
+        <div className="space-y-3">
           <a
             href={bestDownloadUrl(assets[platform], releaseUrl)}
-            className="block w-full py-2.5 text-sm font-medium text-white bg-gray-800 hover:bg-gray-900 rounded transition-colors"
+            className="block w-full py-3 text-sm font-medium text-text-invert bg-interactive hover:bg-interactive-hover rounded-lg transition-colors shadow-sm"
           >
             {info.label}
           </a>
-          <p className="text-[10px] text-gray-400">
+          <p className="text-xs text-text-muted">
             {info.note} &middot; No dependencies needed
             {assets[platform].archive && assets[platform].installer && (
-              <> &middot; <a href={assets[platform].archive!} className="underline hover:text-gray-600">portable archive</a></>
+              <> &middot; <a href={assets[platform].archive!} className="underline hover:text-text-secondary">portable archive</a></>
             )}
           </p>
 
           {/* Other platforms */}
-          <div className="flex items-center justify-center gap-2 text-[10px]">
+          <div className="flex items-center justify-center gap-3 text-xs">
             {platform !== 'mac' && (
-              <a href={bestDownloadUrl(assets.mac, releaseUrl)} className="text-gray-400 hover:text-gray-600 underline">macOS</a>
+              <a href={bestDownloadUrl(assets.mac, releaseUrl)} className="text-text-muted hover:text-text-secondary underline">macOS</a>
             )}
             {platform !== 'windows' && (
-              <a href={bestDownloadUrl(assets.windows, releaseUrl)} className="text-gray-400 hover:text-gray-600 underline">Windows</a>
+              <a href={bestDownloadUrl(assets.windows, releaseUrl)} className="text-text-muted hover:text-text-secondary underline">Windows</a>
             )}
             {platform !== 'linux' && (
-              <a href={bestDownloadUrl(assets.linux, releaseUrl)} className="text-gray-400 hover:text-gray-600 underline">Linux</a>
+              <a href={bestDownloadUrl(assets.linux, releaseUrl)} className="text-text-muted hover:text-text-secondary underline">Linux</a>
             )}
           </div>
         </div>
 
         {/* Quick start after download */}
-        <div className="bg-gray-50 rounded-lg p-3 text-left space-y-1.5">
-          <p className="text-[10px] font-medium text-gray-500 uppercase tracking-wide">After downloading</p>
-          <div className="space-y-1">
+        <div className="bg-surface-secondary rounded-lg p-4 text-left space-y-2 shadow-sm">
+          <p className="text-xs font-medium text-text-muted uppercase tracking-wide">After downloading</p>
+          <div className="space-y-1.5">
             {info.steps.map((step, i) => (
               <div key={i} className="flex items-start gap-2">
-                <span className="text-[10px] text-gray-400 font-mono mt-0.5 shrink-0">{i + 1}.</span>
-                <span className="text-xs text-gray-600">{step}</span>
+                <span className="text-xs text-text-muted font-mono mt-0.5 shrink-0">{i + 1}.</span>
+                <span className="text-sm text-text-secondary">{step}</span>
               </div>
             ))}
             <div className="flex items-start gap-2">
-              <span className="text-[10px] text-gray-400 font-mono mt-0.5 shrink-0">{info.steps.length + 1}.</span>
-              <span className="text-xs text-gray-600">Run <code className="text-[11px] bg-gray-200 px-1 py-0.5 rounded font-mono">quoroom serve</code></span>
+              <span className="text-xs text-text-muted font-mono mt-0.5 shrink-0">{info.steps.length + 1}.</span>
+              <span className="text-sm text-text-secondary">Run <code className="text-xs bg-surface-tertiary px-1.5 py-0.5 rounded font-mono text-text-primary">quoroom serve</code></span>
             </div>
             <div className="flex items-start gap-2">
-              <span className="text-[10px] text-gray-400 font-mono mt-0.5 shrink-0">{info.steps.length + 2}.</span>
-              <span className="text-xs text-gray-500">This page will redirect automatically</span>
+              <span className="text-xs text-text-muted font-mono mt-0.5 shrink-0">{info.steps.length + 2}.</span>
+              <span className="text-sm text-text-muted">This page will redirect automatically</span>
             </div>
           </div>
         </div>
@@ -145,19 +145,19 @@ export function ConnectPage({ port, onRetry }: ConnectPageProps): React.JSX.Elem
         <div>
           <button
             onClick={() => setShowDev(!showDev)}
-            className="text-[10px] text-gray-400 hover:text-gray-600"
+            className="text-xs text-text-muted hover:text-text-secondary transition-colors"
           >
             {showDev ? 'Hide' : 'Show'} developer install (npm / Homebrew)
           </button>
           {showDev && (
-            <div className="mt-2 bg-gray-50 rounded-lg p-3 text-left space-y-1.5">
+            <div className="mt-2 bg-surface-secondary rounded-lg p-4 text-left space-y-2 shadow-sm">
               <div className="flex items-start gap-2">
-                <span className="text-[10px] text-gray-500 shrink-0">npm:</span>
-                <code className="text-[11px] bg-gray-200 px-1.5 py-0.5 rounded text-gray-700 font-mono">npm install -g quoroom && quoroom serve</code>
+                <span className="text-xs text-text-muted shrink-0">npm:</span>
+                <code className="text-xs bg-surface-tertiary px-2 py-1 rounded text-text-primary font-mono">npm install -g quoroom && quoroom serve</code>
               </div>
               <div className="flex items-start gap-2">
-                <span className="text-[10px] text-gray-500 shrink-0">brew:</span>
-                <code className="text-[11px] bg-gray-200 px-1.5 py-0.5 rounded text-gray-700 font-mono">brew install quoroom-ai/quoroom/quoroom</code>
+                <span className="text-xs text-text-muted shrink-0">brew:</span>
+                <code className="text-xs bg-surface-tertiary px-2 py-1 rounded text-text-primary font-mono">brew install quoroom-ai/quoroom/quoroom</code>
               </div>
             </div>
           )}
@@ -165,18 +165,18 @@ export function ConnectPage({ port, onRetry }: ConnectPageProps): React.JSX.Elem
 
         {/* Port + Retry */}
         <div className="flex items-center justify-center gap-2">
-          <span className="text-[10px] text-gray-400">Port:</span>
+          <span className="text-xs text-text-muted">Port:</span>
           <input
             type="number"
             value={editPort}
             onChange={(e) => setEditPort(e.target.value)}
             onKeyDown={(e) => { if (e.key === 'Enter') handleRetry() }}
-            className="w-16 px-1.5 py-0.5 text-xs border border-gray-200 rounded text-center font-mono"
+            className="w-16 px-2 py-1 text-sm border border-border-primary rounded-lg text-center font-mono bg-surface-primary text-text-primary"
           />
           <button
             onClick={handleRetry}
             disabled={retrying}
-            className="text-xs px-3 py-1 text-gray-600 hover:text-gray-800 border border-gray-200 hover:border-gray-300 rounded transition-colors disabled:opacity-40"
+            className="text-sm px-4 py-1.5 text-text-secondary hover:text-text-primary border border-border-primary hover:border-interactive rounded-lg transition-colors disabled:opacity-40"
           >
             {retrying ? 'Connecting...' : 'Retry'}
           </button>
@@ -184,15 +184,15 @@ export function ConnectPage({ port, onRetry }: ConnectPageProps): React.JSX.Elem
 
         {/* Links */}
         <div className="flex items-center justify-center gap-3">
-          <a href="https://github.com/quoroom-ai/room" target="_blank" rel="noopener noreferrer" className="text-[10px] text-gray-400 hover:text-gray-600">GitHub</a>
-          <span className="text-gray-200">|</span>
-          <a href="https://github.com/quoroom-ai/room/releases" target="_blank" rel="noopener noreferrer" className="text-[10px] text-gray-400 hover:text-gray-600">All releases</a>
-          <span className="text-gray-200">|</span>
-          <a href="https://github.com/quoroom-ai/room/issues/new" target="_blank" rel="noopener noreferrer" className="text-[10px] text-gray-400 hover:text-gray-600">Report Bug</a>
+          <a href="https://github.com/quoroom-ai/room" target="_blank" rel="noopener noreferrer" className="text-xs text-text-muted hover:text-text-secondary">GitHub</a>
+          <span className="text-border-primary">|</span>
+          <a href="https://github.com/quoroom-ai/room/releases" target="_blank" rel="noopener noreferrer" className="text-xs text-text-muted hover:text-text-secondary">All releases</a>
+          <span className="text-border-primary">|</span>
+          <a href="https://github.com/quoroom-ai/room/issues/new" target="_blank" rel="noopener noreferrer" className="text-xs text-text-muted hover:text-text-secondary">Report Bug</a>
         </div>
 
         {/* Privacy */}
-        <p className="text-[10px] text-gray-300">
+        <p className="text-xs text-text-muted opacity-60">
           100% local — all data stays on your machine. This page contains no backend.
         </p>
       </div>

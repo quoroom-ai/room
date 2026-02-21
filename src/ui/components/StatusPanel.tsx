@@ -39,16 +39,16 @@ async function fetchStatus(): Promise<StatusData> {
 }
 
 const cardClass =
-  'w-full text-left p-3 bg-gray-50 rounded-lg hover:bg-gray-100 transition-colors cursor-pointer'
+  'w-full text-left p-3 bg-surface-secondary rounded-lg shadow-sm hover:bg-surface-hover transition-colors cursor-pointer'
 
 const EVENT_TYPE_COLORS: Record<string, string> = {
-  decision: 'bg-blue-100 text-blue-700',
-  milestone: 'bg-amber-100 text-amber-700',
-  financial: 'bg-green-100 text-green-700',
-  deployment: 'bg-purple-100 text-purple-700',
-  worker: 'bg-orange-100 text-orange-700',
-  error: 'bg-red-100 text-red-700',
-  system: 'bg-gray-100 text-gray-500',
+  decision: 'bg-interactive-bg text-interactive',
+  milestone: 'bg-status-warning-bg text-status-warning',
+  financial: 'bg-status-success-bg text-status-success',
+  deployment: 'bg-status-info-bg text-status-info',
+  worker: 'bg-brand-100 text-brand-700',
+  error: 'bg-status-error-bg text-status-error',
+  system: 'bg-surface-tertiary text-text-muted',
 }
 
 interface StatusPanelProps {
@@ -89,11 +89,11 @@ export function StatusPanel({ onNavigate, advancedMode, roomId }: StatusPanelPro
   const workerMap = new Map((workers ?? []).map(w => [w.id, w]))
 
   if (isLoading && !data) {
-    return <div ref={containerRef} className="p-4 text-xs text-gray-400">Loading...</div>
+    return <div ref={containerRef} className="p-4 text-sm text-text-muted">Loading...</div>
   }
   if (!data) {
     return (
-      <div ref={containerRef} className="p-4 text-xs text-red-500">
+      <div ref={containerRef} className="p-4 text-sm text-status-error">
         {error ?? 'Failed to load status.'}
       </div>
     )
@@ -106,8 +106,8 @@ export function StatusPanel({ onNavigate, advancedMode, roomId }: StatusPanelPro
   const memoryCard = advancedMode ? (
     <button key="memory" className={cardClass} onClick={() => onNavigate?.('memory')}>
       <div className="flex items-center justify-between">
-        <span className="text-xs font-medium text-gray-600">Memory</span>
-        <span className="text-xs text-gray-500">{data.entityCount} entities</span>
+        <span className="text-sm font-medium text-text-secondary">Memory</span>
+        <span className="text-sm text-text-muted">{data.entityCount} entities</span>
       </div>
     </button>
   ) : null
@@ -115,8 +115,8 @@ export function StatusPanel({ onNavigate, advancedMode, roomId }: StatusPanelPro
   const workersCard = (
     <button key="workers" className={cardClass} onClick={() => onNavigate?.('workers')}>
       <div className="flex items-center justify-between">
-        <span className="text-xs font-medium text-gray-600">Workers</span>
-        <span className="text-xs text-gray-500">{data.workerCount} configured</span>
+        <span className="text-sm font-medium text-text-secondary">Workers</span>
+        <span className="text-sm text-text-muted">{data.workerCount} configured</span>
       </div>
     </button>
   )
@@ -124,13 +124,13 @@ export function StatusPanel({ onNavigate, advancedMode, roomId }: StatusPanelPro
   const tasksCard = (
     <button key="tasks" className={cardClass} onClick={() => onNavigate?.('tasks')}>
       <div className="flex items-center justify-between mb-1">
-        <span className="text-xs font-medium text-gray-600">Tasks</span>
-        <span className="text-xs text-gray-500">{data.tasks.length} total</span>
+        <span className="text-sm font-medium text-text-secondary">Tasks</span>
+        <span className="text-sm text-text-muted">{data.tasks.length} total</span>
       </div>
-      <div className="flex gap-3 text-xs text-gray-500">
-        <span className="text-green-600">{activeTasks.length} active</span>
-        {pausedTasks.length > 0 && <span className="text-yellow-600">{pausedTasks.length} paused</span>}
-        {completedTasks.length > 0 && <span className="text-blue-600">{completedTasks.length} completed</span>}
+      <div className="flex gap-3 text-sm text-text-muted">
+        <span className="text-status-success">{activeTasks.length} active</span>
+        {pausedTasks.length > 0 && <span className="text-status-warning">{pausedTasks.length} paused</span>}
+        {completedTasks.length > 0 && <span className="text-interactive">{completedTasks.length} completed</span>}
       </div>
     </button>
   )
@@ -138,8 +138,8 @@ export function StatusPanel({ onNavigate, advancedMode, roomId }: StatusPanelPro
   const watchesCard = advancedMode ? (
     <button key="watches" className={cardClass} onClick={() => onNavigate?.('watches')}>
       <div className="flex items-center justify-between">
-        <span className="text-xs font-medium text-gray-600">Watches</span>
-        <span className="text-xs text-gray-500">{data.watchCount} active</span>
+        <span className="text-sm font-medium text-text-secondary">Watches</span>
+        <span className="text-sm text-text-muted">{data.watchCount} active</span>
       </div>
     </button>
   ) : null
@@ -147,21 +147,21 @@ export function StatusPanel({ onNavigate, advancedMode, roomId }: StatusPanelPro
   const lastRunCard = (
     <button key="lastrun" className={cardClass} onClick={() => onNavigate?.('results')}>
       <div className="flex items-center justify-between mb-1">
-        <span className="text-xs font-medium text-gray-600">Last Run</span>
+        <span className="text-sm font-medium text-text-secondary">Last Run</span>
       </div>
       {data.latestRun ? (
-        <div className="text-xs text-gray-500">
-          <span className={data.latestRun.status === 'completed' ? 'text-green-600' : data.latestRun.status === 'running' ? 'text-blue-600' : 'text-red-500'}>
+        <div className="text-sm text-text-muted">
+          <span className={data.latestRun.status === 'completed' ? 'text-status-success' : data.latestRun.status === 'running' ? 'text-interactive' : 'text-status-error'}>
             {data.latestRun.status}
           </span>
           {' — '}
           {formatRelativeTime(data.latestRun.startedAt)}
           {data.latestRun.durationMs != null && (
-            <span className="text-gray-400"> ({(data.latestRun.durationMs / 1000).toFixed(1)}s)</span>
+            <span className="text-text-muted"> ({(data.latestRun.durationMs / 1000).toFixed(1)}s)</span>
           )}
         </div>
       ) : (
-        <span className="text-xs text-gray-400">No runs yet</span>
+        <span className="text-sm text-text-muted">No runs yet</span>
       )}
     </button>
   )
@@ -169,15 +169,15 @@ export function StatusPanel({ onNavigate, advancedMode, roomId }: StatusPanelPro
   const walletCard = wallet ? (
     <button key="wallet" className={cardClass} onClick={() => onNavigate?.('transactions')}>
       <div className="flex items-center justify-between mb-1">
-        <span className="text-xs font-medium text-gray-600">Wallet</span>
-        <span className="text-xs text-gray-400">{wallet.chain}</span>
+        <span className="text-sm font-medium text-text-secondary">Wallet</span>
+        <span className="text-sm text-text-muted">{wallet.chain}</span>
       </div>
-      <div className="font-mono text-[10px] text-gray-500 truncate">{wallet.address}</div>
+      <div className="font-mono text-xs text-text-muted truncate">{wallet.address}</div>
       {revenueSummary && (
-        <div className="flex gap-3 text-xs mt-1">
-          <span className="text-green-600">+${revenueSummary.totalIncome.toFixed(2)}</span>
-          <span className="text-red-500">-${revenueSummary.totalExpenses.toFixed(2)}</span>
-          <span className={revenueSummary.netProfit >= 0 ? 'text-blue-600' : 'text-amber-600'}>
+        <div className="flex gap-3 text-sm mt-1">
+          <span className="text-status-success">+${revenueSummary.totalIncome.toFixed(2)}</span>
+          <span className="text-status-error">-${revenueSummary.totalExpenses.toFixed(2)}</span>
+          <span className={revenueSummary.netProfit >= 0 ? 'text-interactive' : 'text-status-warning'}>
             net ${revenueSummary.netProfit.toFixed(2)}
           </span>
         </div>
@@ -187,20 +187,20 @@ export function StatusPanel({ onNavigate, advancedMode, roomId }: StatusPanelPro
 
   const runningSection =
     data.runningRuns.length > 0 ? (
-      <div className="p-3 bg-blue-50 rounded-lg">
-        <div className="text-xs font-medium text-blue-700 mb-1">Running ({data.runningRuns.length})</div>
+      <div className="p-3 bg-interactive-bg rounded-lg shadow-sm">
+        <div className="text-sm font-medium text-interactive mb-1">Running ({data.runningRuns.length})</div>
         {data.runningRuns.map((run) => (
           <div key={run.id} className="mb-1 last:mb-0">
             <div className="flex items-center gap-2">
-              <div className="flex-1 h-1.5 bg-blue-200 rounded-full overflow-hidden">
+              <div className="flex-1 h-1.5 bg-interactive-bg rounded-full overflow-hidden">
                 {run.progress != null ? (
-                  <div className="h-full bg-blue-500 rounded-full transition-all duration-500" style={{ width: `${Math.round(run.progress * 100)}%` }} />
+                  <div className="h-full bg-interactive rounded-full transition-all duration-500" style={{ width: `${Math.round(run.progress * 100)}%` }} />
                 ) : (
-                  <div className="h-full bg-blue-400 rounded-full animate-pulse w-full" />
+                  <div className="h-full bg-interactive rounded-full animate-pulse w-full" />
                 )}
               </div>
             </div>
-            {run.progressMessage && <div className="text-xs text-blue-600 mt-0.5 truncate">{run.progressMessage}</div>}
+            {run.progressMessage && <div className="text-sm text-interactive mt-0.5 truncate">{run.progressMessage}</div>}
           </div>
         ))}
       </div>
@@ -212,7 +212,7 @@ export function StatusPanel({ onNavigate, advancedMode, roomId }: StatusPanelPro
   const consoleSection = <LiveConsoleSection runningRuns={data.runningRuns} taskNames={taskNames} />
 
   const errorAlert = error ? (
-    <div className="px-3 py-2 text-xs text-yellow-700 bg-yellow-50 rounded-lg">Temporary data refresh issue: {error}</div>
+    <div className="px-3 py-2 text-sm text-status-warning bg-status-warning-bg rounded-lg">Temporary data refresh issue: {error}</div>
   ) : null
 
   // Activity timeline
@@ -235,18 +235,18 @@ export function StatusPanel({ onNavigate, advancedMode, roomId }: StatusPanelPro
   }
 
   const activitySection = roomId ? (
-    <div className="bg-gray-50 rounded-lg p-3 flex-1 flex flex-col min-h-0 overflow-x-hidden">
+    <div className="bg-surface-secondary rounded-lg p-4 shadow-sm flex-1 flex flex-col min-h-0 overflow-x-hidden">
       {/* Filter chips */}
       {presentTypes.length > 1 && (
-        <div className="flex flex-wrap gap-1 mb-2 shrink-0">
+        <div className="flex flex-wrap gap-2 mb-2 shrink-0">
           {presentTypes.map(type => (
             <button
               key={type}
               onClick={() => toggleFilter(type)}
-              className={`px-1.5 py-0.5 rounded text-[10px] font-medium transition-colors ${
+              className={`px-2.5 py-1.5 rounded-lg text-xs font-medium transition-colors ${
                 activeFilters.size === 0 || activeFilters.has(type)
-                  ? EVENT_TYPE_COLORS[type] ?? 'bg-gray-100 text-gray-500'
-                  : 'bg-gray-100 text-gray-300'
+                  ? EVENT_TYPE_COLORS[type] ?? 'bg-surface-tertiary text-text-muted'
+                  : 'bg-surface-tertiary text-text-muted'
               }`}
             >
               {type}
@@ -257,33 +257,33 @@ export function StatusPanel({ onNavigate, advancedMode, roomId }: StatusPanelPro
 
       {/* Timeline */}
       {filteredActivity.length === 0 ? (
-        <div className="text-xs text-gray-400">
+        <div className="text-sm text-text-muted">
           {allActivity.length === 0 ? 'No room activity yet.' : 'No matching events.'}
         </div>
       ) : (
-        <div className="space-y-1 flex-1 overflow-y-auto overflow-x-hidden">
+        <div className="space-y-2 flex-1 overflow-y-auto overflow-x-hidden">
           {filteredActivity.map(entry => (
             <div
               key={entry.id}
-              className="cursor-pointer hover:bg-white rounded px-1.5 py-1 transition-colors"
+              className="cursor-pointer hover:bg-surface-primary rounded-lg px-2.5 py-1.5 transition-colors"
               onClick={() => setExpandedActivityId(expandedActivityId === entry.id ? null : entry.id)}
             >
               <div className="flex items-center gap-1.5">
-                <span className={`px-1.5 py-0.5 rounded text-[10px] font-medium shrink-0 ${EVENT_TYPE_COLORS[entry.eventType] ?? 'bg-gray-100 text-gray-500'}`}>
+                <span className={`px-2.5 py-1.5 rounded-lg text-xs font-medium shrink-0 ${EVENT_TYPE_COLORS[entry.eventType] ?? 'bg-surface-tertiary text-text-muted'}`}>
                   {entry.eventType}
                 </span>
-                <span className="text-xs text-gray-700 truncate flex-1">{entry.summary}</span>
-                <span className="text-[10px] text-gray-400 shrink-0">{formatRelativeTime(entry.createdAt)}</span>
+                <span className="text-sm text-text-secondary truncate flex-1">{entry.summary}</span>
+                <span className="text-xs text-text-muted shrink-0">{formatRelativeTime(entry.createdAt)}</span>
               </div>
               {expandedActivityId === entry.id && (
                 <div className="mt-1 ml-1 space-y-0.5">
                   {entry.actorId && (
-                    <div className="text-[10px] text-gray-500">
+                    <div className="text-xs text-text-muted">
                       by {workerMap.get(entry.actorId)?.name ?? `Worker #${entry.actorId}`}
                     </div>
                   )}
                   {entry.details && (
-                    <div className="text-[10px] text-gray-500 whitespace-pre-wrap break-words">{entry.details}</div>
+                    <div className="text-xs text-text-muted whitespace-pre-wrap break-words">{entry.details}</div>
                   )}
                 </div>
               )}
@@ -298,27 +298,27 @@ export function StatusPanel({ onNavigate, advancedMode, roomId }: StatusPanelPro
   const activeView = showToggle ? viewMode : 'console'
 
   const toggleBar = showToggle ? (
-    <div className="flex gap-1 bg-gray-100 rounded-lg p-0.5 self-start shrink-0">
+    <div className="flex gap-2 bg-surface-tertiary rounded-lg p-0.5 self-start shrink-0">
       <button
         onClick={() => setViewMode('activity')}
-        className={`px-2.5 py-1 rounded-md text-xs font-medium transition-colors ${
-          activeView === 'activity' ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-700'
+        className={`px-2.5 py-1 rounded-md text-sm font-medium transition-colors ${
+          activeView === 'activity' ? 'bg-surface-primary text-text-primary shadow-sm' : 'text-text-muted hover:text-text-secondary'
         }`}
       >
         Timeline
       </button>
       <button
         onClick={() => setViewMode('console')}
-        className={`px-2.5 py-1 rounded-md text-xs font-medium transition-colors ${
-          activeView === 'console' ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-700'
+        className={`px-2.5 py-1 rounded-md text-sm font-medium transition-colors ${
+          activeView === 'console' ? 'bg-surface-primary text-text-primary shadow-sm' : 'text-text-muted hover:text-text-secondary'
         }`}
       >
         Console
       </button>
       <button
         onClick={() => setViewMode('chat')}
-        className={`px-2.5 py-1 rounded-md text-xs font-medium transition-colors ${
-          activeView === 'chat' ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-700'
+        className={`px-2.5 py-1 rounded-md text-sm font-medium transition-colors ${
+          activeView === 'chat' ? 'bg-surface-primary text-text-primary shadow-sm' : 'text-text-muted hover:text-text-secondary'
         }`}
       >
         Chat

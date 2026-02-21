@@ -9,6 +9,7 @@ import { checkExpiredDecisions } from './quorum'
 import { getRoomStatus } from './room'
 import { detectRateLimit, sleep } from './rate-limit'
 import { fetchPublicRooms, getRoomCloudId, listCloudStations, type PublicRoom, type CloudStation } from './cloud-sync'
+import { resolveApiKeyForModel } from './model-provider'
 
 interface LoopState {
   running: boolean
@@ -333,10 +334,12 @@ export async function runCycle(
   queries.updateAgentState(db, worker.id, 'acting')
 
   const model = worker.model ?? 'claude'
+  const apiKey = resolveApiKeyForModel(db, roomId, model)
   const result = await executeAgent({
     model,
     prompt,
     systemPrompt,
+    apiKey,
     timeoutMs: 5 * 60 * 1000, // 5 minutes per cycle
     maxTurns: maxTurns ?? 10
   })

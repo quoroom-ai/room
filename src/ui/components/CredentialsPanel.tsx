@@ -53,41 +53,41 @@ export function CredentialsPanel({ roomId }: CredentialsPanelProps): React.JSX.E
   }
 
   if (!roomId) {
-    return <div className="p-4 text-xs text-gray-400">Select a room to view credentials.</div>
+    return <div className="p-4 text-sm text-text-muted">Select a room to view credentials.</div>
   }
 
   return (
-    <div className="p-3 space-y-3">
+    <div className="p-4 space-y-4">
       <div className="flex items-center justify-between">
-        <h2 className="text-sm font-semibold text-gray-800">Credentials</h2>
+        <h2 className="text-base font-semibold text-text-primary">Credentials</h2>
         <button
           onClick={() => setShowForm(!showForm)}
-          className="text-[10px] px-2 py-0.5 bg-gray-100 rounded hover:bg-gray-200 text-gray-600"
+          className="text-xs px-2.5 py-1.5 bg-surface-tertiary rounded-lg hover:bg-surface-tertiary text-text-secondary"
         >
           {showForm ? 'Cancel' : '+ Add'}
         </button>
       </div>
 
       {showForm && (
-        <div className="bg-gray-50 rounded-lg p-3 space-y-2">
+        <div className="bg-surface-secondary shadow-sm rounded-lg p-4 space-y-2">
           <input
             value={name}
             onChange={e => setName(e.target.value)}
             placeholder="Name (e.g. OpenAI API Key)"
-            className="w-full text-xs px-2 py-1.5 border border-gray-200 rounded"
+            className="w-full text-sm px-2.5 py-1.5 border border-border-primary rounded-lg bg-surface-primary text-text-primary"
           />
           <input
             value={value}
             onChange={e => setValue(e.target.value)}
             placeholder="Value (will be encrypted)"
             type="password"
-            className="w-full text-xs px-2 py-1.5 border border-gray-200 rounded"
+            className="w-full text-sm px-2.5 py-1.5 border border-border-primary rounded-lg bg-surface-primary text-text-primary"
           />
           <div className="flex gap-2 items-center">
             <select
               value={type}
               onChange={e => setType(e.target.value)}
-              className="text-xs px-2 py-1 border border-gray-200 rounded"
+              className="text-sm px-2.5 py-1.5 border border-border-primary rounded-lg bg-surface-primary text-text-primary"
             >
               <option value="api_key">API Key</option>
               <option value="account">Account</option>
@@ -97,7 +97,7 @@ export function CredentialsPanel({ roomId }: CredentialsPanelProps): React.JSX.E
             <button
               onClick={handleCreate}
               disabled={!name.trim() || !value.trim()}
-              className="text-[10px] px-2 py-1 bg-gray-800 text-white rounded hover:bg-gray-700 disabled:opacity-40"
+              className="text-xs px-2.5 py-1.5 bg-surface-invert text-text-invert rounded-lg hover:opacity-80 disabled:opacity-40"
             >
               Save
             </button>
@@ -106,28 +106,28 @@ export function CredentialsPanel({ roomId }: CredentialsPanelProps): React.JSX.E
       )}
 
       {(!credentials || credentials.length === 0) ? (
-        <div className="text-xs text-gray-400 py-4 text-center">
+        <div className="text-sm text-text-muted py-4 text-center">
           No credentials provided yet. Agents may request API keys, accounts, or passwords.
         </div>
       ) : (
-        <div className="space-y-1.5">
+        <div className="space-y-2">
           {credentials.map(cred => (
-            <div key={cred.id} className="bg-gray-50 rounded-lg p-2.5 flex items-center gap-2">
+            <div key={cred.id} className="bg-surface-secondary shadow-sm rounded-lg p-3 flex items-center gap-2">
               <div className="flex-1 min-w-0">
-                <div className="text-xs font-medium text-gray-800 truncate">{cred.name}</div>
-                <div className="text-[10px] text-gray-400 flex gap-2">
-                  <span className="bg-gray-200 px-1 rounded">{TYPE_LABELS[cred.type] ?? cred.type}</span>
+                <div className="text-sm font-medium text-text-primary truncate">{cred.name}</div>
+                <div className="text-xs text-text-muted flex gap-2">
+                  <span className="bg-surface-tertiary px-1 rounded">{TYPE_LABELS[cred.type] ?? cred.type}</span>
                   <span>{maskValue(cred.valueEncrypted)}</span>
                   <span>{formatRelativeTime(cred.createdAt)}</span>
                 </div>
               </div>
               {confirmDelete === cred.id ? (
                 <div className="flex gap-1">
-                  <button onClick={() => handleDelete(cred.id)} className="text-[10px] px-1.5 py-0.5 bg-red-500 text-white rounded">Delete</button>
-                  <button onClick={() => setConfirmDelete(null)} className="text-[10px] px-1.5 py-0.5 bg-gray-200 rounded">Cancel</button>
+                  <button onClick={() => handleDelete(cred.id)} className="text-xs px-2.5 py-1.5 bg-status-error text-white rounded-lg">Delete</button>
+                  <button onClick={() => setConfirmDelete(null)} className="text-xs px-2.5 py-1.5 bg-surface-tertiary rounded-lg">Cancel</button>
                 </div>
               ) : (
-                <button onClick={() => setConfirmDelete(cred.id)} className="text-[10px] text-red-400 hover:text-red-600">Delete</button>
+                <button onClick={() => setConfirmDelete(cred.id)} className="text-xs text-status-error hover:text-red-600">Delete</button>
               )}
             </div>
           ))}

@@ -15,7 +15,6 @@ export function QueenChat({ roomId }: QueenChatProps): React.JSX.Element {
   const autoScrollRef = useRef(true)
   const inputRef = useRef<HTMLInputElement>(null)
 
-  // Load chat history on mount / room change
   useEffect(() => {
     if (!roomId) return
     setMessages([])
@@ -23,7 +22,6 @@ export function QueenChat({ roomId }: QueenChatProps): React.JSX.Element {
     api.chat.messages(roomId).then(setMessages).catch(() => {})
   }, [roomId])
 
-  // Auto-scroll on new messages
   useEffect(() => {
     if (autoScrollRef.current && scrollRef.current) {
       scrollRef.current.scrollTop = scrollRef.current.scrollHeight
@@ -44,7 +42,6 @@ export function QueenChat({ roomId }: QueenChatProps): React.JSX.Element {
     setLoading(true)
     autoScrollRef.current = true
 
-    // Optimistically add user message
     const tempMsg: ChatMessage = {
       id: -Date.now(),
       roomId,
@@ -75,22 +72,21 @@ export function QueenChat({ roomId }: QueenChatProps): React.JSX.Element {
 
   if (!roomId) {
     return (
-      <div className="bg-gray-50 rounded-lg flex-1 flex items-center justify-center min-h-0">
-        <span className="text-xs text-gray-400">Select a room to chat with the queen</span>
+      <div className="bg-surface-secondary rounded-lg flex-1 flex items-center justify-center min-h-0 shadow-sm">
+        <span className="text-sm text-text-muted">Select a room to chat with the queen</span>
       </div>
     )
   }
 
   return (
-    <div className="bg-gray-50 rounded-lg overflow-hidden flex-1 flex flex-col min-h-0">
-      {/* Messages area */}
+    <div className="bg-surface-secondary rounded-lg overflow-hidden flex-1 flex flex-col min-h-0 shadow-sm">
       <div
         ref={scrollRef}
         onScroll={handleScroll}
-        className="flex-1 overflow-y-auto bg-gray-900 mx-3 mt-3 rounded p-2 font-mono text-xs leading-relaxed min-h-[4rem]"
+        className="flex-1 overflow-y-auto bg-console-bg mx-3 mt-3 rounded-lg p-3 font-mono text-sm leading-relaxed min-h-[4rem]"
       >
         {messages.length === 0 && !loading ? (
-          <div className="text-gray-500">Ask the queen anything...</div>
+          <div className="text-console-muted">Ask the queen anything...</div>
         ) : (
           messages.map((msg) => (
             <div key={msg.id} className={`mb-1.5 ${msg.role === 'user' ? '' : ''}`}>
@@ -111,8 +107,7 @@ export function QueenChat({ roomId }: QueenChatProps): React.JSX.Element {
         )}
       </div>
 
-      {/* Input area */}
-      <div className="flex items-center gap-1.5 mx-3 mb-3 mt-1.5">
+      <div className="flex items-center gap-2 mx-3 mb-3 mt-2">
         <input
           ref={inputRef}
           type="text"
@@ -121,12 +116,12 @@ export function QueenChat({ roomId }: QueenChatProps): React.JSX.Element {
           onKeyDown={(e) => { if (e.key === 'Enter') handleSend() }}
           disabled={loading}
           placeholder="Ask the queen..."
-          className="flex-1 px-2 py-1.5 text-xs border border-gray-300 rounded focus:outline-none focus:border-gray-500 bg-white disabled:opacity-50"
+          className="flex-1 px-3 py-2 text-sm border border-border-primary rounded-lg focus:outline-none focus:border-interactive bg-surface-primary text-text-primary disabled:opacity-50"
         />
         <button
           onClick={handleSend}
           disabled={loading || !input.trim()}
-          className="px-2 py-1.5 text-xs bg-blue-500 text-white rounded hover:bg-blue-600 disabled:opacity-50 disabled:cursor-not-allowed shrink-0"
+          className="px-4 py-2 text-sm bg-interactive text-text-invert rounded-lg hover:bg-interactive-hover disabled:opacity-50 disabled:cursor-not-allowed shrink-0 transition-colors"
         >
           Send
         </button>
@@ -134,7 +129,7 @@ export function QueenChat({ roomId }: QueenChatProps): React.JSX.Element {
           <button
             onClick={handleReset}
             disabled={loading}
-            className="px-2 py-1.5 text-xs text-gray-500 hover:text-gray-700 border border-gray-200 rounded hover:border-gray-300 disabled:opacity-50 shrink-0"
+            className="px-3 py-2 text-sm text-text-muted hover:text-text-secondary border border-border-primary rounded-lg hover:border-interactive disabled:opacity-50 shrink-0 transition-colors"
           >
             Clear
           </button>

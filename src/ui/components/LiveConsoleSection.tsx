@@ -6,7 +6,7 @@ import type { TaskRun, ConsoleLogEntry } from '@shared/types'
 const CONSOLE_ENTRY_COLORS: Record<string, string> = {
   tool_call: 'text-yellow-400',
   assistant_text: 'text-green-300',
-  tool_result: 'text-gray-400',
+  tool_result: 'text-console-muted',
   result: 'text-blue-400',
   error: 'text-red-400'
 }
@@ -93,14 +93,14 @@ export function LiveConsoleSection({
   }, [])
 
   return (
-    <div className="bg-gray-50 rounded-lg overflow-hidden flex-1 flex flex-col min-h-0">
+    <div className="bg-surface-secondary rounded-lg overflow-hidden flex-1 flex flex-col min-h-0 shadow-sm">
       <div
         ref={scrollRef}
         onScroll={handleScroll}
-        className="flex-1 overflow-y-auto overflow-x-hidden bg-gray-900 m-3 rounded p-2 font-mono text-xs leading-relaxed min-h-[4rem]"
+        className="flex-1 overflow-y-auto overflow-x-hidden bg-console-bg m-3 rounded-lg p-3 font-mono text-sm leading-relaxed min-h-[4rem]"
       >
         {runningRuns.length === 0 ? (
-          <div className="text-gray-500">No tasks running</div>
+          <div className="text-console-muted">No tasks running</div>
         ) : (
           runningRuns.map((run) => {
             const entries = logsByRunId.get(run.id) ?? []
@@ -108,17 +108,17 @@ export function LiveConsoleSection({
             return (
               <div key={run.id} className="mb-2 last:mb-0">
                 {runningRuns.length > 1 && (
-                  <div className="text-blue-400 font-semibold mb-0.5 sticky top-0 bg-gray-900 py-0.5">
+                  <div className="text-blue-400 font-semibold mb-0.5 sticky top-0 bg-console-bg py-0.5">
                     {taskName}
                   </div>
                 )}
                 {entries.length === 0 ? (
-                  <div className="text-gray-500">Waiting for output...</div>
+                  <div className="text-console-muted">Waiting for output...</div>
                 ) : (
                   entries.map((e) => (
                     <div
                       key={`${run.id}-${e.seq}`}
-                      className={`${CONSOLE_ENTRY_COLORS[e.entryType] ?? 'text-gray-300'} whitespace-pre-wrap break-words`}
+                      className={`${CONSOLE_ENTRY_COLORS[e.entryType] ?? 'text-console-text'} whitespace-pre-wrap break-words`}
                     >
                       {e.content}
                     </div>
