@@ -25,7 +25,7 @@ import { useNotifications } from './hooks/useNotifications'
 import { semverGt } from './lib/releases'
 import { useInstallPrompt, type InstallPrompt } from './hooks/useInstallPrompt'
 import { api } from './lib/client'
-import type { Room, Escalation, RoomMessage } from '@shared/types'
+import type { Room, Escalation, RoomMessage, QuorumDecision } from '@shared/types'
 
 const ADVANCED_TABS = new Set<Tab>(
   mainTabs.filter((tab) => tab.advanced).map((tab) => tab.id)
@@ -96,11 +96,13 @@ function App(): React.JSX.Element {
   const [createRoomError, setCreateRoomError] = useState<string | null>(null)
 
   const [messagesUnread, setMessagesUnread] = useState(0)
+  const [votesActive, setVotesActive] = useState(0)
 
   useNotifications()
   const installPrompt = useInstallPrompt()
   const [installDismissed, setInstallDismissed] = useState(() => localStorage.getItem('quoroom_install_dismissed') === 'true')
   const [showWalkthrough, setShowWalkthrough] = useState(() => !localStorage.getItem('quoroom_walkthrough_seen'))
+  const [sidebarOpen, setSidebarOpen] = useState(false)
 
   // Update check — fetch /api/status once on startup (and every 30 min) to detect new releases
   const [serverUpdateInfo, setServerUpdateInfo] = useState<{
@@ -139,6 +141,18 @@ function App(): React.JSX.Element {
     }
     void fetchUnread()
     const interval = setInterval(fetchUnread, 10000)
+    return () => clearInterval(interval)
+  }, [expandedRoomId, ready])
+
+  // Poll active voting count for the expanded room (for sidebar badge)
+  useEffect(() => {
+    if (!ready || expandedRoomId === null) { setVotesActive(0); return }
+    async function fetchActive(): Promise<void> {
+      const decisions = await api.decisions.list(expandedRoomId!, 'voting').catch(() => [] as QuorumDecision[])
+      setVotesActive(decisions.length)
+    }
+    void fetchActive()
+    const interval = setInterval(fetchActive, 10000)
     return () => clearInterval(interval)
   }, [expandedRoomId, ready])
 
@@ -222,6 +236,7 @@ function App(): React.JSX.Element {
   function handleTabChange(t: Tab): void {
     setTab(t)
     localStorage.setItem('quoroom_tab', t)
+    setSidebarOpen(false)
   }
 
   function handleAdvancedModeChange(enabled: boolean): void {
@@ -244,6 +259,7 @@ function App(): React.JSX.Element {
     const next = expandedRoomId === roomId ? null : roomId
     setExpandedRoomId(next)
     if (next !== null) handleRoomChange(next)
+    else setSidebarOpen(false)
   }
 
   function handleRoomTabClick(roomId: number, t: Tab): void {
@@ -387,10 +403,36 @@ function App(): React.JSX.Element {
 
   return (
     <div className="flex h-screen bg-surface-primary">
-      {/* Left sidebar */}
-      <div data-testid="sidebar" className="w-48 flex-shrink-0 flex flex-col bg-surface-secondary border-r border-border-primary py-2 px-2">
-        {/* Swarm link */}
+      {/* Sidebar backdrop (mobile only) */}
+      {sidebarOpen && (
+        <div className="fixed inset-0 bg-black/40 z-40 md:hidden" onClick={() => setSidebarOpen(false)} />
+      )}
+
+      {/* Left sidebar — overlay on mobile, static on desktop */}
+      <div
+        data-testid="sidebar"
+        className={`fixed inset-y-0 left-0 z-50 w-64 flex flex-col bg-surface-secondary border-r border-border-primary py-2 px-2 transform transition-transform duration-200 ease-out ${sidebarOpen ? 'translate-x-0' : '-translate-x-full'} md:static md:translate-x-0 md:w-48 md:flex-shrink-0 md:z-auto`}
+      >
+        {/* Navigation links */}
         <div className="pb-2 mb-2 border-b border-border-primary">
+          <a
+            href="https://quoroom.ai/rooms"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="w-full px-3 py-2 text-sm text-left rounded-lg transition-colors flex items-center gap-2 text-text-muted hover:text-text-secondary hover:bg-surface-hover"
+          >
+            <svg width="14" height="14" viewBox="0 0 14 14" className="shrink-0" fill="none" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M7 1C4 1 1 4 1 7s3 6 6 6 6-3 6-6-3-6-6-6z" />
+              <path d="M1 7h12" />
+              <path d="M7 1c1.5 1.5 2.5 3.5 2.5 6S8.5 11.5 7 13" />
+              <path d="M7 1c-1.5 1.5-2.5 3.5-2.5 6s1 4.5 2.5 6" />
+            </svg>
+            Public Rooms
+            <svg width="10" height="10" viewBox="0 0 10 10" className="shrink-0 ml-auto opacity-50" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M4 1h5v5" />
+              <path d="M9 1L3.5 6.5" />
+            </svg>
+          </a>
           <button
             onClick={() => handleTabChange('swarm')}
             className={`w-full px-3 py-2 text-sm text-left rounded-lg transition-colors flex items-center gap-2 ${
@@ -402,7 +444,7 @@ function App(): React.JSX.Element {
             <svg width="14" height="14" viewBox="0 0 14 14" className="shrink-0">
               <polygon points="7,1 12.5,4 12.5,10 7,13 1.5,10 1.5,4" fill="none" stroke="currentColor" strokeWidth="1.3"/>
             </svg>
-            Swarm
+            My Swarm
           </button>
         </div>
 
@@ -483,6 +525,11 @@ function App(): React.JSX.Element {
                       >
                         <span className="flex items-center gap-1.5">
                           {t.label}
+                          {t.id === 'votes' && votesActive > 0 && (
+                            <span className="inline-flex items-center justify-center min-w-[16px] h-4 px-1 rounded-full bg-interactive text-white text-[10px] font-bold leading-none">
+                              {votesActive}
+                            </span>
+                          )}
                           {t.id === 'messages' && messagesUnread > 0 && (
                             <span className="inline-flex items-center justify-center min-w-[16px] h-4 px-1 rounded-full bg-status-error text-white text-[10px] font-bold leading-none">
                               {messagesUnread}
@@ -540,18 +587,33 @@ function App(): React.JSX.Element {
           const statusColor = running ? 'text-status-success' : paused ? 'text-status-warning' : 'text-text-muted'
           return (
             <div className="flex items-center gap-2 px-4 py-2 border-b border-border-secondary bg-surface-primary shrink-0">
+              <button className="md:hidden p-1 -ml-1 mr-1 text-text-muted hover:text-text-primary" onClick={() => setSidebarOpen(true)} aria-label="Open menu">
+                <svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"><path d="M3 5h14M3 10h14M3 15h14" /></svg>
+              </button>
               <span className={`w-2 h-2 rounded-full flex-shrink-0 ${dot}`} />
               <span className="text-sm font-semibold text-text-primary truncate">{selectedRoom.name}</span>
               <span className={`text-xs flex-shrink-0 ${statusColor}`}>{statusLabel}</span>
               {selectedRoom.goal && (
                 <>
-                  <span className="text-text-muted flex-shrink-0">{'\u00B7'}</span>
-                  <span className="text-xs text-text-muted truncate flex-1 min-w-0">{selectedRoom.goal}</span>
+                  <span className="text-text-muted flex-shrink-0 hidden sm:inline">{'\u00B7'}</span>
+                  <span className="text-xs text-text-muted truncate flex-1 min-w-0 hidden sm:inline">{selectedRoom.goal}</span>
                 </>
               )}
             </div>
           )
         })()}
+
+        {/* Mobile header for non-room views */}
+        {(tab === 'swarm' || tab === 'settings' || tab === 'help' || !selectedRoom) && (
+          <div className="md:hidden flex items-center gap-2 px-4 py-2 border-b border-border-secondary bg-surface-primary shrink-0">
+            <button className="p-1 -ml-1 text-text-muted hover:text-text-primary" onClick={() => setSidebarOpen(true)} aria-label="Open menu">
+              <svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"><path d="M3 5h14M3 10h14M3 15h14" /></svg>
+            </button>
+            <span className="text-sm font-semibold text-text-primary">
+              {tab === 'swarm' ? 'My Swarm' : tab === 'settings' ? 'Global Settings' : tab === 'help' ? 'Help' : 'Quoroom'}
+            </span>
+          </div>
+        )}
 
         <div className="flex-1 overflow-y-auto">
           {renderPanel()}

@@ -2,7 +2,7 @@ import { useState, useMemo, useCallback, useRef } from 'react'
 import { usePolling } from '../hooks/usePolling'
 import { useContainerWidth } from '../hooks/useContainerWidth'
 import { api } from '../lib/client'
-import type { Room, Worker, Station, RevenueSummary } from '@shared/types'
+import type { Room, Worker, Station, RevenueSummary, OnChainBalance } from '@shared/types'
 
 interface SwarmPanelProps {
   rooms: Room[]
@@ -363,6 +363,20 @@ export function SwarmPanel({ rooms, queenRunning, onNavigateToRoom }: SwarmPanel
     30000
   )
 
+  const { data: balanceMap } = usePolling<Record<number, OnChainBalance>>(
+    async () => {
+      if (rooms.length === 0) return {}
+      const entries = await Promise.all(
+        rooms.map(async r => {
+          const bal = await api.wallet.balance(r.id).catch(() => null)
+          return [r.id, bal] as const
+        })
+      )
+      return Object.fromEntries(entries.filter(([, v]) => v !== null)) as Record<number, OnChainBalance>
+    },
+    30000
+  )
+
   const workersPerRoom = useMemo(() => {
     const map: Record<number, Worker[]> = {}
     for (const w of allWorkers ?? []) {
@@ -375,6 +389,7 @@ export function SwarmPanel({ rooms, queenRunning, onNavigateToRoom }: SwarmPanel
 
   const totalIncome = useMemo(() => Object.values(revenueMap ?? {}).reduce((s, r) => s + r.totalIncome, 0), [revenueMap])
   const totalExpenses = useMemo(() => Object.values(revenueMap ?? {}).reduce((s, r) => s + r.totalExpenses, 0), [revenueMap])
+  const totalOnChainBalance = useMemo(() => Object.values(balanceMap ?? {}).reduce((s, b) => s + b.totalBalance, 0), [balanceMap])
 
   const showSatellites = containerWidth >= 400
 
@@ -453,20 +468,23 @@ export function SwarmPanel({ rooms, queenRunning, onNavigateToRoom }: SwarmPanel
   return (
     <div ref={containerRef} className="flex flex-col h-full">
       {/* Header */}
-      <div className="flex items-center justify-between px-4 py-2.5 border-b border-border-primary shrink-0">
+      <div className="flex flex-col md:flex-row md:items-center md:justify-between px-4 py-2.5 border-b border-border-primary shrink-0 gap-1 md:gap-0">
         <div className="flex items-center gap-2">
           <svg width="16" height="16" viewBox="0 0 16 16" className="text-interactive shrink-0">
             <polygon points={hexPoints(8, 8, 7)} fill="none" stroke="currentColor" strokeWidth="1.3" />
           </svg>
           <span className="text-sm font-semibold text-text-secondary">Swarm</span>
         </div>
-        <div className="flex items-center gap-3">
+        <div className="flex items-center gap-3 flex-wrap">
           <span className="text-xs text-text-muted">{rooms.length} room{rooms.length !== 1 ? 's' : ''}</span>
           <span className="text-xs text-text-muted">{(allWorkers ?? []).filter(w => w.roomId !== null).length} workers</span>
           <span className="text-xs text-text-muted">{Object.values(stationMap ?? {}).flat().length} stations</span>
 
           {showMoney && revenueMap && (
             <>
+              {totalOnChainBalance > 0 && (
+                <span className="text-xs text-interactive">{fmtMoney(totalOnChainBalance)} bal</span>
+              )}
               <span className="text-xs text-status-success">{fmtMoney(totalIncome)} in</span>
               <span className="text-xs text-status-error">{fmtMoney(totalExpenses)} out</span>
             </>
@@ -729,8 +747,14 @@ export function SwarmPanel({ rooms, queenRunning, onNavigateToRoom }: SwarmPanel
               )}
               {showMoney && (revenueMap ?? {})[hoveredRoom.id] && (() => {
                 const rev = (revenueMap ?? {})[hoveredRoom.id]!
+                const bal = (balanceMap ?? {})[hoveredRoom.id]
                 return (
                   <div className="pt-1 border-t border-border-primary mt-1">
+                    {bal && bal.totalBalance > 0 && (
+                      <div>
+                        <span className="text-interactive font-medium">{fmtMoney(bal.totalBalance)} balance</span>
+                      </div>
+                    )}
                     <span className="text-status-success">{fmtMoney(rev.totalIncome)} income</span>
                     <span className="text-text-muted mx-1">/</span>
                     <span className="text-status-error">{fmtMoney(rev.totalExpenses)} expenses</span>

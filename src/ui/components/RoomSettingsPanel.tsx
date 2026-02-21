@@ -1,7 +1,8 @@
 import { useState } from 'react'
 import { usePolling } from '../hooks/usePolling'
 import { api } from '../lib/client'
-import type { Room, Wallet, RevenueSummary } from '@shared/types'
+import { Select } from './Select'
+import type { Room, Wallet, RevenueSummary, OnChainBalance } from '@shared/types'
 
 interface RoomSettingsPanelProps {
   roomId: number | null
@@ -29,6 +30,10 @@ export function RoomSettingsPanel({ roomId }: RoomSettingsPanelProps): React.JSX
   )
   const { data: revenueSummary } = usePolling<RevenueSummary | null>(
     () => roomId ? api.wallet.summary(roomId).catch(() => null) : Promise.resolve(null),
+    30000
+  )
+  const { data: onChainBalance } = usePolling<OnChainBalance | null>(
+    () => roomId ? api.wallet.balance(roomId).catch(() => null) : Promise.resolve(null),
     30000
   )
   const [queenRunning, setQueenRunning] = useState<Record<number, boolean>>({})
@@ -196,11 +201,14 @@ export function RoomSettingsPanel({ roomId }: RoomSettingsPanelProps): React.JSX
   const quietEnabled = room.queenQuietFrom !== null
   const activeQueenAuth = queenAuth[room.id] ?? null
 
-  function row(label: string, children: React.ReactNode): React.JSX.Element {
+  function row(label: string, children: React.ReactNode, description?: string): React.JSX.Element {
     return (
-      <div className="flex items-center justify-between text-sm py-2">
-        <span className="text-text-secondary">{label}</span>
-        <div>{children}</div>
+      <div className="py-2">
+        <div className="flex items-center justify-between text-sm">
+          <span className="text-text-secondary">{label}</span>
+          <div>{children}</div>
+        </div>
+        {description && <p className="text-xs text-text-muted mt-0.5 leading-tight">{description}</p>}
       </div>
     )
   }
@@ -246,24 +254,26 @@ export function RoomSettingsPanel({ roomId }: RoomSettingsPanelProps): React.JSX
                       room.autonomyMode === 'semi' ? 'bg-interactive text-white' : 'bg-surface-primary text-text-muted hover:bg-surface-hover'
                     }`}
                   >Semi</button>
-                </div>
+                </div>,
+                'Auto: agents control everything, UI is read-only. Semi: full UI controls for the keeper.'
               )}
 
               {/* Queen model */}
               {row('Model',
-                <select
+                <Select
                   value={queenModel[room.id] ?? 'claude'}
-                  onChange={(e) => handleSetQueenModel(room, e.target.value)}
-                  className="text-sm border border-border-primary rounded-lg px-2.5 py-1.5 bg-surface-primary text-text-secondary"
-                >
-                  <option value="claude">Claude Code (subscription)</option>
-                  <option value="claude-opus-4-6">Opus</option>
-                  <option value="claude-sonnet-4-6">Sonnet</option>
-                  <option value="claude-haiku-4-5-20251001">Haiku</option>
-                  <option value="codex">Codex (ChatGPT subscription)</option>
-                  <option value="openai:gpt-4o-mini">OpenAI API</option>
-                  <option value="anthropic:claude-3-5-sonnet-latest">Claude API</option>
-                </select>
+                  onChange={(v) => handleSetQueenModel(room, v)}
+                  options={[
+                    { value: 'claude', label: 'Claude Code (subscription)' },
+                    { value: 'claude-opus-4-6', label: 'Opus' },
+                    { value: 'claude-sonnet-4-6', label: 'Sonnet' },
+                    { value: 'claude-haiku-4-5-20251001', label: 'Haiku' },
+                    { value: 'codex', label: 'Codex (ChatGPT subscription)' },
+                    { value: 'openai:gpt-4o-mini', label: 'OpenAI API' },
+                    { value: 'anthropic:claude-3-5-sonnet-latest', label: 'Claude API' },
+                  ]}
+                />,
+                'LLM provider for the queen. Subscription has lower cost per token than API. API options require a key.'
               )}
 
               {activeQueenAuth?.mode === 'api' && (
@@ -292,31 +302,33 @@ export function RoomSettingsPanel({ roomId }: RoomSettingsPanelProps): React.JSX
                     disabled={room.maxConcurrentTasks <= 1}
                     className="w-5 h-5 rounded-lg bg-surface-tertiary hover:bg-surface-tertiary disabled:opacity-30 text-sm font-medium text-text-secondary"
                   >-</button>
-                  <span className="w-5 text-center text-sm tabular-nums">{room.maxConcurrentTasks}</span>
+                  <span className="w-5 text-center text-sm tabular-nums text-text-primary">{room.maxConcurrentTasks}</span>
                   <button
                     onClick={() => handleChangeMaxTasks(room, 1)}
                     disabled={room.maxConcurrentTasks >= 10}
                     className="w-5 h-5 rounded-lg bg-surface-tertiary hover:bg-surface-tertiary disabled:opacity-30 text-sm font-medium text-text-secondary"
                   >+</button>
-                </div>
+                </div>,
+                'How many tasks the queen can run in parallel. Higher values use more compute.'
               )}
 
               {/* Cycle gap */}
               {row('Cycle gap',
-                <select
-                  value={room.queenCycleGapMs}
-                  onChange={(e) => handleSetCycleGap(room, Number(e.target.value))}
-                  className="text-sm border border-border-primary rounded-lg px-2.5 py-1.5 bg-surface-primary text-text-secondary"
-                >
-                  <option value={10000}>10s</option>
-                  <option value={30000}>30s</option>
-                  <option value={60000}>1 min</option>
-                  <option value={300000}>5 min</option>
-                  <option value={900000}>15 min</option>
-                  <option value={1800000}>30 min</option>
-                  <option value={3600000}>1 hr</option>
-                  <option value={7200000}>2 hr</option>
-                </select>
+                <Select
+                  value={String(room.queenCycleGapMs)}
+                  onChange={(v) => handleSetCycleGap(room, Number(v))}
+                  options={[
+                    { value: '10000', label: '10s' },
+                    { value: '30000', label: '30s' },
+                    { value: '60000', label: '1 min' },
+                    { value: '300000', label: '5 min' },
+                    { value: '900000', label: '15 min' },
+                    { value: '1800000', label: '30 min' },
+                    { value: '3600000', label: '1 hr' },
+                    { value: '7200000', label: '2 hr' },
+                  ]}
+                />,
+                'Sleep time between queen cycles. Shorter gaps burn more tokens.'
               )}
 
               {/* Max turns */}
@@ -327,13 +339,14 @@ export function RoomSettingsPanel({ roomId }: RoomSettingsPanelProps): React.JSX
                     disabled={room.queenMaxTurns <= 1}
                     className="w-5 h-5 rounded-lg bg-surface-tertiary hover:bg-surface-tertiary disabled:opacity-30 text-sm font-medium text-text-secondary"
                   >-</button>
-                  <span className="w-5 text-center text-sm tabular-nums">{room.queenMaxTurns}</span>
+                  <span className="w-5 text-center text-sm tabular-nums text-text-primary">{room.queenMaxTurns}</span>
                   <button
                     onClick={() => handleSetMaxTurns(room, 1)}
                     disabled={room.queenMaxTurns >= 50}
                     className="w-5 h-5 rounded-lg bg-surface-tertiary hover:bg-surface-tertiary disabled:opacity-30 text-sm font-medium text-text-secondary"
                   >+</button>
-                </div>
+                </div>,
+                'Max tool-use rounds per cycle. Limits how much the queen can do in one run.'
               )}
 
               {/* Quiet hours */}
@@ -387,7 +400,6 @@ export function RoomSettingsPanel({ roomId }: RoomSettingsPanelProps): React.JSX
                 <p className="text-sm text-text-muted py-1">Wallet not found for this room.</p>
               ) : (
                 <div className="space-y-2">
-                  {row('Chain', <span className="text-sm text-text-muted">{wallet.chain}</span>)}
                   <div className="py-1">
                     <p className="text-sm text-text-secondary mb-1">Address</p>
                     <div className="flex items-center gap-2">
@@ -407,6 +419,12 @@ export function RoomSettingsPanel({ roomId }: RoomSettingsPanelProps): React.JSX
                     {copyState === 'error' && (
                       <p className="text-xs text-status-error mt-1">Copy failed.</p>
                     )}
+                    {onChainBalance && onChainBalance.totalBalance > 0 && (
+                      <div className="text-sm mt-1">
+                        <span className="text-interactive font-medium">${onChainBalance.totalBalance.toFixed(2)}</span>
+                        <span className="text-text-muted"> on-chain</span>
+                      </div>
+                    )}
                     {revenueSummary && (
                       <div className="flex gap-3 text-sm mt-1">
                         <span className="text-status-success">+${revenueSummary.totalIncome.toFixed(2)}</span>
@@ -416,6 +434,13 @@ export function RoomSettingsPanel({ roomId }: RoomSettingsPanelProps): React.JSX
                         </span>
                       </div>
                     )}
+                  </div>
+                  <div className="pt-1 border-t border-border-primary">
+                    <p className="text-xs text-text-muted leading-relaxed">
+                      Supports USDC and USDT on Base, Ethereum, Arbitrum, Optimism, and Polygon.
+                      Same address works on all EVM chains. Balance is aggregated across all networks.
+                      Fund the wallet to give the queen resources for stations and services.
+                    </p>
                   </div>
                 </div>
               )}
@@ -440,7 +465,8 @@ export function RoomSettingsPanel({ roomId }: RoomSettingsPanelProps): React.JSX
                       (room.workerModel ?? 'claude').startsWith('ollama:') ? 'bg-interactive text-white' : 'bg-surface-primary text-text-muted hover:bg-surface-hover'
                     }`}
                   >Ollama</button>
-                </div>
+                </div>,
+                'LLM for worker agents. Ollama runs free local models, Claude uses your subscription or API key.'
               )}
               {(room.workerModel ?? 'claude').startsWith('ollama:') && (
                 <p className="text-xs text-status-success leading-tight pl-0">
@@ -457,7 +483,7 @@ export function RoomSettingsPanel({ roomId }: RoomSettingsPanelProps): React.JSX
               <div className="flex items-center justify-between text-sm py-1">
                 <div>
                   <span className="text-text-secondary">Public room</span>
-                  <p className="text-xs text-text-muted mt-0.5 leading-tight">Visible on the public leaderboard at quoroom.ai</p>
+                  <p className="text-xs text-text-muted mt-0.5 leading-tight">Visible on the public leaderboard at quoroom.ai. Shows objective, balances, and activity only.</p>
                 </div>
                 <button
                   onClick={() => handleToggleVisibility(room)}

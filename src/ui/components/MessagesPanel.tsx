@@ -3,6 +3,7 @@ import { usePolling } from '../hooks/usePolling'
 import { useWebSocket } from '../hooks/useWebSocket'
 import { api } from '../lib/client'
 import { formatRelativeTime } from '../utils/time'
+import { Select } from './Select'
 import type { Escalation, Worker, RoomMessage } from '@shared/types'
 
 const STATUS_COLORS: Record<string, string> = {
@@ -155,26 +156,26 @@ export function MessagesPanel({ roomId, autonomyMode }: MessagesPanelProps): Rea
       {semi && showCreateForm && roomId && (
         <div className="p-4 border-b-2 border-blue-300 bg-interactive-bg/50 space-y-2">
           <div className="flex gap-2">
-            <select
-              value={fromAgentId}
-              onChange={(e) => { setFromAgentId(e.target.value === '' ? '' : Number(e.target.value)); setCreateError(null) }}
-              className="flex-1 px-2.5 py-1.5 text-sm border border-border-primary rounded-lg focus:outline-none focus:border-gray-500 bg-surface-primary text-text-primary"
-            >
-              <option value="">Send as worker...</option>
-              {workerList.map(w => (
-                <option key={w.id} value={w.id}>{w.name}</option>
-              ))}
-            </select>
-            <select
-              value={toAgentId}
-              onChange={(e) => setToAgentId(e.target.value === '' ? '' : Number(e.target.value))}
-              className="flex-1 px-2.5 py-1.5 text-sm border border-border-primary rounded-lg focus:outline-none focus:border-gray-500 bg-surface-primary text-text-primary"
-            >
-              <option value="">To worker (optional)</option>
-              {workerList.map(w => (
-                <option key={w.id} value={w.id}>{w.name}</option>
-              ))}
-            </select>
+            <Select
+              value={String(fromAgentId)}
+              onChange={(v) => { setFromAgentId(v === '' ? '' : Number(v)); setCreateError(null) }}
+              className="flex-1"
+              placeholder="Send as worker..."
+              options={[
+                { value: '', label: 'Send as worker...' },
+                ...workerList.map(w => ({ value: String(w.id), label: w.name }))
+              ]}
+            />
+            <Select
+              value={String(toAgentId)}
+              onChange={(v) => setToAgentId(v === '' ? '' : Number(v))}
+              className="flex-1"
+              placeholder="To worker (optional)"
+              options={[
+                { value: '', label: 'To worker (optional)' },
+                ...workerList.map(w => ({ value: String(w.id), label: w.name }))
+              ]}
+            />
           </div>
           <textarea
             value={messageBody}

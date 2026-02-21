@@ -3,6 +3,7 @@ import { usePolling } from '../hooks/usePolling'
 import { useWebSocket } from '../hooks/useWebSocket'
 import { api } from '../lib/client'
 import { formatRelativeTime } from '../utils/time'
+import { Select } from './Select'
 import type { Credential } from '@shared/types'
 
 const TYPE_LABELS: Record<string, string> = {
@@ -84,16 +85,16 @@ export function CredentialsPanel({ roomId }: CredentialsPanelProps): React.JSX.E
             className="w-full text-sm px-2.5 py-1.5 border border-border-primary rounded-lg bg-surface-primary text-text-primary"
           />
           <div className="flex gap-2 items-center">
-            <select
+            <Select
               value={type}
-              onChange={e => setType(e.target.value)}
-              className="text-sm px-2.5 py-1.5 border border-border-primary rounded-lg bg-surface-primary text-text-primary"
-            >
-              <option value="api_key">API Key</option>
-              <option value="account">Account</option>
-              <option value="card">Card</option>
-              <option value="other">Other</option>
-            </select>
+              onChange={setType}
+              options={[
+                { value: 'api_key', label: 'API Key' },
+                { value: 'account', label: 'Account' },
+                { value: 'card', label: 'Card' },
+                { value: 'other', label: 'Other' },
+              ]}
+            />
             <button
               onClick={handleCreate}
               disabled={!name.trim() || !value.trim()}

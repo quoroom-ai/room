@@ -2,7 +2,7 @@ import { useState } from 'react'
 import { usePolling } from '../hooks/usePolling'
 import { api } from '../lib/client'
 import { formatRelativeTime } from '../utils/time'
-import type { WalletTransaction, RevenueSummary, Wallet } from '@shared/types'
+import type { WalletTransaction, RevenueSummary, Wallet, OnChainBalance } from '@shared/types'
 
 const TYPE_COLORS: Record<string, string> = {
   receive: 'text-status-success',
@@ -69,6 +69,11 @@ export function TransactionsPanel({ roomId }: TransactionsPanelProps): React.JSX
     10000
   )
 
+  const { data: onChainBalance } = usePolling<OnChainBalance | null>(
+    () => roomId ? api.wallet.balance(roomId).catch(() => null) : Promise.resolve(null),
+    30000
+  )
+
   const { data: billingStations } = usePolling<CloudStation[]>(
     () => roomId ? (api.cloudStations.list(roomId) as Promise<CloudStation[]>).catch(() => []) : Promise.resolve([]),
     30000
@@ -88,13 +93,13 @@ export function TransactionsPanel({ roomId }: TransactionsPanelProps): React.JSX
         <div className="flex gap-2">
           <button
             onClick={() => setSubTab('wallet')}
-            className={`text-xs px-2.5 py-1.5 rounded-lg ${subTab === 'wallet' ? 'bg-surface-invert text-white' : 'bg-surface-tertiary text-text-muted hover:bg-surface-hover'}`}
+            className={`text-xs px-2.5 py-1.5 rounded-lg ${subTab === 'wallet' ? 'bg-surface-hover text-text-primary' : 'bg-surface-tertiary text-text-muted hover:bg-surface-hover'}`}
           >
             Wallet
           </button>
           <button
             onClick={() => setSubTab('billing')}
-            className={`text-xs px-2.5 py-1.5 rounded-lg ${subTab === 'billing' ? 'bg-surface-invert text-white' : 'bg-surface-tertiary text-text-muted hover:bg-surface-hover'}`}
+            className={`text-xs px-2.5 py-1.5 rounded-lg ${subTab === 'billing' ? 'bg-surface-hover text-text-primary' : 'bg-surface-tertiary text-text-muted hover:bg-surface-hover'}`}
           >
             Billing
           </button>
@@ -108,13 +113,19 @@ export function TransactionsPanel({ roomId }: TransactionsPanelProps): React.JSX
             <div className="bg-surface-secondary rounded-lg p-3 shadow-sm text-sm">
               <div className="text-text-muted">Wallet</div>
               <div className="font-mono text-xs text-text-secondary truncate">{wallet.address}</div>
-              <div className="text-xs text-text-muted mt-0.5">{wallet.chain} chain</div>
+              <div className="text-xs text-text-muted mt-0.5">EVM</div>
             </div>
           )}
 
           {/* P&L Summary */}
           {summary && (
-            <div className="grid grid-cols-4 gap-2">
+            <div className={`grid gap-2 ${onChainBalance && onChainBalance.totalBalance > 0 ? 'grid-cols-5' : 'grid-cols-4'}`}>
+              {onChainBalance && onChainBalance.totalBalance > 0 && (
+                <div className="bg-interactive-bg rounded-lg p-3 text-center shadow-sm">
+                  <div className="text-xs text-interactive">Balance</div>
+                  <div className="text-sm font-semibold text-interactive">${onChainBalance.totalBalance.toFixed(2)}</div>
+                </div>
+              )}
               <div className="bg-status-success-bg rounded-lg p-3 text-center shadow-sm">
                 <div className="text-xs text-status-success">Income</div>
                 <div className="text-sm font-semibold text-status-success">${summary.totalIncome.toFixed(2)}</div>

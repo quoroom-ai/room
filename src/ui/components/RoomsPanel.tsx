@@ -3,6 +3,7 @@ import { usePolling } from '../hooks/usePolling'
 import { useContainerWidth } from '../hooks/useContainerWidth'
 import { api } from '../lib/client'
 import { formatRelativeTime } from '../utils/time'
+import { Select } from './Select'
 import type { Room, Wallet } from '@shared/types'
 import { ROOM_TEMPLATES } from '@shared/room-templates'
 
@@ -125,10 +126,10 @@ export function RoomsPanel({ selectedRoomId, onSelectRoom }: RoomsPanelProps): R
       {/* Create form */}
       {showCreate && (
         <div className="bg-surface-secondary shadow-sm rounded-lg p-4 space-y-2">
-          <select
+          <Select
             value={selectedTemplate ?? ''}
-            onChange={(e) => {
-              const id = e.target.value || null
+            onChange={(v) => {
+              const id = v || null
               setSelectedTemplate(id)
               const tpl = ROOM_TEMPLATES.find(t => t.id === id)
               if (tpl) {
@@ -139,13 +140,16 @@ export function RoomsPanel({ selectedRoomId, onSelectRoom }: RoomsPanelProps): R
                 setCreateGoal('')
               }
             }}
-            className="w-full bg-surface-primary border border-border-primary rounded-lg px-2.5 py-1.5 text-sm text-text-secondary"
-          >
-            <option value="">Custom room...</option>
-            {ROOM_TEMPLATES.map(t => (
-              <option key={t.id} value={t.id}>{t.name} — {t.description.slice(0, 60)}</option>
-            ))}
-          </select>
+            className="w-full"
+            placeholder="Custom room..."
+            options={[
+              { value: '', label: 'Custom room...' },
+              ...ROOM_TEMPLATES.map(t => ({
+                value: t.id,
+                label: `${t.name} — ${t.description.slice(0, 60)}`
+              }))
+            ]}
+          />
           <input
             value={createName}
             onChange={(e) => setCreateName(e.target.value)}
@@ -235,7 +239,7 @@ export function RoomsPanel({ selectedRoomId, onSelectRoom }: RoomsPanelProps): R
                   Created {formatRelativeTime(room.createdAt)}
                   {wallets?.[room.id] && (
                     <span className="ml-2 font-mono text-text-muted" title={wallets[room.id].address}>
-                      {wallets[room.id].chain} {wallets[room.id].address.slice(0, 6)}...{wallets[room.id].address.slice(-4)}
+                      {wallets[room.id].address.slice(0, 6)}...{wallets[room.id].address.slice(-4)}
                     </span>
                   )}
                 </div>

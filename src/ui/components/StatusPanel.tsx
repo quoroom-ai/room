@@ -5,7 +5,7 @@ import { useContainerWidth } from '../hooks/useContainerWidth'
 import { LiveConsoleSection } from './LiveConsoleSection'
 import { QueenChat } from './QueenChat'
 import { api } from '../lib/client'
-import type { Task, TaskRun, RoomActivityEntry, Worker, Wallet, RevenueSummary } from '@shared/types'
+import type { Task, TaskRun, RoomActivityEntry, Worker, Wallet, RevenueSummary, OnChainBalance } from '@shared/types'
 import { formatRelativeTime } from '../utils/time'
 
 interface StatusData {
@@ -79,6 +79,10 @@ export function StatusPanel({ onNavigate, advancedMode, roomId }: StatusPanelPro
   )
   const { data: revenueSummary } = usePolling<RevenueSummary | null>(
     () => roomId ? api.wallet.summary(roomId).catch(() => null) : Promise.resolve(null),
+    30000
+  )
+  const { data: onChainBalance } = usePolling<OnChainBalance | null>(
+    () => roomId ? api.wallet.balance(roomId).catch(() => null) : Promise.resolve(null),
     30000
   )
 
@@ -170,9 +174,15 @@ export function StatusPanel({ onNavigate, advancedMode, roomId }: StatusPanelPro
     <button key="wallet" className={cardClass} onClick={() => onNavigate?.('transactions')}>
       <div className="flex items-center justify-between mb-1">
         <span className="text-sm font-medium text-text-secondary">Wallet</span>
-        <span className="text-sm text-text-muted">{wallet.chain}</span>
+        <span className="text-sm text-text-muted">EVM</span>
       </div>
       <div className="font-mono text-xs text-text-muted truncate">{wallet.address}</div>
+      {onChainBalance && onChainBalance.totalBalance > 0 && (
+        <div className="text-sm mt-1">
+          <span className="text-interactive font-medium">${onChainBalance.totalBalance.toFixed(2)}</span>
+          <span className="text-text-muted"> on-chain</span>
+        </div>
+      )}
       {revenueSummary && (
         <div className="flex gap-3 text-sm mt-1">
           <span className="text-status-success">+${revenueSummary.totalIncome.toFixed(2)}</span>

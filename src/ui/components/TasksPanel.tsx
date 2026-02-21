@@ -4,6 +4,7 @@ import { formatRelativeTime } from '../utils/time'
 import { useState, useEffect, useRef } from 'react'
 import { useContainerWidth } from '../hooks/useContainerWidth'
 import { api } from '../lib/client'
+import { Select } from './Select'
 
 type StatusFilter = 'all' | 'active' | 'paused' | 'completed'
 
@@ -324,15 +325,12 @@ function CreateTaskForm({ workers, onCreated, roomId }: { workers: Worker[] | nu
           ))}
         </div>
         {scheduleMode === 'preset' && (
-          <select
-            value={selectedPreset}
-            onChange={(e) => setSelectedPreset(Number(e.target.value))}
-            className="w-full bg-surface-primary border border-border-primary rounded-lg px-2.5 py-1.5 text-sm text-text-primary focus:outline-none focus:border-text-muted"
-          >
-            {SCHEDULE_PRESETS.map((p, i) => (
-              <option key={i} value={i}>{p.label}</option>
-            ))}
-          </select>
+          <Select
+            value={String(selectedPreset)}
+            onChange={(v) => setSelectedPreset(Number(v))}
+            className="w-full"
+            options={SCHEDULE_PRESETS.map((p, i) => ({ value: String(i), label: p.label }))}
+          />
         )}
         {scheduleMode === 'custom' && (
           <input
@@ -346,16 +344,15 @@ function CreateTaskForm({ workers, onCreated, roomId }: { workers: Worker[] | nu
       </div>
       <div className="flex items-center gap-2 flex-wrap">
         {workers && workers.length > 0 && (
-          <select
-            value={workerId}
-            onChange={(e) => setWorkerId(e.target.value ? Number(e.target.value) : '')}
-            className="bg-surface-primary border border-border-primary rounded-lg px-2.5 py-1.5 text-sm text-text-primary focus:outline-none focus:border-text-muted"
-          >
-            <option value="">No worker</option>
-            {workers.map((w) => (
-              <option key={w.id} value={w.id}>{w.name}{w.isDefault ? ' (default)' : ''}</option>
-            ))}
-          </select>
+          <Select
+            value={String(workerId)}
+            onChange={(v) => setWorkerId(v ? Number(v) : '')}
+            placeholder="No worker"
+            options={[
+              { value: '', label: 'No worker' },
+              ...workers.map(w => ({ value: String(w.id), label: `${w.name}${w.isDefault ? ' (default)' : ''}` }))
+            ]}
+          />
         )}
         <div className="flex items-center gap-2">
           <span className="text-xs text-text-muted">Runs:</span>
@@ -539,7 +536,7 @@ export function TasksPanel({ roomId, autonomyMode }: { roomId?: number | null; a
       )}
 
       <div className="px-3 py-2 border-b border-border-primary">
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 flex-wrap">
           <FilterPill
             label={`All (${taskCounts.all})`}
             active={filter === 'all'}
@@ -620,16 +617,17 @@ export function TasksPanel({ roomId, autonomyMode }: { roomId?: number | null; a
                   <div className="text-xs text-text-muted flex items-center gap-2 mt-0.5">
                     {source && <span>via {source}</span>}
                     {semi && workers && workers.length > 0 ? (
-                      <select
-                        value={task.workerId ?? ''}
-                        onChange={(e) => assignWorker(task.id, e.target.value ? Number(e.target.value) : null)}
-                        className="text-xs text-purple-400 bg-transparent border-none p-0 cursor-pointer focus:outline-none"
-                      >
-                        <option value="">No worker</option>
-                        {workers.map((w) => (
-                          <option key={w.id} value={w.id}>{w.name}{w.isDefault ? ' (default)' : ''}</option>
-                        ))}
-                      </select>
+                      <Select
+                        value={String(task.workerId ?? '')}
+                        onChange={(v) => assignWorker(task.id, v ? Number(v) : null)}
+                        variant="inline"
+                        className="text-purple-400"
+                        placeholder="No worker"
+                        options={[
+                          { value: '', label: 'No worker' },
+                          ...workers.map(w => ({ value: String(w.id), label: `${w.name}${w.isDefault ? ' (default)' : ''}` }))
+                        ]}
+                      />
                     ) : (
                       worker && <span className="text-purple-400">{worker.name}</span>
                     )}
@@ -760,16 +758,17 @@ export function TasksPanel({ roomId, autonomyMode }: { roomId?: number | null; a
                   )}
                   {semi && workers && workers.length > 0 && (
                     <div className="ml-auto flex items-center gap-2">
-                      <select
-                        value={task.workerId ?? ''}
-                        onChange={(e) => assignWorker(task.id, e.target.value ? Number(e.target.value) : null)}
-                        className="text-xs text-purple-400 bg-transparent border border-border-primary rounded-lg px-2.5 py-1.5 cursor-pointer focus:outline-none"
-                      >
-                        <option value="">No worker</option>
-                        {workers.map((w) => (
-                          <option key={w.id} value={w.id}>{w.name}{w.isDefault ? ' (default)' : ''}</option>
-                        ))}
-                      </select>
+                      <Select
+                        value={String(task.workerId ?? '')}
+                        onChange={(v) => assignWorker(task.id, v ? Number(v) : null)}
+                        variant="inline"
+                        className="text-purple-400"
+                        placeholder="No worker"
+                        options={[
+                          { value: '', label: 'No worker' },
+                          ...workers.map(w => ({ value: String(w.id), label: `${w.name}${w.isDefault ? ' (default)' : ''}` }))
+                        ]}
+                      />
                     </div>
                   )}
                 </div>

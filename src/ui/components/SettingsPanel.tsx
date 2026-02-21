@@ -41,6 +41,7 @@ export function SettingsPanel({ advancedMode, onAdvancedModeChange, installPromp
   const [updateChecking, setUpdateChecking] = useState(false)
   const [updateChecked, setUpdateChecked] = useState(false)
   const [claudePlan, setClaudePlan] = useState<'pro' | 'max' | 'api' | null>(null)
+  const [chatGptPlan, setChatGptPlan] = useState<'plus' | 'pro' | 'api' | null>(null)
   const [queenModel, setQueenModel] = useState<string | null>(null)
   const [telemetryEnabled, setTelemetryEnabled] = useState<boolean | null>(null)
   const { theme, setTheme } = useTheme()
@@ -71,6 +72,12 @@ export function SettingsPanel({ advancedMode, onAdvancedModeChange, installPromp
       setClaudePlan(plan)
     }).catch(() => {})
 
+    api.settings.get('chatgpt_plan').then((v) => {
+      const valid = ['plus', 'pro', 'api'] as const
+      const plan = valid.find(p => p === v) ?? null
+      setChatGptPlan(plan)
+    }).catch(() => {})
+
     api.settings.get('queen_model').then((v) => {
       setQueenModel(v || null)
     }).catch(() => setQueenModel(null))
@@ -83,6 +90,11 @@ export function SettingsPanel({ advancedMode, onAdvancedModeChange, installPromp
   async function setClaudePlanSetting(plan: 'pro' | 'max' | 'api' | null): Promise<void> {
     await api.settings.set('claude_plan', plan ?? '')
     setClaudePlan(plan)
+  }
+
+  async function setChatGptPlanSetting(plan: 'plus' | 'pro' | 'api' | null): Promise<void> {
+    await api.settings.set('chatgpt_plan', plan ?? '')
+    setChatGptPlan(plan)
   }
 
   async function setQueenModelSetting(model: string): Promise<void> {
@@ -233,6 +245,33 @@ export function SettingsPanel({ advancedMode, onAdvancedModeChange, installPromp
           </div>
           <div className="py-1.5">
             <div className="flex items-center justify-between text-sm">
+              <span className="text-text-secondary">ChatGPT plan</span>
+              <div className="flex rounded-lg overflow-hidden border border-border-primary">
+                <button
+                  onClick={() => setChatGptPlanSetting(null)}
+                  className={`px-2.5 py-1 text-xs font-medium transition-colors ${
+                    chatGptPlan === null
+                      ? 'bg-text-muted text-text-invert'
+                      : 'bg-surface-primary text-text-muted hover:bg-surface-tertiary'
+                  }`}
+                >{'\u2014'}</button>
+                {(['plus', 'pro', 'api'] as const).map((p) => (
+                  <button
+                    key={p}
+                    onClick={() => setChatGptPlanSetting(p)}
+                    className={`px-2.5 py-1 text-xs font-medium transition-colors ${
+                      chatGptPlan === p
+                        ? 'bg-interactive text-text-invert'
+                        : 'bg-surface-primary text-text-muted hover:bg-surface-tertiary'
+                    }`}
+                  >{p === 'api' ? 'API' : p.charAt(0).toUpperCase() + p.slice(1)}</button>
+                ))}
+              </div>
+            </div>
+            <p className="text-xs text-text-muted mt-0.5 leading-tight">Optimizes queen defaults when using Codex. Plus and Pro have different rate limits.</p>
+          </div>
+          <div className="py-1.5">
+            <div className="flex items-center justify-between text-sm">
               <span className="text-text-secondary">Queen model</span>
               <div className="flex rounded-lg overflow-hidden border border-border-primary">
                 {([
@@ -313,12 +352,19 @@ export function SettingsPanel({ advancedMode, onAdvancedModeChange, installPromp
           </div>
           <div className="flex items-center justify-between text-sm">
             <span className="text-text-secondary">Codex</span>
-            <span className={serverStatus?.codex.available ? 'text-status-success' : 'text-text-muted'}>
-              {serverStatus === null
-                ? '...'
-                : serverStatus.codex.available
-                  ? serverStatus.codex.version || 'Found'
-                  : 'Not found'}
+            <span className="flex items-center gap-1.5">
+              {chatGptPlan && (
+                <span className="px-1.5 py-0.5 rounded text-xs font-medium bg-interactive-bg text-interactive uppercase tracking-wide">
+                  {chatGptPlan}
+                </span>
+              )}
+              <span className={serverStatus?.codex.available ? 'text-status-success' : 'text-text-muted'}>
+                {serverStatus === null
+                  ? '...'
+                  : serverStatus.codex.available
+                    ? serverStatus.codex.version || 'Found'
+                    : 'Not found'}
+              </span>
             </span>
           </div>
           <div className="flex items-center justify-between text-sm">

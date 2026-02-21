@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react'
 import { usePolling } from '../hooks/usePolling'
 import { api } from '../lib/client'
 import { formatRelativeTime } from '../utils/time'
+import { Select } from './Select'
 import type { QuorumDecision, QuorumVote, Worker } from '@shared/types'
 
 const STATUS_COLORS: Record<string, string> = {
@@ -98,6 +99,11 @@ export function VotesPanel({ roomId, autonomyMode }: VotesPanelProps): React.JSX
     refresh()
   }
 
+  async function handleKeeperVote(decisionId: number, vote: string): Promise<void> {
+    await api.decisions.keeperVote(decisionId, vote)
+    refresh()
+  }
+
   async function handleResolve(decisionId: number, status: string): Promise<void> {
     await api.decisions.resolve(decisionId, status)
     refresh()
@@ -138,13 +144,12 @@ export function VotesPanel({ roomId, autonomyMode }: VotesPanelProps): React.JSX
             className="w-full px-2.5 py-1.5 text-sm border border-border-primary rounded-lg focus:outline-none focus:border-gray-500 bg-surface-primary resize-y"
           />
           <div className="flex gap-2 items-center">
-            <select
+            <Select
               value={createType}
-              onChange={(e) => setCreateType(e.target.value)}
-              className="flex-1 px-2.5 py-1.5 text-sm border border-border-primary rounded-lg focus:outline-none focus:border-gray-500 bg-surface-primary text-text-primary"
-            >
-              {Object.entries(TYPE_LABELS).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
-            </select>
+              onChange={setCreateType}
+              className="flex-1"
+              options={Object.entries(TYPE_LABELS).map(([k, v]) => ({ value: k, label: v }))}
+            />
             <button
               onClick={handleCreate}
               disabled={!createProposal.trim()}
@@ -185,6 +190,7 @@ export function VotesPanel({ roomId, autonomyMode }: VotesPanelProps): React.JSX
                       semi={semi}
                       onToggle={() => toggleExpand(d.id)}
                       onVote={(vote) => handleVote(d.id, vote)}
+                      onKeeperVote={(vote) => handleKeeperVote(d.id, vote)}
                       onResolve={(status) => handleResolve(d.id, status)}
                       onVoteWorkerChange={setVoteWorkerId}
                       onVoteReasoningChange={setVoteReasoning}
@@ -214,6 +220,7 @@ export function VotesPanel({ roomId, autonomyMode }: VotesPanelProps): React.JSX
                       semi={semi}
                       onToggle={() => toggleExpand(d.id)}
                       onVote={(vote) => handleVote(d.id, vote)}
+                      onKeeperVote={(vote) => handleKeeperVote(d.id, vote)}
                       onResolve={(status) => handleResolve(d.id, status)}
                       onVoteWorkerChange={setVoteWorkerId}
                       onVoteReasoningChange={setVoteReasoning}
@@ -240,6 +247,7 @@ interface DecisionRowProps {
   semi: boolean
   onToggle: () => void
   onVote: (vote: string) => void
+  onKeeperVote: (vote: string) => void
   onResolve: (status: string) => void
   onVoteWorkerChange: (v: number | '') => void
   onVoteReasoningChange: (v: string) => void
@@ -248,7 +256,7 @@ interface DecisionRowProps {
 function DecisionRow({
   decision: d, workerMap, workers, expanded, votes,
   voteWorkerId, voteReasoning, semi,
-  onToggle, onVote, onResolve, onVoteWorkerChange, onVoteReasoningChange
+  onToggle, onVote, onKeeperVote, onResolve, onVoteWorkerChange, onVoteReasoningChange
 }: DecisionRowProps): React.JSX.Element {
   const isVoting = d.status === 'voting'
 
@@ -286,18 +294,53 @@ function DecisionRow({
 
       {expanded && (
         <div className="px-3 pb-3 bg-surface-secondary space-y-2">
-          {/* Vote buttons for active proposals */}
+          {/* Keeper vote (semi-auto mode) */}
+          {isVoting && semi && (
+            <div className="flex items-center gap-2 py-1">
+              <span className="text-xs font-medium text-text-secondary shrink-0">Keeper vote:</span>
+              {d.keeperVote ? (
+                <span className={`px-1.5 py-0.5 rounded-lg text-xs font-medium border ${VOTE_COLORS[d.keeperVote] ?? 'bg-surface-tertiary text-text-muted'}`}>
+                  {d.keeperVote}
+                </span>
+              ) : (
+                <>
+                  <button
+                    onClick={() => onKeeperVote('yes')}
+                    className="text-xs px-3 py-2 md:px-2 md:py-1 rounded-lg border border-green-200 text-status-success hover:bg-green-50"
+                  >
+                    Yes
+                  </button>
+                  <button
+                    onClick={() => onKeeperVote('no')}
+                    className="text-xs px-3 py-2 md:px-2 md:py-1 rounded-lg border border-red-200 text-status-error hover:bg-red-50"
+                  >
+                    No
+                  </button>
+                  <button
+                    onClick={() => onKeeperVote('abstain')}
+                    className="text-xs px-3 py-2 md:px-2 md:py-1 rounded-lg border border-border-primary text-text-muted hover:bg-surface-hover"
+                  >
+                    Abstain
+                  </button>
+                </>
+              )}
+            </div>
+          )}
+
+          {/* Worker vote buttons for active proposals */}
           {isVoting && (
             <div className="space-y-2">
               <div className="flex gap-2 items-center">
-                <select
-                  value={voteWorkerId}
-                  onChange={(e) => onVoteWorkerChange(e.target.value ? Number(e.target.value) : '')}
-                  className="flex-1 px-2.5 py-1.5 text-sm border border-border-primary rounded-lg focus:outline-none focus:border-gray-500 bg-surface-primary text-text-primary"
-                >
-                  <option value="">Vote as...</option>
-                  {workers.map(w => <option key={w.id} value={w.id}>{w.name}</option>)}
-                </select>
+                <Select
+                  value={String(voteWorkerId)}
+                  onChange={(v) => onVoteWorkerChange(v ? Number(v) : '')}
+                  className="flex-1"
+                  placeholder="Vote as..."
+                  options={[
+                    { value: '', label: 'Vote as...' },
+                    ...workers.map(w => ({ value: String(w.id), label: w.name }))
+                  ]}
+                />
               </div>
               <div className="flex gap-2 items-center">
                 <input
@@ -311,21 +354,21 @@ function DecisionRow({
                 <button
                   onClick={() => onVote('yes')}
                   disabled={!voteWorkerId}
-                  className="text-xs px-2.5 py-1.5 rounded-lg border border-green-200 text-status-success hover:bg-green-50 disabled:opacity-50"
+                  className="text-xs px-3 py-2 md:px-2.5 md:py-1.5 rounded-lg border border-green-200 text-status-success hover:bg-green-50 disabled:opacity-50"
                 >
                   Yes
                 </button>
                 <button
                   onClick={() => onVote('no')}
                   disabled={!voteWorkerId}
-                  className="text-xs px-2.5 py-1.5 rounded-lg border border-red-200 text-status-error hover:bg-red-50 disabled:opacity-50"
+                  className="text-xs px-3 py-2 md:px-2.5 md:py-1.5 rounded-lg border border-red-200 text-status-error hover:bg-red-50 disabled:opacity-50"
                 >
                   No
                 </button>
                 <button
                   onClick={() => onVote('abstain')}
                   disabled={!voteWorkerId}
-                  className="text-xs px-2.5 py-1.5 rounded-lg border border-border-primary text-text-muted hover:bg-surface-hover disabled:opacity-50"
+                  className="text-xs px-3 py-2 md:px-2.5 md:py-1.5 rounded-lg border border-border-primary text-text-muted hover:bg-surface-hover disabled:opacity-50"
                 >
                   Abstain
                 </button>
@@ -334,13 +377,13 @@ function DecisionRow({
                     <div className="flex-1" />
                     <button
                       onClick={() => onResolve('approved')}
-                      className="text-xs px-2.5 py-1.5 rounded-lg border border-emerald-200 text-status-success hover:bg-emerald-50"
+                      className="text-xs px-3 py-2 md:px-2.5 md:py-1.5 rounded-lg border border-emerald-200 text-status-success hover:bg-emerald-50"
                     >
                       Approve
                     </button>
                     <button
                       onClick={() => onResolve('rejected')}
-                      className="text-xs px-2.5 py-1.5 rounded-lg border border-red-200 text-status-error hover:bg-red-50"
+                      className="text-xs px-3 py-2 md:px-2.5 md:py-1.5 rounded-lg border border-red-200 text-status-error hover:bg-red-50"
                     >
                       Reject
                     </button>
@@ -351,10 +394,18 @@ function DecisionRow({
           )}
 
           {/* Vote breakdown */}
-          {votes && votes.length > 0 && (
+          {(votes && votes.length > 0 || d.keeperVote) && (
             <div className="space-y-2 pt-1 border-t border-border-primary">
               <div className="text-xs font-medium text-text-muted">Votes</div>
-              {votes.map(v => (
+              {d.keeperVote && (
+                <div className="flex items-center gap-2 text-sm">
+                  <span className="text-text-secondary shrink-0 font-medium">Keeper</span>
+                  <span className={`px-1.5 py-0.5 rounded-lg text-xs font-medium border ${VOTE_COLORS[d.keeperVote] ?? 'bg-surface-tertiary text-text-muted'}`}>
+                    {d.keeperVote}
+                  </span>
+                </div>
+              )}
+              {(votes ?? []).map(v => (
                 <div key={v.id} className="flex items-center gap-2 text-sm">
                   <span className="text-text-secondary shrink-0">
                     {workerMap.get(v.workerId)?.name ?? `Worker #${v.workerId}`}
