@@ -8,19 +8,28 @@ interface BeforeInstallPromptEvent extends Event {
 export interface InstallPrompt {
   canInstall: boolean
   isInstalled: boolean
+  isManualInstallPlatform: boolean
   install: () => Promise<boolean>
 }
 
 export function useInstallPrompt(): InstallPrompt {
   const [deferredPrompt, setDeferredPrompt] = useState<BeforeInstallPromptEvent | null>(null)
   const [isInstalled, setIsInstalled] = useState(false)
+  const [isManualInstallPlatform, setIsManualInstallPlatform] = useState(false)
 
   useEffect(() => {
+    const ua = window.navigator.userAgent.toLowerCase()
+    const isiOS = /iphone|ipad|ipod/.test(ua)
+    const isSafari = ua.includes('safari') && !ua.includes('crios') && !ua.includes('fxios') && !ua.includes('edgios')
+
     // Already running as installed PWA
-    if (window.matchMedia('(display-mode: standalone)').matches) {
+    const inStandalone = window.matchMedia('(display-mode: standalone)').matches || (window.navigator as Navigator & { standalone?: boolean }).standalone === true
+    if (inStandalone) {
       setIsInstalled(true)
+      setIsManualInstallPlatform(false)
       return
     }
+    setIsManualInstallPlatform(isiOS && isSafari)
 
     const onPrompt = (e: Event) => {
       e.preventDefault()
@@ -49,5 +58,5 @@ export function useInstallPrompt(): InstallPrompt {
     return outcome === 'accepted'
   }
 
-  return { canInstall: !!deferredPrompt, isInstalled, install }
+  return { canInstall: !!deferredPrompt, isInstalled, isManualInstallPlatform, install }
 }

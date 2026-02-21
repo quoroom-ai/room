@@ -419,6 +419,8 @@ export function SettingsPanel({ advancedMode, onAdvancedModeChange, installPromp
               >
                 Install
               </button>
+            ) : installPrompt.isManualInstallPlatform ? (
+              <button onClick={() => onNavigate?.('help')} className="text-interactive hover:text-interactive-hover transition-colors">Manual install &rarr;</button>
             ) : (
               <button onClick={() => onNavigate?.('help')} className="text-interactive hover:text-interactive-hover transition-colors">Help tab &rarr;</button>
             )}

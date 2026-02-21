@@ -532,22 +532,30 @@ function App(): React.JSX.Element {
 
       {/* Main content */}
       <div className="flex-1 flex flex-col min-w-0">
-        {installPrompt.canInstall && !installPrompt.isInstalled && !installDismissed && (
+        {(installPrompt.canInstall || installPrompt.isManualInstallPlatform) && !installPrompt.isInstalled && !installDismissed && (
           <div className="flex items-center gap-3 px-4 py-2 bg-brand-50 border-b border-brand-200">
             <span className="text-sm text-brand-700 flex-1">
-              Install Quoroom as an app for quick access, Dock icon, and badge notifications.
+              {installPrompt.canInstall
+                ? 'Install Quoroom as an app for quick access, Dock icon, and badge notifications.'
+                : 'Install Quoroom from your browser menu for quick access, Dock icon, and badge notifications.'}
             </span>
             <button
               onClick={async () => {
-                const accepted = await installPrompt.install()
-                if (!accepted) {
+                if (installPrompt.canInstall) {
+                  const accepted = await installPrompt.install()
+                  if (!accepted) {
+                    setInstallDismissed(true)
+                    localStorage.setItem('quoroom_install_dismissed', 'true')
+                  }
+                } else {
+                  handleTabChange('help')
                   setInstallDismissed(true)
                   localStorage.setItem('quoroom_install_dismissed', 'true')
                 }
               }}
               className="text-sm px-4 py-1.5 bg-interactive text-text-invert rounded-lg hover:bg-interactive-hover shrink-0 font-medium transition-colors"
             >
-              Install
+              {installPrompt.canInstall ? 'Install' : 'How to install'}
             </button>
             <button
               onClick={() => {

@@ -1,4 +1,5 @@
 import type { InstallPrompt } from '../hooks/useInstallPrompt'
+import { APP_MODE } from '../lib/auth'
 
 interface HelpPanelProps {
   installPrompt: InstallPrompt
@@ -40,13 +41,25 @@ export function HelpPanel({ installPrompt, onStartWalkthrough }: HelpPanelProps)
           <h3 className="text-sm font-semibold text-text-secondary mb-1">How It Works</h3>
           <div className="bg-surface-secondary rounded-lg p-3 space-y-2 text-sm text-text-secondary leading-relaxed flex-1">
             <p>
-              <span className="font-medium text-interactive">100% local.</span> Database, agents, memory — everything stays on your machine.
+              <span className="font-medium text-interactive">
+                {APP_MODE === 'cloud' ? 'Your private server.' : '100% local.'}
+              </span>{' '}
+              {APP_MODE === 'cloud'
+                ? 'Database, agents, memory — everything stays on your cloud server.'
+                : 'Database, agents, memory — everything stays on your machine.'}
             </p>
             <p>
-              Server at <span className="font-mono text-text-secondary">localhost:3700</span>, SQLite database. Queen and workers support Claude/Codex/API and free Ollama models.
+              {APP_MODE === 'cloud'
+                ? 'Hosted server, SQLite database.'
+                : <>Server at <span className="font-mono text-text-secondary">localhost:3700</span>, SQLite database.</>
+              }{' '}
+              Queen and workers support Claude/Codex/API and free Ollama models.
             </p>
             <p className="text-xs text-text-muted">
-              <span className="font-mono">quoroom serve</span> → SQLite → Room Settings model selection
+              {APP_MODE === 'cloud'
+                ? 'Cloud server → SQLite → Room Settings model selection'
+                : <><span className="font-mono">quoroom serve</span> → SQLite → Room Settings model selection</>
+              }
             </p>
           </div>
         </div>
@@ -116,7 +129,10 @@ export function HelpPanel({ installPrompt, onStartWalkthrough }: HelpPanelProps)
               <span className="font-medium text-text-secondary">Tip:</span> Set your Claude plan in Preferences — Quoroom applies safe defaults automatically.
             </p>
             <p className="text-xs text-text-muted">
-              <span className="font-medium text-text-secondary">No token budget?</span> Pick an Ollama model in Room Settings. Queen model install runs automatically.
+              <span className="font-medium text-text-secondary">No token budget?</span>{' '}
+              {APP_MODE === 'cloud'
+                ? 'Pick an Ollama model in Room Settings — free models are available on your server.'
+                : 'Pick an Ollama model in Room Settings. Queen model install runs automatically.'}
             </p>
           </div>
         </div>
@@ -140,6 +156,11 @@ export function HelpPanel({ installPrompt, onStartWalkthrough }: HelpPanelProps)
                   >
                     Install Quoroom
                   </button>
+                )}
+                {!installPrompt.canInstall && installPrompt.isManualInstallPlatform && (
+                  <p className="text-xs text-status-warning">
+                    Automatic prompt is unavailable on this browser. Use manual install steps below.
+                  </p>
                 )}
               </>
             )}

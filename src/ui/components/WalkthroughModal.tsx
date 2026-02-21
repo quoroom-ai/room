@@ -1,4 +1,7 @@
 import { useState } from 'react'
+import { APP_MODE } from '../lib/auth'
+
+const isCloud = APP_MODE === 'cloud'
 
 const steps = [
   {
@@ -11,11 +14,15 @@ const steps = [
   },
   {
     title: 'Workers multiply',
-    body: "The Queen spawns workers as needed. They share your machine resources, so more workers means more load. Workers can use the Queen's model or run on a separate free Ollama model.",
+    body: isCloud
+      ? "The Queen spawns workers as needed. They share your server's resources, so more workers means more load. Workers can use the Queen's model or run on a separate free Ollama model."
+      : "The Queen spawns workers as needed. They share your machine resources, so more workers means more load. Workers can use the Queen's model or run on a separate free Ollama model.",
   },
   {
     title: 'Need more power? Rent stations',
-    body: 'Workers can run on rented cloud stations with free Ollama models. This offloads compute from your machine — the Queen stays local, workers go remote.',
+    body: isCloud
+      ? 'Stations add extra compute to your room — workers go to stations while the Queen stays on your server.'
+      : 'Workers can run on rented cloud stations with free Ollama models. This offloads compute from your machine — the Queen stays local, workers go remote.',
   },
   {
     title: 'Democracy in the swarm',
@@ -45,19 +52,8 @@ export function WalkthroughModal({ onClose }: WalkthroughModalProps): React.JSX.
   }
 
   return (
-    <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/50"
-      onClick={(e) => { if (e.target === e.currentTarget) onClose() }}
-    >
-      <div className="bg-surface-primary rounded-2xl shadow-2xl w-full max-w-md mx-4 p-8 relative">
-        <button
-          onClick={onClose}
-          className="absolute top-4 right-4 text-text-muted hover:text-text-secondary text-lg leading-none transition-colors"
-          aria-label="Close"
-        >
-          {'\u2715'}
-        </button>
-
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
+      <div className="bg-surface-primary rounded-2xl shadow-2xl w-full max-w-md mx-4 p-8">
         <div className="flex gap-1.5 mb-6">
           {steps.map((_, i) => (
             <button

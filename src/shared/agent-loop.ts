@@ -326,7 +326,24 @@ export async function runCycle(
     )
   }
 
-  contextParts.push(`## Instructions\nBased on the current state, decide what to do next. You can:\n- Update goal progress\n- Create sub-goals\n- Propose decisions to the quorum\n- Create new workers\n- Escalate questions\n- Report observations\n\nRespond with your analysis and any actions you want to take.`)
+  // Execution settings + rate limit awareness
+  const rateLimitEvents = recentActivity.filter(a =>
+    a.eventType === 'system' && a.summary.includes('rate limited')
+  )
+  const settingsParts = [
+    `- Cycle gap: ${Math.round(status.room.queenCycleGapMs / 1000)}s`,
+    `- Max turns per cycle: ${status.room.queenMaxTurns}`,
+    `- Max concurrent tasks: ${status.room.maxConcurrentTasks}`
+  ]
+  if (rateLimitEvents.length > 0) {
+    settingsParts.push(`- **Rate limits hit recently: ${rateLimitEvents.length}** (in last ${recentActivity.length} events)`)
+  }
+  contextParts.push(`## Execution Settings\n${settingsParts.join('\n')}`)
+
+  const selfRegulateHint = rateLimitEvents.length > 0
+    ? '\n- **Self-regulate**: You are hitting rate limits. Use quoroom_configure_room to increase your cycle gap or reduce max turns to stay within API limits.'
+    : ''
+  contextParts.push(`## Instructions\nBased on the current state, decide what to do next. You can:\n- Update goal progress\n- Create sub-goals\n- Propose decisions to the quorum\n- Create new workers\n- Escalate questions\n- Report observations${selfRegulateHint}\n\nRespond with your analysis and any actions you want to take.`)
 
   const prompt = contextParts.join('\n\n')
 

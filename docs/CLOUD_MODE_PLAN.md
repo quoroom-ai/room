@@ -60,9 +60,9 @@ In `cloud` landing page:
 
 - Primary CTA block with two actions:
   - `Run locally` -> existing installer/download flow.
-  - `Run in cloud` -> `/cloud/new` (new flow).
+- `Run in cloud` -> `/app/new` (new flow).
 
-### Cloud setup flow (`/cloud/new`)
+### Cloud setup flow (`/app/new`)
 
 Steps:
 
@@ -71,7 +71,7 @@ Steps:
 3. Enter room name + optional goal + optional provider credentials.
 4. Stripe checkout.
 5. Provisioning screen (30-120s) with live status.
-6. Redirect to hosted app URL (for example `https://app.quoroom.ai/r/{roomId}`).
+6. Redirect to hosted app URL (for example `https://app.quoroom.ai/app/r/{roomId}`).
 
 ### Hosted app behavior
 
@@ -86,7 +86,7 @@ Steps:
 
 - **Public surface** (`quoroom.ai`): landing, docs, public rooms, pricing, station purchase entry.
 - **Private surface** (`app.quoroom.ai`): account auth, instance management, hosted Room dashboard.
-- Hosted Room dashboard route example: `app.quoroom.ai/r/{instanceId}`.
+- Hosted Room dashboard route example: `app.quoroom.ai/app/r/{instanceId}`.
 
 ## 4.1 Control plane (`cloud` repo)
 
@@ -251,7 +251,7 @@ Exit criteria:
 ## Phase 1: Purchase + Provision MVP (4-7 days)
 
 - Landing `Run in cloud` CTA.
-- New `/cloud/new` flow with server picker and Stripe checkout.
+- New `/app/new` flow with server picker and Stripe checkout.
 - Private app shell (`app.quoroom.ai`) with login + authenticated instance list.
 - Webhook-driven provisioning to Fly.
 - Provisioning progress page.
@@ -315,6 +315,23 @@ Status update (2026-02-21, follow-up):
 Exit criteria:
 
 - Lighthouse PWA pass + manual install verified on iOS Safari and Android Chrome.
+
+Execution checklist (implemented baseline):
+
+- Service worker upgraded to build-versioned caches via `sw.js?v={buildId}` registration.
+- Added offline fallback page (`/offline.html`) for navigation failures.
+- Cache strategy split:
+  - documents: network-first, offline fallback
+  - static assets/icons/manifest: stale-while-revalidate
+  - API/WS excluded from SW cache
+- Added iOS/manual-install detection in UI install prompt state.
+- Added mobile/PWA smoke e2e coverage:
+  - mobile sidebar/header usability
+  - manifest and service-worker availability checks
+- Updated static file cache headers in room server:
+  - no-store for HTML + `sw.js`
+  - long immutable cache for hashed `/assets/*`
+  - bounded cache for icons/fonts/manifest
 
 ## Phase 4: Ops + Safety (3-5 days)
 

@@ -169,4 +169,66 @@ export function registerRoomTools(server: McpServer): void {
       return { content: [{ type: 'text' as const, text: JSON.stringify(list, null, 2) }] }
     }
   )
+
+  server.registerTool(
+    'quoroom_configure_room',
+    {
+      title: 'Configure Room',
+      description: 'Modify a room\'s execution parameters (cycle gap, max turns, concurrent tasks). '
+        + 'Use this to self-regulate when hitting rate limits or to optimize resource usage. '
+        + 'RESPONSE STYLE: Confirm briefly in 1 sentence. No notes, tips, or implementation details.',
+      inputSchema: {
+        roomId: z.number().describe('The room ID'),
+        queenCycleGapMs: z.number().int().min(1000).max(3600000).optional()
+          .describe('Milliseconds between queen cycles (1000ms–3600000ms / 1s–60min)'),
+        queenMaxTurns: z.number().int().min(1).max(50).optional()
+          .describe('Maximum agentic turns per queen cycle (1–50)'),
+        maxConcurrentTasks: z.number().int().min(1).max(10).optional()
+          .describe('Maximum parallel tasks (1–10)')
+      }
+    },
+    async ({ roomId, queenCycleGapMs, queenMaxTurns, maxConcurrentTasks }) => {
+      const db = getMcpDatabase()
+      const room = queries.getRoom(db, roomId)
+      if (!room) {
+        return { content: [{ type: 'text' as const, text: `Room ${roomId} not found.` }], isError: true }
+      }
+
+      const updates: Record<string, number> = {}
+      const changes: string[] = []
+
+      if (queenCycleGapMs !== undefined) {
+        updates.queenCycleGapMs = queenCycleGapMs
+        changes.push(`cycleGap: ${Math.round(room.queenCycleGapMs / 1000)}s → ${Math.round(queenCycleGapMs / 1000)}s`)
+      }
+      if (queenMaxTurns !== undefined) {
+        updates.queenMaxTurns = queenMaxTurns
+        changes.push(`maxTurns: ${room.queenMaxTurns} → ${queenMaxTurns}`)
+      }
+      if (maxConcurrentTasks !== undefined) {
+        updates.maxConcurrentTasks = maxConcurrentTasks
+        changes.push(`concurrentTasks: ${room.maxConcurrentTasks} → ${maxConcurrentTasks}`)
+      }
+
+      if (changes.length === 0) {
+        return { content: [{ type: 'text' as const, text: 'No changes specified.' }] }
+      }
+
+      queries.updateRoom(db, roomId, updates)
+
+      queries.logRoomActivity(db, roomId, 'system',
+        `Room config updated: ${changes.join(', ')}`,
+        JSON.stringify({
+          before: { queenCycleGapMs: room.queenCycleGapMs, queenMaxTurns: room.queenMaxTurns, maxConcurrentTasks: room.maxConcurrentTasks },
+          after: updates
+        }))
+
+      return {
+        content: [{
+          type: 'text' as const,
+          text: `Room ${roomId} updated: ${changes.join(', ')}.`
+        }]
+      }
+    }
+  )
 }

@@ -32,6 +32,8 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
 }
 
 if ('serviceWorker' in navigator) {
+  const swBuildId = (import.meta.env.VITE_SW_BUILD_ID || __APP_BUILD_ID__).trim()
+  const swUrl = `/sw.js?v=${encodeURIComponent(swBuildId)}`
   const host = location.hostname
   const isLocalhost = host === 'localhost' || host === '127.0.0.1' || host === '::1' || host === '[::1]'
 
@@ -53,7 +55,7 @@ if ('serviceWorker' in navigator) {
       window.location.reload()
     })
 
-    navigator.serviceWorker.register('/sw.js').then((registration) => {
+    navigator.serviceWorker.register(swUrl).then((registration) => {
       registration.update().catch(() => {})
       if (registration.waiting) {
         registration.waiting.postMessage({ type: 'SKIP_WAITING' })
