@@ -176,6 +176,33 @@ const MIME_TYPES: Record<string, string> = {
   '.webmanifest': 'application/manifest+json',
 }
 
+function getCacheControl(filePath: string, ext: string): string {
+  const normalized = filePath.replace(/\\/g, '/')
+  const base = path.basename(filePath)
+
+  if (base === 'sw.js') return 'no-cache, no-store, must-revalidate'
+  if (ext === '.html') return 'no-cache, no-store, must-revalidate'
+  if (ext === '.webmanifest') return 'public, max-age=3600'
+
+  if (normalized.includes('/assets/') && /-[A-Za-z0-9_-]{8,}\./.test(base)) {
+    return 'public, max-age=31536000, immutable'
+  }
+
+  if (
+    base.startsWith('icon-')
+    || base === 'apple-touch-icon.png'
+    || ['.png', '.jpg', '.jpeg', '.svg', '.ico', '.webp', '.woff', '.woff2'].includes(ext)
+  ) {
+    return 'public, max-age=604800'
+  }
+
+  if (ext === '.js' || ext === '.css') {
+    return 'public, max-age=3600'
+  }
+
+  return 'no-cache, max-age=0'
+}
+
 function serveStatic(staticDir: string, pathname: string, res: http.ServerResponse): void {
   // Prevent directory traversal
   const safePath = path.normalize(pathname).replace(/^(\.\.[/\\])+/, '')
@@ -206,7 +233,7 @@ function serveStatic(staticDir: string, pathname: string, res: http.ServerRespon
     const contentType = MIME_TYPES[ext] ?? 'application/octet-stream'
     const headers: Record<string, string> = {
       'Content-Type': contentType,
-      'Cache-Control': 'no-cache, no-store, must-revalidate',
+      'Cache-Control': getCacheControl(filePath, ext),
     }
     res.writeHead(200, headers)
     res.end(data)
@@ -254,7 +281,13 @@ export function createApiServer(options: ServerOptions = {}): {
     setCorsHeaders(origin, responseHeaders)
 
     // Origin validation for all /api/ requests
-    if (pathname.startsWith('/api/') && !isAllowedOrigin(origin)) {
+    // Allow same-origin: if Origin host matches request Host, it's the app's own UI
+    const isSameOrigin = origin && req.headers.host && (() => {
+      try {
+        return new URL(origin).host === req.headers.host
+      } catch { return false }
+    })()
+    if (pathname.startsWith('/api/') && !isSameOrigin && !isAllowedOrigin(origin)) {
       res.writeHead(403, responseHeaders)
       res.end(JSON.stringify({ error: 'Forbidden origin' }))
       return
