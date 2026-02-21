@@ -8,11 +8,22 @@ function normalizeApiBase(url: string): string {
   return url.replace(/\/+$/, '')
 }
 
-function normalizeAppMode(value: string | undefined): AppMode {
-  return value?.trim().toLowerCase() === 'cloud' ? 'cloud' : 'local'
+function detectAppMode(envValue: string | undefined): AppMode {
+  if (envValue?.trim().toLowerCase() === 'cloud') return 'cloud'
+  // Auto-detect: if running on a non-localhost origin with a token param or stored token, it's cloud
+  if (typeof location !== 'undefined') {
+    const host = location.hostname
+    const isLocal = host === 'localhost' || host === '127.0.0.1' || host === '::1' || host === '[::1]'
+    if (!isLocal) {
+      const hasTokenParam = new URLSearchParams(location.search).has('token')
+      const hasStoredToken = !!localStorage.getItem('quoroom_cloud_token')
+      if (hasTokenParam || hasStoredToken) return 'cloud'
+    }
+  }
+  return 'local'
 }
 
-export const APP_MODE = normalizeAppMode(import.meta.env.VITE_APP_MODE)
+export const APP_MODE = detectAppMode(import.meta.env.VITE_APP_MODE)
 
 export function getApiBase(): string {
   // Explicit env override always wins
