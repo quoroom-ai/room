@@ -49,6 +49,7 @@ const AUTO_MODE_USER_WHITELIST = [
   /^DELETE \/api\/credentials\/\d+$/,            // delete credential
   /^POST \/api\/status\/simulate-update$/,       // dev: simulate update notification
   /^POST \/api\/ollama\/start$/,                 // start Ollama server
+  /^POST \/api\/ollama\/ensure-model$/,          // ensure Ollama model is installed
   /^DELETE \/api\/rooms\/\d+\/cloud-stations\/\d+$/, // delete cloud station (archive)
 ]
 

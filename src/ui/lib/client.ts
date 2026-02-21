@@ -334,7 +334,9 @@ export const api = {
   // ─── Ollama ──────────────────────────────────────────
   ollama: {
     start: () =>
-      request<{ available: boolean }>('POST', '/api/ollama/start'),
+      request<{ available: boolean; status: 'running' | 'install_failed' | 'start_failed' }>('POST', '/api/ollama/start'),
+    ensureModel: (model: string) =>
+      request<{ ok: true; status: 'ready' | 'pulled'; model: string }>('POST', '/api/ollama/ensure-model', { model }),
   },
 
   // ─── Wallet ───────────────────────────────────────────

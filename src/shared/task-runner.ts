@@ -223,7 +223,12 @@ export async function executeTask(
     if (!model && task.roomId) {
       const room = queries.getRoom(db, task.roomId)
       if (room?.workerModel && room.workerModel !== 'claude') {
-        model = room.workerModel
+        if (room.workerModel === 'queen') {
+          const queen = room.queenWorkerId ? queries.getWorker(db, room.queenWorkerId) : null
+          model = queen?.model ?? 'claude'
+        } else {
+          model = room.workerModel
+        }
       }
     }
   } catch (err) {

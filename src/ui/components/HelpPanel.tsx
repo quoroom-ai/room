@@ -43,10 +43,10 @@ export function HelpPanel({ installPrompt, onStartWalkthrough }: HelpPanelProps)
               <span className="font-medium text-interactive">100% local.</span> Database, agents, memory — everything stays on your machine.
             </p>
             <p>
-              Server at <span className="font-mono text-text-secondary">localhost:3700</span>, SQLite database. Queen uses Claude CLI, workers use Ollama (free).
+              Server at <span className="font-mono text-text-secondary">localhost:3700</span>, SQLite database. Queen and workers support Claude/Codex/API and free Ollama models.
             </p>
             <p className="text-xs text-text-muted">
-              <span className="font-mono">quoroom serve</span> → SQLite → Claude CLI / Ollama
+              <span className="font-mono">quoroom serve</span> → SQLite → Room Settings model selection
             </p>
           </div>
         </div>
@@ -57,11 +57,11 @@ export function HelpPanel({ installPrompt, onStartWalkthrough }: HelpPanelProps)
           <div className="bg-surface-secondary shadow-sm rounded-lg p-3 space-y-2 text-sm text-text-secondary flex-1">
             <div className="flex gap-2">
               <span className="font-medium text-text-secondary shrink-0">Queen</span>
-              <span className="text-text-muted">— strategic brain, Claude CLI</span>
+              <span className="text-text-muted">— strategic brain, configurable model provider</span>
             </div>
             <div className="flex gap-2">
               <span className="font-medium text-text-secondary shrink-0">Worker</span>
-              <span className="text-text-muted">— executor, Ollama (free)</span>
+              <span className="text-text-muted">— executor, can inherit queen model or use Ollama</span>
             </div>
             <div className="flex gap-2">
               <span className="font-medium text-text-secondary shrink-0">Goals</span>
@@ -114,6 +114,9 @@ export function HelpPanel({ installPrompt, onStartWalkthrough }: HelpPanelProps)
             </div>
             <p className="text-xs text-text-muted pt-1 border-t border-amber-100">
               <span className="font-medium text-text-secondary">Tip:</span> Set your Claude plan in Preferences — Quoroom applies safe defaults automatically.
+            </p>
+            <p className="text-xs text-text-muted">
+              <span className="font-medium text-text-secondary">No token budget?</span> Pick an Ollama model in Room Settings. Queen model install runs automatically.
             </p>
           </div>
         </div>

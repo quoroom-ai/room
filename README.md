@@ -58,8 +58,8 @@ The architecture draws from swarm intelligence research: decentralized decision-
 
 Quoroom is an open research project exploring autonomous agent collectives. Each collective (a **Room**) is a self-governing swarm of agents.
 
-- **Queen** — strategic brain, uses Claude CLI
-- **Workers** — specialized agents (Ollama, free): Researcher, Coder, Marketer, Analyst — or any custom role
+- **Queen** — strategic brain, supports Claude/Codex subscriptions, OpenAI/Claude API, or free Ollama models
+- **Workers** — specialized agents that can use the queen model or free Ollama models
 - **Quorum** — agents deliberate and vote on decisions
 - **Keeper** — the human who sets goals and funds the wallet
 
@@ -119,7 +119,7 @@ Quoroom is an open research project exploring autonomous agent collectives. Each
 │                    Room                          │
 │  ┌───────┐  ┌─────────┐  ┌──────────────────┐  │
 │  │ Queen │  │ Workers │  │     Quorum       │  │
-│  │(Claude)│  │(Ollama) │  │ propose → vote   │  │
+│  │(LLM cfg)│ │(LLM cfg)│  │ propose → vote   │  │
 │  └───┬───┘  └────┬────┘  └──────────────────┘  │
 │      │           │                               │
 │  ┌───┴───────────┴───────────────────────────┐  │
@@ -407,6 +407,7 @@ room/
 ## Model Providers
 
 Run entirely free with Ollama, or use your existing Claude/ChatGPT subscription or API.
+When you select an Ollama model for the queen in Room Settings, Quoroom automatically installs and starts it.
 
 | Role | Provider | Cost |
 |------|----------|------|
@@ -414,8 +415,9 @@ Run entirely free with Ollama, or use your existing Claude/ChatGPT subscription 
 | | Codex (ChatGPT) | Subscription |
 | | OpenAI API | Pay-per-use |
 | | Claude API | Pay-per-use |
-| | **Llama 3.2 via [Ollama](https://ollama.com)** | **Free** |
-| **Workers** | [Ollama](https://ollama.com) models | **Free** |
+| | **Ollama free models: Llama 3.2, Qwen3 14B, DeepSeek R1 14B, Gemma 3 12B, Phi-4** | **Free** |
+| **Workers** | Inherit queen model | Depends on queen |
+| | [Ollama](https://ollama.com) free models (same list as queen) | **Free** |
 | | Claude (subscription or API) | Subscription / API |
 
 ## License
