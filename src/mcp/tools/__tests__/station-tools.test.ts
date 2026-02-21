@@ -35,6 +35,7 @@ vi.mock('../../../shared/cloud-sync', () => ({
   startCloudStation: vi.fn().mockResolvedValue(undefined),
   stopCloudStation: vi.fn().mockResolvedValue(undefined),
   deleteCloudStation: vi.fn().mockResolvedValue(undefined),
+  cancelCloudStation: vi.fn().mockResolvedValue(undefined),
 }))
 
 let roomId: number
@@ -113,6 +114,24 @@ describe('quoroom_station_delete', () => {
   })
 })
 
+describe('quoroom_station_cancel', () => {
+  it('requests station cancellation at end of billing period', async () => {
+    const handler = toolHandlers.get('quoroom_station_cancel')!
+    const result = await handler({ roomId, id: 1 })
+    expect(result.isError).toBeUndefined()
+    const text = getResponseText(result)
+    expect(text).toContain('cancellation requested')
+    expect(text).toContain('end of billing period')
+  })
+
+  it('calls cancelCloudStation with correct cloud room ID', async () => {
+    const { cancelCloudStation } = await import('../../../shared/cloud-sync')
+    const handler = toolHandlers.get('quoroom_station_cancel')!
+    await handler({ roomId, id: 42 })
+    expect(vi.mocked(cancelCloudStation)).toHaveBeenCalledWith(`mock-cloud-id-${roomId}`, 42)
+  })
+})
+
 describe('quoroom_station_exec', () => {
   it('executes command and returns result', async () => {
     const handler = toolHandlers.get('quoroom_station_exec')!
@@ -167,12 +186,13 @@ describe('quoroom_station_status', () => {
 })
 
 describe('tool registration', () => {
-  it('registers all 8 station tools', () => {
+  it('registers all 9 station tools', () => {
     expect(toolHandlers.has('quoroom_station_create')).toBe(true)
     expect(toolHandlers.has('quoroom_station_list')).toBe(true)
     expect(toolHandlers.has('quoroom_station_start')).toBe(true)
     expect(toolHandlers.has('quoroom_station_stop')).toBe(true)
     expect(toolHandlers.has('quoroom_station_delete')).toBe(true)
+    expect(toolHandlers.has('quoroom_station_cancel')).toBe(true)
     expect(toolHandlers.has('quoroom_station_exec')).toBe(true)
     expect(toolHandlers.has('quoroom_station_logs')).toBe(true)
     expect(toolHandlers.has('quoroom_station_status')).toBe(true)

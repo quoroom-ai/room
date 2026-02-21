@@ -11,6 +11,7 @@ import {
   startCloudStation,
   stopCloudStation,
   deleteCloudStation,
+  cancelCloudStation,
 } from '../../shared/cloud-sync'
 
 const CLOUD_BASE = 'https://quoroom.ai'
@@ -140,6 +141,31 @@ export function registerStationTools(server: McpServer): void {
         content: [{
           type: 'text' as const,
           text: `Station ${id} deletion requested (subscription canceled, machine destroyed).`
+        }]
+      }
+    }
+  )
+
+  server.registerTool(
+    'quoroom_station_cancel',
+    {
+      title: 'Cancel Station',
+      description: 'Cancel a station subscription at end of billing period. '
+        + 'The station keeps running until the period ends, then stops automatically. '
+        + 'RESPONSE STYLE: Confirm briefly in 1 sentence.',
+      inputSchema: {
+        roomId: z.number().describe('The room ID'),
+        id: z.number().describe('The station subscription ID to cancel')
+      }
+    },
+    async ({ roomId, id }) => {
+      await bootstrapRoomToken(roomId)
+      const cloudRoomId = getRoomCloudId(roomId)
+      await cancelCloudStation(cloudRoomId, id)
+      return {
+        content: [{
+          type: 'text' as const,
+          text: `Station ${id} cancellation requested (will stop at end of billing period).`
         }]
       }
     }

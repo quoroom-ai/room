@@ -107,6 +107,13 @@ test.describe('UI — Tab navigation', () => {
     await expect(page.getByText(/Select a room|No messages yet/i)).toBeVisible({ timeout: 5000 })
     await page.screenshot({ path: 'e2e/screenshots/ui-17-messages-panel.png', fullPage: true })
   })
+
+  test('Transactions tab', async ({ page }) => {
+    await page.locator('button').filter({ hasText: /^Transactions$/i }).first().click()
+    // Transactions panel shows the heading and Wallet/Billing sub-tabs
+    await expect(page.getByRole('heading', { name: 'Transactions' })).toBeVisible({ timeout: 5000 })
+    await page.screenshot({ path: 'e2e/screenshots/ui-18-transactions-panel.png', fullPage: true })
+  })
 })
 
 test.describe('UI — Interaction', () => {
@@ -179,6 +186,42 @@ test.describe('UI — Interaction', () => {
     await expect(page.getByRole('button', { name: /New Worker/i })).not.toBeVisible()
 
     await page.screenshot({ path: 'e2e/screenshots/ui-10-workers-readonly.png', fullPage: true })
+  })
+
+  test('transactions panel has Wallet and Billing sub-tabs', async ({ page }) => {
+    // Navigate to Transactions tab
+    await page.locator('button').filter({ hasText: /^Transactions$/i }).first().click()
+
+    // Click a room in the sidebar to select it
+    const sidebar = page.locator('[class*="sidebar"], nav, aside').first()
+    const roomLink = sidebar.locator('button, a').filter({ hasText: /Room|room/i }).first()
+    if (await roomLink.isVisible({ timeout: 2000 }).catch(() => false)) {
+      await roomLink.click()
+      await page.waitForTimeout(500)
+    }
+
+    // Check for Wallet / Billing sub-tab buttons
+    const walletBtn = page.getByRole('button', { name: /^Wallet$/i })
+    const billingBtn = page.getByRole('button', { name: /^Billing$/i })
+    await expect(walletBtn).toBeVisible({ timeout: 5000 })
+    await expect(billingBtn).toBeVisible()
+
+    // Default is Wallet sub-tab — should show wallet content or empty state
+    await expect(page.getByText('No transactions yet.')).toBeVisible({ timeout: 5000 })
+
+    // Click Billing sub-tab
+    await billingBtn.click()
+    await page.waitForTimeout(300)
+    // Billing tab shows station subscriptions or empty state
+    await expect(page.getByText('No station subscriptions.')).toBeVisible({ timeout: 5000 })
+
+    // Click back to Wallet sub-tab
+    await walletBtn.click()
+    await page.waitForTimeout(300)
+    // Wallet tab shows empty state again
+    await expect(page.getByText('No transactions yet.')).toBeVisible({ timeout: 5000 })
+
+    await page.screenshot({ path: 'e2e/screenshots/ui-19-transactions-subtabs.png', fullPage: true })
   })
 
   test('toggle advanced mode shows extra tabs', async ({ page }) => {

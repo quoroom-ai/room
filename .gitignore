@@ -18,3 +18,8 @@ build/
 CLAUDE.md
 PROGRESS.md
 PLAN.md
+
+# Generated E2E artifacts
+e2e/report/
+e2e/results/
+e2e/screenshots/

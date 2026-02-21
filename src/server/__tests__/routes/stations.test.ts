@@ -48,4 +48,31 @@ describe('Station routes', () => {
       expect(res.status).toBe(404)
     })
   })
+
+  describe('Cloud station proxy routes', () => {
+    it('GET /api/rooms/:roomId/cloud-stations returns 404 for missing room', async () => {
+      const res = await request(ctx, 'GET', '/api/rooms/99999/cloud-stations')
+      expect(res.status).toBe(404)
+    })
+
+    it('POST /api/rooms/:roomId/cloud-stations/:id/start returns 404 for missing room', async () => {
+      const res = await request(ctx, 'POST', `/api/rooms/99999/cloud-stations/1/start`)
+      expect(res.status).toBe(404)
+    })
+
+    it('POST /api/rooms/:roomId/cloud-stations/:id/stop returns 404 for missing room', async () => {
+      const res = await request(ctx, 'POST', `/api/rooms/99999/cloud-stations/1/stop`)
+      expect(res.status).toBe(404)
+    })
+
+    it('POST /api/rooms/:roomId/cloud-stations/:id/cancel returns 404 for missing room', async () => {
+      const res = await request(ctx, 'POST', `/api/rooms/99999/cloud-stations/1/cancel`)
+      expect(res.status).toBe(404)
+    })
+
+    it('DELETE /api/rooms/:roomId/cloud-stations/:id returns 404 for missing room', async () => {
+      const res = await request(ctx, 'DELETE', `/api/rooms/99999/cloud-stations/1`)
+      expect(res.status).toBe(404)
+    })
+  })
 })
