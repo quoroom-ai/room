@@ -353,6 +353,31 @@ export function RoomSettingsPanel({ roomId }: RoomSettingsPanelProps): React.JSX
                   </div>
                 )
               )}
+              {activeQueenAuth?.mode === 'subscription' && !activeQueenAuth.ready && (
+                row('Status',
+                  <div className="flex items-center gap-2">
+                    <span className="text-xs text-status-warning">
+                      {activeQueenAuth.provider === 'claude_subscription' && 'Claude CLI not installed'}
+                      {activeQueenAuth.provider === 'codex_subscription' && 'Codex CLI not installed'}
+                      {activeQueenAuth.provider === 'ollama' && 'Ollama not running'}
+                    </span>
+                    {activeQueenAuth.provider === 'ollama' && (
+                      <button
+                        onClick={async () => {
+                          try {
+                            await api.ollama.start()
+                            const q = await api.rooms.queenStatus(room.id).catch(() => null)
+                            if (q) setQueenAuth(prev => ({ ...prev, [room.id]: q.auth }))
+                          } catch {}
+                        }}
+                        className="text-xs px-2.5 py-1.5 rounded-lg border border-border-primary text-text-secondary hover:bg-surface-hover"
+                      >
+                        Start
+                      </button>
+                    )}
+                  </div>
+                )
+              )}
               {apiKeyFeedback[room.id] && (
                 <div className={`text-xs mt-1 ${
                   apiKeyFeedback[room.id]?.kind === 'success'

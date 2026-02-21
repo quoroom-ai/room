@@ -1,5 +1,8 @@
 import type Database from 'better-sqlite3'
+import { execSync } from 'node:child_process'
 import * as queries from './db-queries'
+import { checkClaudeCliAvailable } from './claude-code'
+import { isOllamaAvailable } from './agent-executor'
 
 export type ModelProvider =
   | 'claude_subscription'
@@ -34,7 +37,7 @@ export function getModelProvider(model: string | null | undefined): ModelProvide
   return 'claude_subscription'
 }
 
-export function getModelAuthStatus(db: Database.Database, roomId: number, model: string | null | undefined): ModelAuthStatus {
+export async function getModelAuthStatus(db: Database.Database, roomId: number, model: string | null | undefined): Promise<ModelAuthStatus> {
   const provider = getModelProvider(model)
   if (provider === 'openai_api') {
     return resolveApiAuthStatus(db, roomId, 'openai_api_key', 'OPENAI_API_KEY', provider)
@@ -42,6 +45,16 @@ export function getModelAuthStatus(db: Database.Database, roomId: number, model:
   if (provider === 'anthropic_api') {
     return resolveApiAuthStatus(db, roomId, 'anthropic_api_key', 'ANTHROPIC_API_KEY', provider)
   }
+
+  let ready = false
+  if (provider === 'claude_subscription') {
+    ready = checkClaudeCliAvailable().available
+  } else if (provider === 'codex_subscription') {
+    ready = checkCodexCliAvailable()
+  } else if (provider === 'ollama') {
+    ready = await cachedIsOllamaAvailable()
+  }
+
   return {
     provider,
     mode: 'subscription',
@@ -49,7 +62,7 @@ export function getModelAuthStatus(db: Database.Database, roomId: number, model:
     envVar: null,
     hasCredential: false,
     hasEnvKey: false,
-    ready: true
+    ready
   }
 }
 
@@ -105,4 +118,30 @@ function getRoomCredential(db: Database.Database, roomId: number, credentialName
 
 function getEnvValue(envVar: string): string {
   return (process.env[envVar] || '').trim()
+}
+
+let cachedCodexCheck: boolean | null = null
+function checkCodexCliAvailable(): boolean {
+  if (cachedCodexCheck !== null) return cachedCodexCheck
+  try {
+    execSync('codex --version', { timeout: 5000, stdio: ['pipe', 'pipe', 'pipe'] })
+    cachedCodexCheck = true
+  } catch {
+    cachedCodexCheck = false
+  }
+  return cachedCodexCheck
+}
+
+let ollamaCache: { value: boolean; at: number } | null = null
+const OLLAMA_CACHE_MS = 30_000
+
+async function cachedIsOllamaAvailable(): Promise<boolean> {
+  if (ollamaCache && Date.now() - ollamaCache.at < OLLAMA_CACHE_MS) return ollamaCache.value
+  const available = await isOllamaAvailable()
+  ollamaCache = { value: available, at: Date.now() }
+  return available
+}
+
+export function invalidateOllamaCache(): void {
+  ollamaCache = null
 }

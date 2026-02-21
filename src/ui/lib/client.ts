@@ -331,6 +331,12 @@ export const api = {
       }>('GET', '/api/status'),
   },
 
+  // ─── Ollama ──────────────────────────────────────────
+  ollama: {
+    start: () =>
+      request<{ available: boolean }>('POST', '/api/ollama/start'),
+  },
+
   // ─── Wallet ───────────────────────────────────────────
   wallet: {
     get: (roomId: number) =>

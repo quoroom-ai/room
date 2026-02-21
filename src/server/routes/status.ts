@@ -1,8 +1,9 @@
 import type { Router } from '../router'
-import { execSync } from 'node:child_process'
+import { execSync, spawn } from 'node:child_process'
 import os from 'node:os'
 import { getDataDir } from '../db'
 import { isOllamaAvailable, listOllamaModels } from '../../shared/agent-executor'
+import { invalidateOllamaCache } from '../../shared/model-provider'
 import { getUpdateInfo, simulateUpdate } from '../updateChecker'
 
 const startedAt = Date.now()
@@ -75,6 +76,25 @@ export function registerStatusRoutes(router: Router): void {
   router.post('/api/status/simulate-update', async () => {
     await simulateUpdate()
     return { data: { ok: true } }
+  })
+
+  router.post('/api/ollama/start', async () => {
+    const already = await isOllamaAvailable()
+    if (already) return { data: { available: true } }
+    try {
+      const child = spawn('ollama', ['serve'], { detached: true, stdio: 'ignore' })
+      child.unref()
+    } catch {
+      return { data: { available: false } }
+    }
+    // Wait for Ollama to start up
+    await new Promise(r => setTimeout(r, 2000))
+    const available = await isOllamaAvailable()
+    // Invalidate caches so next polls pick up the change
+    cachedOllama = null
+    ollamaCachedAt = 0
+    invalidateOllamaCache()
+    return { data: { available } }
   })
 
   router.get('/api/status', async (ctx) => {

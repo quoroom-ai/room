@@ -153,14 +153,14 @@ export function registerRoomRoutes(router: Router): void {
   })
 
   // Queen agent control
-  router.get('/api/rooms/:id/queen', (ctx) => {
+  router.get('/api/rooms/:id/queen', async (ctx) => {
     const roomId = Number(ctx.params.id)
     const room = queries.getRoom(ctx.db, roomId)
     if (!room) return { status: 404, error: 'Room not found' }
     if (!room.queenWorkerId) return { status: 404, error: 'No queen worker' }
     const worker = queries.getWorker(ctx.db, room.queenWorkerId)
     const model = worker?.model ?? null
-    const auth = getModelAuthStatus(ctx.db, roomId, model)
+    const auth = await getModelAuthStatus(ctx.db, roomId, model)
     return {
       data: {
         workerId: room.queenWorkerId,
