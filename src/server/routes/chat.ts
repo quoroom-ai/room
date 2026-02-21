@@ -1,6 +1,6 @@
 import type { Router } from '../router'
 import * as queries from '../../shared/db-queries'
-import { executeClaudeCode } from '../../shared/claude-code'
+import { executeAgent } from '../../shared/agent-executor'
 
 export function registerChatRoutes(router: Router): void {
   // List chat messages for a room
@@ -42,7 +42,9 @@ export function registerChatRoutes(router: Router): void {
     queries.insertChatMessage(ctx.db, roomId, 'user', message)
 
     // Execute with queen's system prompt + session continuity
-    const result = await executeClaudeCode(message, {
+    const result = await executeAgent({
+      model: queen.model ?? 'claude',
+      prompt: message,
       systemPrompt: queen.systemPrompt,
       resumeSessionId: room.chatSessionId ?? undefined,
       maxTurns: 10,
@@ -50,7 +52,7 @@ export function registerChatRoutes(router: Router): void {
     })
 
     // Extract response text
-    const response = result.stdout || result.stderr || 'No response'
+    const response = result.output || 'No response'
 
     // Save assistant response
     queries.insertChatMessage(ctx.db, roomId, 'assistant', response)
