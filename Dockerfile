@@ -20,4 +20,4 @@ RUN npm install --omit=dev
 WORKDIR /app
 EXPOSE 3700
 
-CMD ["node", "out/mcp/api-server.js"]
+CMD ["node", "out/mcp/cli.js", "serve"]
