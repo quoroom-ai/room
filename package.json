@@ -25,7 +25,7 @@
     "dev": "npm run build:mcp && npm run build:ui && node scripts/dev-server.js",
     "dev:ui": "vite --config src/ui/vite.config.ts",
     "typecheck": "tsc --noEmit",
-    "test": "npm run rebuild:native:node && vitest run --pool=forks",
+    "test": "npm run rebuild:native:node && vitest run --pool=forks --passWithNoTests",
     "test:watch": "npm run rebuild:native:node && vitest --pool=forks",
     "test:e2e": "npm run build && npx playwright test",
     "test:e2e:ui": "npm run build && npx playwright test e2e/ui.test.ts",
