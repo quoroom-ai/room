@@ -169,7 +169,22 @@ export const api = {
     delete: (id: number) =>
       request<{ ok: true }>('DELETE', `/api/rooms/${id}`),
     queenStatus: (id: number) =>
-      request<{ workerId: number; name: string; agentState: string; running: boolean; model: string | null }>('GET', `/api/rooms/${id}/queen`),
+      request<{
+        workerId: number
+        name: string
+        agentState: string
+        running: boolean
+        model: string | null
+        auth: {
+          provider: 'claude_subscription' | 'codex_subscription' | 'openai_api' | 'anthropic_api' | 'ollama'
+          mode: 'subscription' | 'api'
+          credentialName: string | null
+          envVar: string | null
+          hasCredential: boolean
+          hasEnvKey: boolean
+          ready: boolean
+        }
+      }>('GET', `/api/rooms/${id}/queen`),
     queenStart: (id: number) =>
       request<{ ok: true; running: boolean }>('POST', `/api/rooms/${id}/queen/start`),
     queenStop: (id: number) =>
@@ -265,6 +280,7 @@ export const api = {
         dataDir: string
         dbPath: string
         claude: { available: boolean; version?: string }
+        codex: { available: boolean; version?: string }
         ollama: { available: boolean; models: Array<{ name: string; size: number }> }
         resources: { cpuCount: number; loadAvg1m: number; loadAvg5m: number; memTotalGb: number; memFreeGb: number; memUsedPct: number }
         updateInfo?: { latestVersion: string; releaseUrl: string; assets: { mac: string | null; windows: string | null; linux: string | null } } | null

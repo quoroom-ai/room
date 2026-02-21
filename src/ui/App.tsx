@@ -17,6 +17,7 @@ import { CredentialsPanel } from './components/CredentialsPanel'
 import { TransactionsPanel } from './components/TransactionsPanel'
 import { StationsPanel } from './components/StationsPanel'
 import { RoomSettingsPanel } from './components/RoomSettingsPanel'
+import { SwarmPanel } from './components/SwarmPanel'
 import { ConnectPage } from './components/ConnectPage'
 import { WalkthroughModal } from './components/WalkthroughModal'
 import { UpdateModal } from './components/UpdateModal'
@@ -30,7 +31,7 @@ const ADVANCED_TABS = new Set<Tab>(
   mainTabs.filter((tab) => tab.advanced).map((tab) => tab.id)
 )
 
-const ALL_TAB_IDS: Tab[] = ['status', 'goals', 'votes', 'messages', 'workers', 'tasks', 'skills', 'credentials', 'transactions', 'stations', 'room-settings', 'memory', 'watches', 'results', 'settings', 'help']
+const ALL_TAB_IDS: Tab[] = ['swarm', 'status', 'goals', 'votes', 'messages', 'workers', 'tasks', 'skills', 'credentials', 'transactions', 'stations', 'room-settings', 'memory', 'watches', 'results', 'settings', 'help']
 
 const DEFAULT_PORT = '3700'
 const isRemoteOrigin = location.hostname !== 'localhost' && location.hostname !== '127.0.0.1'
@@ -305,6 +306,12 @@ function App(): React.JSX.Element {
 
   function renderPanel(): React.JSX.Element {
     switch (tab) {
+      case 'swarm':
+        return <SwarmPanel rooms={rooms} queenRunning={queenRunning} onNavigateToRoom={(roomId) => {
+          handleRoomChange(roomId)
+          setExpandedRoomId(roomId)
+          handleTabChange('status')
+        }} />
       case 'status':
         return <StatusPanel onNavigate={(t) => handleTabChange(t as Tab)} advancedMode={advancedMode} roomId={selectedRoomId} />
       case 'goals':
@@ -392,6 +399,23 @@ function App(): React.JSX.Element {
     <div className="flex h-screen bg-white">
       {/* Left sidebar */}
       <div data-testid="sidebar" className="w-40 flex-shrink-0 flex flex-col bg-gray-50 border-r border-gray-200 py-1.5 px-1.5">
+        {/* Swarm link */}
+        <div className="pb-1.5 mb-1.5 border-b border-gray-200">
+          <button
+            onClick={() => handleTabChange('swarm')}
+            className={`w-full px-2 py-1.5 text-xs text-left rounded transition-colors flex items-center gap-1.5 ${
+              tab === 'swarm'
+                ? 'bg-amber-50 text-amber-700 font-medium'
+                : 'text-gray-500 hover:text-gray-700 hover:bg-gray-100'
+            }`}
+          >
+            <svg width="12" height="12" viewBox="0 0 14 14" className="shrink-0">
+              <polygon points="7,1 12.5,4 12.5,10 7,13 1.5,10 1.5,4" fill="none" stroke="currentColor" strokeWidth="1.3"/>
+            </svg>
+            Swarm
+          </button>
+        </div>
+
         {/* Create room */}
         <div className="pb-1.5 mb-1.5 border-b border-gray-200">
           <button
@@ -523,7 +547,7 @@ function App(): React.JSX.Element {
         )}
 
         {/* Room context header */}
-        {selectedRoom && tab !== 'settings' && tab !== 'help' && (() => {
+        {selectedRoom && tab !== 'swarm' && tab !== 'settings' && tab !== 'help' && (() => {
           const running = selectedRoom.status === 'active' && queenRunning[selectedRoom.id]
           const paused = selectedRoom.status === 'paused'
           const dot = running ? 'bg-green-400' : paused ? 'bg-yellow-400' : 'bg-gray-300'

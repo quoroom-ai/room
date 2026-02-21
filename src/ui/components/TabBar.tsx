@@ -1,4 +1,4 @@
-export type Tab = 'status' | 'memory' | 'workers' | 'tasks' | 'watches' | 'results' | 'goals' | 'votes' | 'messages' | 'skills' | 'credentials' | 'transactions' | 'stations' | 'room-settings' | 'settings' | 'help'
+export type Tab = 'swarm' | 'status' | 'memory' | 'workers' | 'tasks' | 'watches' | 'results' | 'goals' | 'votes' | 'messages' | 'skills' | 'credentials' | 'transactions' | 'stations' | 'room-settings' | 'settings' | 'help'
 
 export const mainTabs: { id: Tab; label: string; advanced?: boolean }[] = [
   { id: 'status', label: 'Overview' },

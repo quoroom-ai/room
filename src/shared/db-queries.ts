@@ -1521,10 +1521,15 @@ export function createCredential(
   db: Database.Database, roomId: number, name: string, type: string, value: string
 ): Credential {
   const encryptedValue = encryptSecret(value)
-  const result = db
-    .prepare('INSERT INTO credentials (room_id, name, type, value_encrypted) VALUES (?, ?, ?, ?)')
+  db.prepare(`
+      INSERT INTO credentials (room_id, name, type, value_encrypted)
+      VALUES (?, ?, ?, ?)
+      ON CONFLICT(room_id, name) DO UPDATE SET
+        type = excluded.type,
+        value_encrypted = excluded.value_encrypted
+    `)
     .run(roomId, name, type, encryptedValue)
-  return getCredential(db, result.lastInsertRowid as number)!
+  return getCredentialByName(db, roomId, name)!
 }
 
 export function getCredential(db: Database.Database, id: number): Credential | null {
@@ -1560,7 +1565,12 @@ export function getCredentialByName(db: Database.Database, roomId: number, name:
   const row = db.prepare('SELECT * FROM credentials WHERE room_id = ? AND name = ?').get(roomId, name) as Record<string, unknown> | undefined
   if (!row) return null
   const credential = mapCredentialRow(row)
-  return { ...credential, valueEncrypted: decryptSecret(credential.valueEncrypted) }
+  try {
+    return { ...credential, valueEncrypted: decryptSecret(credential.valueEncrypted) }
+  } catch {
+    // Keep credentials readable even if secret key changed.
+    return credential
+  }
 }
 
 // ─── Room Workers ───────────────────────────────────────────

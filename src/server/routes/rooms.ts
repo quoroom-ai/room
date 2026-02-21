@@ -7,6 +7,7 @@ import { initCloudSync } from '../cloud'
 import { getRoomCloudId } from '../../shared/cloud-sync'
 import { QUEEN_DEFAULTS_BY_PLAN, type ClaudePlan } from '../../shared/constants'
 import type { ActivityEventType } from '../../shared/types'
+import { getModelAuthStatus } from '../../shared/model-provider'
 
 function parseLimit(raw: string | undefined, fallback: number, max: number): number {
   const n = Number(raw)
@@ -151,13 +152,16 @@ export function registerRoomRoutes(router: Router): void {
     if (!room) return { status: 404, error: 'Room not found' }
     if (!room.queenWorkerId) return { status: 404, error: 'No queen worker' }
     const worker = queries.getWorker(ctx.db, room.queenWorkerId)
+    const model = worker?.model ?? null
+    const auth = getModelAuthStatus(ctx.db, roomId, model)
     return {
       data: {
         workerId: room.queenWorkerId,
         name: worker?.name,
         agentState: worker?.agentState ?? 'idle',
         running: isAgentRunning(room.queenWorkerId),
-        model: worker?.model ?? null
+        model,
+        auth
       }
     }
   })

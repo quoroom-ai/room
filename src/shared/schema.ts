@@ -337,6 +337,7 @@ CREATE TABLE IF NOT EXISTS credentials (
     created_at DATETIME DEFAULT (datetime('now','localtime'))
 );
 CREATE INDEX IF NOT EXISTS idx_credentials_room ON credentials(room_id);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_credentials_room_name ON credentials(room_id, name);
 
 -- Wallets
 CREATE TABLE IF NOT EXISTS wallets (

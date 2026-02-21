@@ -31,6 +31,18 @@ function checkClaude(): { available: boolean; version?: string } {
   return cachedClaudeCheck
 }
 
+let cachedCodexCheck: { available: boolean; version?: string } | null = null
+function checkCodex(): { available: boolean; version?: string } {
+  if (cachedCodexCheck) return cachedCodexCheck
+  try {
+    const out = execSync('codex --version 2>/dev/null', { timeout: 5000 }).toString().trim()
+    cachedCodexCheck = { available: true, version: out }
+  } catch {
+    cachedCodexCheck = { available: false }
+  }
+  return cachedCodexCheck
+}
+
 // Cache Ollama status for 30s to avoid hammering it on every UI poll
 let cachedOllama: { available: boolean; models: Array<{ name: string; size: number }> } | null = null
 let ollamaCachedAt = 0
@@ -69,6 +81,7 @@ export function registerStatusRoutes(router: Router): void {
     const dataDir = getDataDir()
     const dbPath = ctx.db.name
     const claude = checkClaude()
+    const codex = checkCodex()
     const ollama = await checkOllama()
     const resources = getResources()
 
@@ -79,6 +92,7 @@ export function registerStatusRoutes(router: Router): void {
         dataDir,
         dbPath,
         claude,
+        codex,
         ollama,
         resources,
         updateInfo: getUpdateInfo(),

@@ -23,6 +23,20 @@ export function runMigrations(database: Database.Database, log: (msg: string) =>
     if (maxTasks?.value) { const n = parseInt(maxTasks.value, 10); if (!isNaN(n)) db.prepare('UPDATE rooms SET max_concurrent_tasks = ?').run(n) }
     if (pubMode?.value === 'true') db.prepare("UPDATE rooms SET visibility = 'public'").run()
   }, log)
+
+  // Migration 26: credentials uniqueness per room+name for deterministic API-key updates
+  applyMigration(database, 26, (db) => {
+    // Keep latest credential row per (room_id, name), remove older duplicates.
+    db.exec(`
+      DELETE FROM credentials
+      WHERE id NOT IN (
+        SELECT MAX(id)
+        FROM credentials
+        GROUP BY room_id, name
+      );
+    `)
+    db.exec('CREATE UNIQUE INDEX IF NOT EXISTS idx_credentials_room_name ON credentials(room_id, name)')
+  }, log)
 }
 
 function applyMigration(

@@ -405,9 +405,15 @@ room/
 
 </details>
 
-## No API keys needed
+## Model Providers
 
-No ChatGPT API. No Claude API. The queen uses your [Claude Code](https://docs.anthropic.com/en/docs/claude-code) subscription. Workers use [Ollama](https://ollama.com) — free, open-source LLMs. Scale up with stations.
+Queen supports multiple providers:
+- [Claude Code](https://docs.anthropic.com/en/docs/claude-code) subscription (CLI)
+- Codex (ChatGPT subscription, CLI)
+- OpenAI API key (optional)
+- Anthropic API key (optional)
+
+Workers use [Ollama](https://ollama.com) — free, open-source LLMs. Scale up with stations.
 
 Quoroom is not affiliated with Anthropic or OpenAI.
 

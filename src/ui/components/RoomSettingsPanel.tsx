@@ -1,10 +1,24 @@
-import { useEffect, useState } from 'react'
+import { useState } from 'react'
 import { usePolling } from '../hooks/usePolling'
 import { api } from '../lib/client'
 import type { Room, Wallet, RevenueSummary } from '@shared/types'
 
 interface RoomSettingsPanelProps {
   roomId: number | null
+}
+
+interface QueenStatus {
+  running: boolean
+  model: string | null
+  auth: {
+    provider: 'claude_subscription' | 'codex_subscription' | 'openai_api' | 'anthropic_api' | 'ollama'
+    mode: 'subscription' | 'api'
+    credentialName: string | null
+    envVar: string | null
+    hasCredential: boolean
+    hasEnvKey: boolean
+    ready: boolean
+  }
 }
 
 export function RoomSettingsPanel({ roomId }: RoomSettingsPanelProps): React.JSX.Element {
@@ -19,12 +33,7 @@ export function RoomSettingsPanel({ roomId }: RoomSettingsPanelProps): React.JSX
   )
   const [queenRunning, setQueenRunning] = useState<Record<number, boolean>>({})
   const [queenModel, setQueenModel] = useState<Record<number, string | null>>({})
-  const [globalQueenModel, setGlobalQueenModel] = useState('claude-opus-4-6')
-  useEffect(() => {
-    api.settings.get('queen_model').then(v => {
-      if (v) setGlobalQueenModel(v)
-    }).catch(() => {})
-  }, [])
+  const [queenAuth, setQueenAuth] = useState<Record<number, QueenStatus['auth'] | null>>({})
   usePolling(async () => {
     if (!rooms || rooms.length === 0) return {}
     const entries = await Promise.all(
@@ -35,6 +44,7 @@ export function RoomSettingsPanel({ roomId }: RoomSettingsPanelProps): React.JSX
     )
     setQueenRunning(Object.fromEntries(entries.map(([id, q]) => [id, q?.running ?? false])))
     setQueenModel(Object.fromEntries(entries.map(([id, q]) => [id, q?.model ?? null])))
+    setQueenAuth(Object.fromEntries(entries.map(([id, q]) => [id, q?.auth ?? null])))
     return {}
   }, 5000)
 
@@ -113,11 +123,30 @@ export function RoomSettingsPanel({ roomId }: RoomSettingsPanelProps): React.JSX
 
   async function handleSetQueenModel(room: Room, model: string): Promise<void> {
     if (!room.queenWorkerId) return
-    setQueenModel(prev => ({ ...prev, [room.id]: model }))
+    const dbModel = model === 'claude' ? null : model
+    setQueenModel(prev => ({ ...prev, [room.id]: dbModel }))
     try {
-      await api.workers.update(room.queenWorkerId, { model })
+      await api.workers.update(room.queenWorkerId, { model: dbModel })
+      const q = await api.rooms.queenStatus(room.id).catch(() => null)
+      if (q) {
+        setQueenAuth(prev => ({ ...prev, [room.id]: q.auth }))
+      }
     } catch (e) {
       console.error('Failed to update queen model:', e)
+    }
+  }
+
+  async function handleSetQueenApiKey(room: Room, auth: QueenStatus['auth'] | null): Promise<void> {
+    if (!auth || auth.mode !== 'api' || !auth.credentialName) return
+    const providerName = auth.credentialName === 'openai_api_key' ? 'OpenAI' : 'Anthropic'
+    const entered = window.prompt(`Enter ${providerName} API key for this room:`)
+    if (!entered) return
+    const value = entered.trim()
+    if (!value) return
+    await api.credentials.create(room.id, auth.credentialName, value, 'api_key')
+    const q = await api.rooms.queenStatus(room.id).catch(() => null)
+    if (q) {
+      setQueenAuth(prev => ({ ...prev, [room.id]: q.auth }))
     }
   }
 
@@ -165,6 +194,7 @@ export function RoomSettingsPanel({ roomId }: RoomSettingsPanelProps): React.JSX
 
   const room = { ...rawRoom, ...roomOverrides[rawRoom.id] }
   const quietEnabled = room.queenQuietFrom !== null
+  const activeQueenAuth = queenAuth[room.id] ?? null
 
   function row(label: string, children: React.ReactNode): React.JSX.Element {
     return (
@@ -222,14 +252,36 @@ export function RoomSettingsPanel({ roomId }: RoomSettingsPanelProps): React.JSX
               {/* Queen model */}
               {row('Model',
                 <select
-                  value={queenModel[room.id] ?? globalQueenModel}
+                  value={queenModel[room.id] ?? 'claude'}
                   onChange={(e) => handleSetQueenModel(room, e.target.value)}
                   className="text-[10px] border border-gray-200 rounded px-1.5 py-0.5 bg-white text-gray-600"
                 >
+                  <option value="claude">Claude Code (subscription)</option>
                   <option value="claude-opus-4-6">Opus</option>
                   <option value="claude-sonnet-4-6">Sonnet</option>
                   <option value="claude-haiku-4-5-20251001">Haiku</option>
+                  <option value="codex">Codex (ChatGPT subscription)</option>
+                  <option value="openai:gpt-4o-mini">OpenAI API</option>
+                  <option value="anthropic:claude-3-5-sonnet-latest">Claude API</option>
                 </select>
+              )}
+
+              {activeQueenAuth?.mode === 'api' && (
+                row('API key',
+                  <div className="flex items-center gap-1.5">
+                    <span className={`text-[10px] ${activeQueenAuth.ready ? 'text-green-600' : 'text-amber-600'}`}>
+                      {activeQueenAuth.ready
+                        ? activeQueenAuth.hasCredential ? 'Saved' : `Env (${activeQueenAuth.envVar ?? 'set'})`
+                        : 'Missing'}
+                    </span>
+                    <button
+                      onClick={() => handleSetQueenApiKey(room, activeQueenAuth)}
+                      className="text-[10px] px-1.5 py-0.5 rounded border border-gray-200 text-gray-600 hover:bg-gray-100"
+                    >
+                      {activeQueenAuth.hasCredential ? 'Update' : 'Set'}
+                    </button>
+                  </div>
+                )
               )}
 
               {/* Sessions */}

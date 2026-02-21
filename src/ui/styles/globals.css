@@ -21,3 +21,12 @@ body {
   background-color: rgba(0, 0, 0, 0.2);
   border-radius: 3px;
 }
+
+@keyframes hex-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.7; }
+}
+
+.hex-pulse {
+  animation: hex-pulse 3s ease-in-out infinite;
+}

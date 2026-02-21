@@ -1,6 +1,7 @@
 import type { Router } from '../router'
 import * as queries from '../../shared/db-queries'
 import { executeAgent } from '../../shared/agent-executor'
+import { resolveApiKeyForModel } from '../../shared/model-provider'
 
 export function registerChatRoutes(router: Router): void {
   // List chat messages for a room
@@ -41,12 +42,16 @@ export function registerChatRoutes(router: Router): void {
     // Save user message
     queries.insertChatMessage(ctx.db, roomId, 'user', message)
 
+    const model = queen.model ?? 'claude'
+    const apiKey = resolveApiKeyForModel(ctx.db, roomId, model)
+
     // Execute with queen's system prompt + session continuity
     const result = await executeAgent({
-      model: queen.model ?? 'claude',
+      model,
       prompt: message,
       systemPrompt: queen.systemPrompt,
       resumeSessionId: room.chatSessionId ?? undefined,
+      apiKey,
       maxTurns: 10,
       timeoutMs: 3 * 60 * 1000, // 3 minutes
     })

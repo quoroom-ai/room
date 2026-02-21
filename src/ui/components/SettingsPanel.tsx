@@ -25,6 +25,7 @@ interface ServerStatus {
   dataDir: string
   dbPath: string
   claude: { available: boolean; version?: string }
+  codex: { available: boolean; version?: string }
   ollama?: { available: boolean; models: Array<{ name: string; size: number }> }
   resources?: { cpuCount: number; loadAvg1m: number; loadAvg5m: number; memTotalGb: number; memFreeGb: number; memUsedPct: number }
   updateInfo?: UpdateInfo | null
@@ -207,12 +208,17 @@ export function SettingsPanel({ advancedMode, onAdvancedModeChange, installPromp
             <div className="flex items-center justify-between text-xs">
               <span className="text-gray-600">Queen model</span>
               <div className="flex rounded overflow-hidden border border-gray-200">
-                {([['claude-opus-4-6', 'Opus'], ['claude-sonnet-4-6', 'Sonnet'], ['claude-haiku-4-5-20251001', 'Haiku']] as const).map(([id, label]) => (
+                {([
+                  ['claude', 'Claude'],
+                  ['codex', 'Codex'],
+                  ['openai:gpt-4o-mini', 'OpenAI API'],
+                  ['anthropic:claude-3-5-sonnet-latest', 'Claude API']
+                ] as const).map(([id, label]) => (
                   <button
                     key={id}
                     onClick={() => setQueenModelSetting(id)}
                     className={`px-2 py-0.5 text-[10px] font-medium transition-colors ${
-                      (queenModel ?? 'claude-opus-4-6') === id
+                      (queenModel ?? 'claude') === id
                         ? 'bg-blue-500 text-white'
                         : 'bg-white text-gray-500 hover:bg-gray-50'
                     }`}
@@ -220,7 +226,7 @@ export function SettingsPanel({ advancedMode, onAdvancedModeChange, installPromp
                 ))}
               </div>
             </div>
-            <p className="text-[10px] text-gray-400 mt-0.5 leading-tight">Default model for new rooms. Sonnet and Haiku use fewer tokens.</p>
+            <p className="text-[10px] text-gray-400 mt-0.5 leading-tight">Default queen provider for new rooms. API modes require key in room credentials or env.</p>
           </div>
         </div>
       </div>
@@ -276,6 +282,16 @@ export function SettingsPanel({ advancedMode, onAdvancedModeChange, installPromp
                     ? serverStatus.claude.version || 'Found'
                     : 'Not found'}
               </span>
+            </span>
+          </div>
+          <div className="flex items-center justify-between text-xs">
+            <span className="text-gray-600">Codex</span>
+            <span className={serverStatus?.codex.available ? 'text-green-600' : 'text-gray-400'}>
+              {serverStatus === null
+                ? '...'
+                : serverStatus.codex.available
+                  ? serverStatus.codex.version || 'Found'
+                  : 'Not found'}
             </span>
           </div>
           <div className="flex items-center justify-between text-xs">
