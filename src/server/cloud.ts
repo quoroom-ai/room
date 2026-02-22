@@ -158,7 +158,8 @@ export function initCloudSync(db: Database.Database): void {
           version,
           queenModel: queen?.model ?? null,
           workers: workersPerRoom.get(room.id) ?? [],
-          stations: stationsPerRoom.get(room.id) ?? []
+          stations: stationsPerRoom.get(room.id) ?? [],
+          inviteCode: room.inviteCode,
         }
       })
     }

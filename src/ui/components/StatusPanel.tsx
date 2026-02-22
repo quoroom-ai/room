@@ -98,6 +98,13 @@ export function StatusPanel({ onNavigate, advancedMode, roomId }: StatusPanelPro
     30000
   )
 
+  const { data: networkCount } = usePolling<number>(
+    () => roomId
+      ? api.rooms.network(roomId).then(r => r.length).catch(() => 0)
+      : Promise.resolve(0),
+    60000
+  )
+
   const [viewMode, setViewMode] = useState<'activity' | 'console'>('activity')
   const [activeFilters, setActiveFilters] = useState<Set<string>>(new Set())
   const [expandedActivityId, setExpandedActivityId] = useState<number | null>(null)
@@ -207,6 +214,15 @@ export function StatusPanel({ onNavigate, advancedMode, roomId }: StatusPanelPro
           </span>
         </div>
       )}
+    </button>
+  ) : null
+
+  const networkCard = (networkCount ?? 0) > 0 ? (
+    <button key="network" className={cardClass} onClick={() => onNavigate?.('swarm')}>
+      <div className="flex items-center justify-between">
+        <span className="text-sm font-medium text-text-secondary">Network</span>
+        <span className="text-sm text-text-muted">{networkCount} referred</span>
+      </div>
     </button>
   ) : null
 
@@ -373,12 +389,13 @@ export function StatusPanel({ onNavigate, advancedMode, roomId }: StatusPanelPro
         {runningSection}
         {lastRunCard}
         {walletCard}
+        {networkCard}
         {renderMainSection()}
       </div>
     )
   }
 
-  const cards = [memoryCard, workersCard, tasksCard, watchesCard, lastRunCard, walletCard].filter(Boolean)
+  const cards = [memoryCard, workersCard, tasksCard, watchesCard, lastRunCard, walletCard, networkCard].filter(Boolean)
 
   return (
     <div ref={containerRef} className="p-4 flex flex-col gap-3 min-h-full overflow-x-hidden">

@@ -51,6 +51,7 @@ CREATE TABLE IF NOT EXISTS rooms (
     queen_quiet_until TEXT,
     config TEXT,
     chat_session_id TEXT,
+    invite_code TEXT,
     created_at DATETIME DEFAULT (datetime('now','localtime')),
     updated_at DATETIME DEFAULT (datetime('now','localtime'))
 );

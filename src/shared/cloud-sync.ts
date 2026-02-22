@@ -82,6 +82,7 @@ export interface CloudRegistration {
   name: string
   goal: string | null
   visibility?: 'public' | 'private'
+  inviteCode?: string | null
 }
 
 export interface CloudHeartbeat {
@@ -96,6 +97,7 @@ export interface CloudHeartbeat {
   queenModel: string | null
   workers: Array<{ name: string; state: string }>
   stations: Array<{ name: string; status: string; tier: string }>
+  inviteCode?: string | null
 }
 
 export async function ensureCloudRoomToken(data: CloudRegistration): Promise<boolean> {
@@ -138,7 +140,7 @@ export async function sendCloudHeartbeat(data: CloudHeartbeat): Promise<void> {
     })
     if (res.status === 401) {
       clearRoomToken(data.roomId)
-      await registerWithCloud({ roomId: data.roomId, name: data.name, goal: data.goal, visibility: 'public' })
+      await registerWithCloud({ roomId: data.roomId, name: data.name, goal: data.goal, visibility: 'public', inviteCode: data.inviteCode })
       if (!getRoomToken(data.roomId)) return
       await fetch(`${getCloudApi()}/rooms/${encodeURIComponent(data.roomId)}/heartbeat`, {
         method: 'POST',
@@ -191,7 +193,7 @@ export function startCloudSync(opts: CloudSyncOptions): void {
   const allData = opts.getHeartbeatDataForPublicRooms()
   for (const data of allData) {
     void (async () => {
-      await registerWithCloud({ roomId: data.roomId, name: data.name, goal: data.goal, visibility: 'public' })
+      await registerWithCloud({ roomId: data.roomId, name: data.name, goal: data.goal, visibility: 'public', inviteCode: data.inviteCode })
       await sendCloudHeartbeat(data)
     })()
   }
@@ -624,6 +626,92 @@ export async function fetchRoomFeed(roomId: string): Promise<PublicRoomFeedEntry
     if (!res.ok) return []
     const data = await res.json() as { feed: PublicRoomFeedEntry[] }
     return data.feed ?? []
+  } catch {
+    return []
+  }
+}
+
+// ─── Invite & Referral Network ──────────────────────────────
+
+export interface CloudInvite {
+  inviteCode: string
+  inviteUrl: string
+  usedCount: number
+  maxUses: number | null
+  isActive: boolean
+  expiresAt: string | null
+  createdAt: string
+}
+
+export interface ReferredRoom {
+  roomId: string
+  visibility: 'public' | 'private'
+  name?: string
+  goal?: string
+  workerCount?: number
+  taskCount?: number
+  earnings?: string
+  queenModel?: string | null
+  workers?: Array<{ name: string; state: string }>
+  stations?: Array<{ name: string; status: string; tier: string }>
+  online?: boolean
+  registeredAt?: string
+}
+
+/**
+ * Create an invite link via cloud API.
+ * Returns invite code and URL on success, null on failure.
+ */
+export async function createCloudInvite(
+  cloudRoomId: string,
+  options?: { maxUses?: number; expiresInDays?: number }
+): Promise<{ inviteCode: string; inviteUrl: string } | null> {
+  try {
+    const res = await fetch(`${getCloudApi()}/rooms/${encodeURIComponent(cloudRoomId)}/invites`, {
+      method: 'POST',
+      headers: cloudHeaders(cloudRoomId, { 'Content-Type': 'application/json' }),
+      body: JSON.stringify(options ?? {}),
+      signal: AbortSignal.timeout(10000)
+    })
+    if (!res.ok) return null
+    const data = await res.json() as { inviteCode: string; inviteUrl: string }
+    return data.inviteCode ? data : null
+  } catch {
+    return null
+  }
+}
+
+/**
+ * List invite links for a room.
+ * Returns empty array on failure.
+ */
+export async function listCloudInvites(cloudRoomId: string): Promise<CloudInvite[]> {
+  try {
+    const res = await fetch(`${getCloudApi()}/rooms/${encodeURIComponent(cloudRoomId)}/invites`, {
+      headers: cloudHeaders(cloudRoomId),
+      signal: AbortSignal.timeout(10000)
+    })
+    if (!res.ok) return []
+    const data = await res.json() as { invites: CloudInvite[] }
+    return data.invites ?? []
+  } catch {
+    return []
+  }
+}
+
+/**
+ * Fetch rooms referred by this room (the room's network).
+ * Returns empty array on failure.
+ */
+export async function fetchReferredRooms(cloudRoomId: string): Promise<ReferredRoom[]> {
+  try {
+    const res = await fetch(`${getCloudApi()}/rooms/${encodeURIComponent(cloudRoomId)}/network`, {
+      headers: cloudHeaders(cloudRoomId),
+      signal: AbortSignal.timeout(10000)
+    })
+    if (!res.ok) return []
+    const data = await res.json() as { referredRooms: ReferredRoom[]; totalCount: number }
+    return data.referredRooms ?? []
   } catch {
     return []
   }

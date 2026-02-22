@@ -50,6 +50,7 @@ export function SettingsPanel({ advancedMode, onAdvancedModeChange, installPromp
   async function handleCheckForUpdates(): Promise<void> {
     setUpdateChecking(true)
     try {
+      await api.status.checkUpdate()
       const status = await api.status.get()
       setServerStatus(status)
       setUpdateChecked(true)

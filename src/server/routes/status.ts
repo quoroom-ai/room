@@ -5,7 +5,7 @@ import { getDataDir } from '../db'
 import { isOllamaAvailable, listOllamaModels } from '../../shared/agent-executor'
 import { invalidateOllamaCache } from '../../shared/model-provider'
 import { isSupportedFreeOllamaModel, stripOllamaPrefix } from '../../shared/ollama-models'
-import { getUpdateInfo, simulateUpdate } from '../updateChecker'
+import { getUpdateInfo, simulateUpdate, forceCheck } from '../updateChecker'
 import { getDeploymentMode } from '../auth'
 
 const startedAt = Date.now()
@@ -200,6 +200,11 @@ export function registerStatusRoutes(router: Router): void {
   router.post('/api/status/simulate-update', async () => {
     await simulateUpdate()
     return { data: { ok: true } }
+  })
+
+  router.post('/api/status/check-update', async () => {
+    await forceCheck()
+    return { data: { updateInfo: getUpdateInfo() } }
   })
 
   router.post('/api/ollama/start', async () => {

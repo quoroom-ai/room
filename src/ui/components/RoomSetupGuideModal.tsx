@@ -8,6 +8,14 @@ interface ProviderSignal {
   connected: boolean | null
 }
 
+interface QueenAuthSignal {
+  provider: string
+  mode: string
+  hasCredential: boolean
+  hasEnvKey: boolean
+  ready: boolean
+}
+
 interface SetupPath {
   id: SetupPathId
   title: string
@@ -24,6 +32,7 @@ interface RoomSetupGuideModalProps {
   currentModel: string
   claude: ProviderSignal | null
   codex: ProviderSignal | null
+  queenAuth: QueenAuthSignal | null
   onApplyModel: (model: string) => Promise<void>
   onClose: () => void
 }
@@ -86,15 +95,56 @@ const PATHS: SetupPath[] = [
 function pickRecommendedPath(
   currentModel: string,
   claude: ProviderSignal | null,
-  codex: ProviderSignal | null
+  codex: ProviderSignal | null,
+  queenAuth: QueenAuthSignal | null,
 ): SetupPathId {
+  // 1. Current model is a connected subscription → keep it
   if ((currentModel === 'codex' || currentModel.startsWith('codex')) && codex?.connected === true) return 'codex_sub'
   if ((currentModel === 'claude' || currentModel.startsWith('claude')) && claude?.connected === true) return 'claude_sub'
+  // 2. Any subscription connected → recommend it
   if (claude?.connected === true) return 'claude_sub'
   if (codex?.connected === true) return 'codex_sub'
+  // 3. Subscription CLI installed → recommend it
   if (claude?.installed) return 'claude_sub'
   if (codex?.installed) return 'codex_sub'
+  // 4. Current model has a ready API key → recommend that API path
+  if (queenAuth?.ready) {
+    if (queenAuth.provider === 'openai_api') return 'openai_api'
+    if (queenAuth.provider === 'anthropic_api') return 'anthropic_api'
+  }
+  // 5. Fallback
   return 'ollama_free'
+}
+
+function getPathStatus(
+  pathId: SetupPathId,
+  claude: ProviderSignal | null,
+  codex: ProviderSignal | null,
+  queenAuth: QueenAuthSignal | null,
+): { label: string; ready: boolean } | null {
+  switch (pathId) {
+    case 'claude_sub':
+      if (!claude) return { label: 'not detected', ready: false }
+      if (claude.connected === true) return { label: 'connected', ready: true }
+      if (claude.installed) return { label: 'installed, not connected', ready: false }
+      return { label: 'not installed', ready: false }
+    case 'codex_sub':
+      if (!codex) return { label: 'not detected', ready: false }
+      if (codex.connected === true) return { label: 'connected', ready: true }
+      if (codex.installed) return { label: 'installed, not connected', ready: false }
+      return { label: 'not installed', ready: false }
+    case 'openai_api':
+      if (queenAuth?.provider === 'openai_api' && queenAuth.ready) return { label: 'API key ready', ready: true }
+      if (queenAuth?.provider === 'openai_api' && (queenAuth.hasCredential || queenAuth.hasEnvKey)) return { label: 'API key ready', ready: true }
+      return { label: 'no API key', ready: false }
+    case 'anthropic_api':
+      if (queenAuth?.provider === 'anthropic_api' && queenAuth.ready) return { label: 'API key ready', ready: true }
+      if (queenAuth?.provider === 'anthropic_api' && (queenAuth.hasCredential || queenAuth.hasEnvKey)) return { label: 'API key ready', ready: true }
+      return { label: 'no API key', ready: false }
+    case 'ollama_free':
+      if (queenAuth?.provider === 'ollama' && queenAuth.ready) return { label: 'available', ready: true }
+      return { label: 'auto-installed on first run', ready: false }
+  }
 }
 
 export function RoomSetupGuideModal({
@@ -102,13 +152,14 @@ export function RoomSetupGuideModal({
   currentModel,
   claude,
   codex,
+  queenAuth,
   onApplyModel,
   onClose,
 }: RoomSetupGuideModalProps): React.JSX.Element {
   const [step, setStep] = useState(0)
   const recommendedId = useMemo(
-    () => pickRecommendedPath(currentModel, claude, codex),
-    [currentModel, claude, codex]
+    () => pickRecommendedPath(currentModel, claude, codex, queenAuth),
+    [currentModel, claude, codex, queenAuth]
   )
   const [selectedPathId, setSelectedPathId] = useState<SetupPathId>(recommendedId)
   const [busy, setBusy] = useState(false)
@@ -176,6 +227,7 @@ export function RoomSetupGuideModal({
               {PATHS.map((path) => {
                 const isRecommended = path.id === recommendedId
                 const selected = path.id === selectedPathId
+                const status = getPathStatus(path.id, claude, codex, queenAuth)
                 return (
                   <button
                     key={path.id}
@@ -195,6 +247,11 @@ export function RoomSetupGuideModal({
                       )}
                     </div>
                     <p className="text-xs text-text-muted">{path.summary}</p>
+                    {status && (
+                      <p className={`text-[11px] mt-1 ${status.ready ? 'text-status-success' : 'text-text-muted'}`}>
+                        {status.label}
+                      </p>
+                    )}
                   </button>
                 )
               })}
@@ -211,16 +268,19 @@ export function RoomSetupGuideModal({
               <p><span className="text-text-secondary font-medium">Tradeoff:</span> <span className="text-text-muted">{selectedPath.tradeoff}</span></p>
               <p><span className="text-text-secondary font-medium">Outcome:</span> <span className="text-text-muted">{selectedPath.outcome}</span></p>
             </div>
-            {selectedPath.id === 'claude_sub' && (
-              <p className="text-xs text-text-muted">
-                Claude status: {claude?.installed ? (claude.connected === true ? 'connected' : 'installed, not connected') : 'not installed'}.
-              </p>
-            )}
-            {selectedPath.id === 'codex_sub' && (
-              <p className="text-xs text-text-muted">
-                Codex status: {codex?.installed ? (codex.connected === true ? 'connected' : 'installed, not connected') : 'not installed'}.
-              </p>
-            )}
+            {(() => {
+              const status = getPathStatus(selectedPath.id, claude, codex, queenAuth)
+              if (!status) return null
+              return (
+                <p className={`text-xs ${status.ready ? 'text-status-success' : 'text-text-muted'}`}>
+                  Status: {status.label}.
+                  {!status.ready && selectedPath.id === 'claude_sub' && ' Connect via Room Settings \u2192 Queen \u2192 Status \u2192 Connect.'}
+                  {!status.ready && selectedPath.id === 'codex_sub' && ' Connect via Room Settings \u2192 Queen \u2192 Status \u2192 Connect.'}
+                  {!status.ready && (selectedPath.id === 'openai_api' || selectedPath.id === 'anthropic_api') && ' Add API key in Room Settings \u2192 Queen \u2192 API key.'}
+                  {!status.ready && selectedPath.id === 'ollama_free' && ' Ollama will be auto-installed on first run.'}
+                </p>
+              )
+            })()}
           </div>
         )}
 
@@ -232,12 +292,12 @@ export function RoomSetupGuideModal({
             </p>
             {(selectedPath.id === 'openai_api' || selectedPath.id === 'anthropic_api') && (
               <p className="text-xs text-status-warning">
-                Next step: add API key in Room Settings → Queen → API key.
+                Next step: add API key in Room Settings {'\u2192'} Queen {'\u2192'} API key.
               </p>
             )}
             {(selectedPath.id === 'claude_sub' || selectedPath.id === 'codex_sub') && (
               <p className="text-xs text-status-warning">
-                Next step: if not connected yet, use Room Settings → Queen → Status → Connect.
+                Next step: if not connected yet, use Room Settings {'\u2192'} Queen {'\u2192'} Status {'\u2192'} Connect.
               </p>
             )}
             {selectedPath.id === 'ollama_free' && (

@@ -66,7 +66,7 @@ function fetchJson(url: string): Promise<unknown> {
   })
 }
 
-async function check(): Promise<void> {
+export async function forceCheck(): Promise<void> {
   try {
     const releases = await fetchJson(
       'https://api.github.com/repos/quoroom-ai/room/releases?per_page=20'
@@ -95,8 +95,8 @@ async function check(): Promise<void> {
 export function initUpdateChecker(): void {
   if (process.env.NODE_ENV === 'test') return
   initTimer = setTimeout(() => {
-    void check()
-    pollInterval = setInterval(() => { void check() }, CHECK_INTERVAL)
+    void forceCheck()
+    pollInterval = setInterval(() => { void forceCheck() }, CHECK_INTERVAL)
   }, INITIAL_DELAY)
 }
 
@@ -111,7 +111,7 @@ export function getUpdateInfo(): UpdateInfo | null {
 
 export async function simulateUpdate(): Promise<void> {
   // Fetch real release data first if not yet cached, so asset URLs are populated.
-  if (!cached) await check()
+  if (!cached) await forceCheck()
   cached = {
     latestVersion: '99.0.0',
     releaseUrl: 'https://github.com/quoroom-ai/room/releases',

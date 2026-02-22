@@ -199,6 +199,7 @@ export interface Room {
   queenQuietUntil: string | null
   config: RoomConfig
   chatSessionId: string | null
+  inviteCode: string | null
   createdAt: string
   updatedAt: string
 }
@@ -207,6 +208,7 @@ export interface CreateRoomInput {
   name: string
   goal?: string
   queenSystemPrompt?: string
+  inviteCode?: string
   config?: Partial<RoomConfig>
 }
 

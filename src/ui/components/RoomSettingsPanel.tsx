@@ -169,6 +169,7 @@ export function RoomSettingsPanel({ roomId }: RoomSettingsPanelProps): React.JSX
   const [archiveError, setArchiveError] = useState<string | null>(null)
   const [showCryptoTopUp, setShowCryptoTopUp] = useState(false)
   const [showSetupGuide, setShowSetupGuide] = useState(false)
+  const [editingInviteCode, setEditingInviteCode] = useState('')
 
   // Sync editingName/editingGoal when selected room changes
   const currentRoom = rooms?.find(r => r.id === roomId) ?? null
@@ -176,8 +177,9 @@ export function RoomSettingsPanel({ roomId }: RoomSettingsPanelProps): React.JSX
     if (currentRoom) {
       setEditingName(currentRoom.name)
       setEditingGoal(currentRoom.goal ?? '')
+      setEditingInviteCode(currentRoom.inviteCode ?? '')
     }
-  }, [currentRoom?.name, currentRoom?.goal, currentRoom?.id])
+  }, [currentRoom?.name, currentRoom?.goal, currentRoom?.id, currentRoom?.inviteCode])
 
   // Auto-open setup popup flow once immediately after creating a room.
   useEffect(() => {
@@ -813,6 +815,7 @@ export function RoomSettingsPanel({ roomId }: RoomSettingsPanelProps): React.JSX
 
   const nameChanged = editingName.trim() !== '' && editingName.trim() !== room.name
   const goalChanged = editingGoal.trim() !== (room.goal ?? '')
+  const inviteCodeChanged = editingInviteCode.trim() !== (room.inviteCode ?? '')
 
   async function handleSaveName(): Promise<void> {
     const trimmed = editingName.trim()
@@ -827,6 +830,14 @@ export function RoomSettingsPanel({ roomId }: RoomSettingsPanelProps): React.JSX
     if (trimmed === (room.goal ?? '')) return
     optimistic(room.id, { goal: trimmed || null })
     await api.rooms.update(room.id, { goal: trimmed || null })
+    refresh()
+  }
+
+  async function handleSaveInviteCode(): Promise<void> {
+    const trimmed = editingInviteCode.trim()
+    if (trimmed === (room.inviteCode ?? '')) return
+    optimistic(room.id, { inviteCode: trimmed || null })
+    await api.rooms.update(room.id, { inviteCode: trimmed || null })
     refresh()
   }
 
@@ -868,7 +879,7 @@ export function RoomSettingsPanel({ roomId }: RoomSettingsPanelProps): React.JSX
 
       await refresh()
       if (issues.length > 0) {
-        setArchiveError(issues.slice(0, 2).join(' | '))
+        setArchiveError(issues.join('\n'))
       }
     } finally {
       setArchiveBusy(false)
@@ -1403,7 +1414,7 @@ export function RoomSettingsPanel({ roomId }: RoomSettingsPanelProps): React.JSX
           {/* Visibility */}
           <div>
             <h3 className="text-sm font-semibold text-text-secondary mb-1">Visibility</h3>
-            <div className="bg-surface-secondary shadow-sm rounded-lg p-3">
+            <div className="bg-surface-secondary shadow-sm rounded-lg p-3 space-y-3">
               <div className="flex items-center justify-between text-sm py-1">
                 <div>
                   <span className="text-text-secondary">Public room</span>
@@ -1419,6 +1430,29 @@ export function RoomSettingsPanel({ roomId }: RoomSettingsPanelProps): React.JSX
                     room.visibility === 'public' ? 'left-4' : 'left-0.5'
                   }`} />
                 </button>
+              </div>
+              <div className="py-1">
+                <label className="block text-sm text-text-secondary mb-1">Referral Code</label>
+                <div className="flex gap-2">
+                  <input
+                    type="text"
+                    value={editingInviteCode}
+                    onChange={e => setEditingInviteCode(e.target.value)}
+                    onKeyDown={e => { if (e.key === 'Enter') void handleSaveInviteCode() }}
+                    onBlur={() => void handleSaveInviteCode()}
+                    placeholder="Enter invite code"
+                    className="flex-1 px-3 py-2 rounded-lg bg-surface-primary border border-border-primary text-sm text-text-primary placeholder:text-text-muted focus:outline-none focus:border-interactive"
+                  />
+                  {inviteCodeChanged && (
+                    <button
+                      onClick={() => void handleSaveInviteCode()}
+                      className="px-3 py-2 rounded-lg bg-interactive text-text-invert text-sm font-medium hover:bg-interactive-hover transition-colors"
+                    >
+                      Save
+                    </button>
+                  )}
+                </div>
+                <p className="text-xs text-text-muted mt-0.5">Links this room to a referrer's network</p>
               </div>
             </div>
           </div>
@@ -1439,7 +1473,7 @@ export function RoomSettingsPanel({ roomId }: RoomSettingsPanelProps): React.JSX
             {archiveBusy ? 'Archiving...' : 'Archive Room'}
           </button>
           {archiveError && (
-            <p className="text-xs text-status-error mt-2 break-words">
+            <p className="text-xs text-status-error mt-2 break-words whitespace-pre-line">
               Archived with issues: {archiveError}
             </p>
           )}
@@ -1452,6 +1486,7 @@ export function RoomSettingsPanel({ roomId }: RoomSettingsPanelProps): React.JSX
           currentModel={queenModelValue}
           claude={providerStatus?.claude ? { installed: providerStatus.claude.installed, connected: providerStatus.claude.connected } : null}
           codex={providerStatus?.codex ? { installed: providerStatus.codex.installed, connected: providerStatus.codex.connected } : null}
+          queenAuth={activeQueenAuth}
           onApplyModel={async (model) => {
             await handleSetQueenModel(room, model)
           }}

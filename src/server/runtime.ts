@@ -306,6 +306,7 @@ async function syncCloudRoomMessages(db: Database.Database): Promise<void> {
       name: room.name,
       goal: room.goal ?? null,
       visibility: room.visibility,
+      inviteCode: room.inviteCode,
     })
     if (!hasToken) continue
 

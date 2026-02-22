@@ -6,6 +6,13 @@ import { api } from '../lib/client'
 import { storageGet, storageSet } from '../lib/storage'
 import type { Room, Worker, Station, RevenueSummary, OnChainBalance } from '@shared/types'
 
+interface ReferredRoom {
+  roomId: string; visibility: 'public' | 'private'; name?: string; goal?: string
+  workerCount?: number; taskCount?: number; earnings?: string; queenModel?: string | null
+  workers?: Array<{ name: string; state: string }>; stations?: Array<{ name: string; status: string; tier: string }>
+  online?: boolean; registeredAt?: string
+}
+
 interface SwarmPanelProps {
   rooms: Room[]
   queenRunning: Record<number, boolean>
@@ -15,6 +22,7 @@ interface SwarmPanelProps {
 // ─── Hexagon math (flat-top orientation) ───────────────────
 
 const ROOM_R = 140
+const REFERRED_R = 80
 const SAT_R = 16
 const H = Math.sqrt(3)
 const HALF_SQRT3 = H / 2 // cos(30°) ≈ 0.866
@@ -457,6 +465,25 @@ export function SwarmPanel({ rooms, queenRunning, onNavigateToRoom }: SwarmPanel
     30000
   )
 
+  const { data: referredMap } = usePolling<Record<number, ReferredRoom[]>>(
+    async () => {
+      if (rooms.length === 0) return {}
+      const entries = await Promise.all(
+        rooms.map(async r => {
+          const referred = await api.rooms.network(r.id).catch(() => [] as ReferredRoom[])
+          return [r.id, referred] as const
+        })
+      )
+      return Object.fromEntries(entries)
+    },
+    60000
+  )
+
+  const totalReferred = useMemo(
+    () => Object.values(referredMap ?? {}).reduce((s, arr) => s + arr.length, 0),
+    [referredMap]
+  )
+
   const workersPerRoom = useMemo(() => {
     const map: Record<number, Worker[]> = {}
     for (const w of allWorkers ?? []) {
@@ -494,15 +521,48 @@ export function SwarmPanel({ rooms, queenRunning, onNavigateToRoom }: SwarmPanel
     })
   }, [rooms, cols, margin, colSpacing, rowSpacing])
 
+  // Ring positions for referred rooms around each user room
+  const referredPositions = useMemo(() => {
+    const result: Array<{
+      ref: ReferredRoom
+      parentRoomId: number
+      cx: number
+      cy: number
+    }> = []
+    for (const { room, cx, cy } of positions) {
+      const refs = (referredMap ?? {})[room.id] ?? []
+      if (refs.length === 0) continue
+      const ringDist = ROOM_R + 24 + REFERRED_R
+      const maxPerRing = Math.max(6, Math.floor((2 * Math.PI * ringDist) / (REFERRED_R * 2.2)))
+      refs.forEach((ref, i) => {
+        const ring = Math.floor(i / maxPerRing)
+        const idxInRing = i % maxPerRing
+        const countInRing = Math.min(refs.length - ring * maxPerRing, maxPerRing)
+        const dist = ringDist + ring * (REFERRED_R * 2.2)
+        const angleStep = (2 * Math.PI) / countInRing
+        const angle = -Math.PI / 2 + idxInRing * angleStep
+        result.push({
+          ref,
+          parentRoomId: room.id,
+          cx: cx + dist * Math.cos(angle),
+          cy: cy + dist * Math.sin(angle),
+        })
+      })
+    }
+    return result
+  }, [positions, referredMap])
+
   const svgWidth = useMemo(() => {
     if (positions.length === 0) return 300
-    return Math.max(...positions.map(p => p.cx)) + margin
-  }, [positions, margin])
+    const allX = [...positions.map(p => p.cx), ...referredPositions.map(p => p.cx + REFERRED_R)]
+    return Math.max(...allX) + margin
+  }, [positions, referredPositions, margin])
 
   const svgHeight = useMemo(() => {
     if (positions.length === 0) return 200
-    return Math.max(...positions.map(p => p.cy)) + margin + 30
-  }, [positions, margin])
+    const allY = [...positions.map(p => p.cy), ...referredPositions.map(p => p.cy + REFERRED_R)]
+    return Math.max(...allY) + margin + 30
+  }, [positions, referredPositions, margin])
 
   // Event bubble positioning
   const roomPositionMap = useMemo(() => {
@@ -578,6 +638,9 @@ export function SwarmPanel({ rooms, queenRunning, onNavigateToRoom }: SwarmPanel
           <span className="text-xs text-text-muted">{rooms.length} room{rooms.length !== 1 ? 's' : ''}</span>
           <span className="text-xs text-text-muted">{(allWorkers ?? []).filter(w => w.roomId !== null).length} workers</span>
           <span className="text-xs text-text-muted">{Object.values(stationMap ?? {}).flat().length} stations</span>
+          {totalReferred > 0 && (
+            <span className="text-xs text-text-muted">{totalReferred} network</span>
+          )}
 
           {showMoney && revenueMap && (
             <>
@@ -830,6 +893,70 @@ export function SwarmPanel({ rooms, queenRunning, onNavigateToRoom }: SwarmPanel
             )
           })}
 
+          {/* ─── Referred room connector lines ─── */}
+          {referredPositions.map((rp) => {
+            const parent = roomPositionMap.get(rp.parentRoomId)
+            if (!parent) return null
+            return (
+              <line
+                key={`conn-${rp.parentRoomId}-${rp.ref.roomId}`}
+                x1={parent.cx} y1={parent.cy}
+                x2={rp.cx} y2={rp.cy}
+                stroke="var(--border-primary)"
+                strokeWidth={1}
+                strokeDasharray="4 4"
+                opacity={0.4}
+              />
+            )
+          })}
+
+          {/* ─── Referred room hexes ─── */}
+          {referredPositions.map((rp) => {
+            const isPublic = rp.ref.visibility === 'public'
+            const refName = isPublic ? (rp.ref.name || rp.ref.roomId.slice(0, 12)) : 'Private'
+            const nameLines = wrapText(refName, 14).slice(0, 2)
+            const wCount = rp.ref.workerCount ?? 0
+            const sCount = rp.ref.stations?.length ?? 0
+            return (
+              <g key={`ref-${rp.parentRoomId}-${rp.ref.roomId}`}>
+                <polygon
+                  points={hexPoints(rp.cx, rp.cy, REFERRED_R)}
+                  fill={isPublic ? 'var(--surface-tertiary)' : 'var(--surface-secondary)'}
+                  fillOpacity={isPublic ? 0.6 : 0.3}
+                  stroke="var(--border-secondary)"
+                  strokeWidth={1}
+                  strokeDasharray="6 3"
+                />
+                {nameLines.map((line, li) => (
+                  <text
+                    key={li}
+                    x={rp.cx} y={rp.cy - 10 + li * 14}
+                    textAnchor="middle" dominantBaseline="middle"
+                    fontSize={li === 0 ? '12' : '11'}
+                    fontWeight={li === 0 ? '600' : '400'}
+                    fill={isPublic ? 'var(--text-secondary)' : 'var(--text-muted)'}
+                    style={{ pointerEvents: 'none' }}
+                  >
+                    {line}
+                  </text>
+                ))}
+                {isPublic && (wCount > 0 || sCount > 0) && (
+                  <text
+                    x={rp.cx} y={rp.cy + nameLines.length * 7 + 6}
+                    textAnchor="middle" dominantBaseline="middle"
+                    fontSize="10" fill="var(--text-muted)"
+                    style={{ pointerEvents: 'none' }}
+                  >
+                    {wCount > 0 ? `${wCount}w` : ''}{wCount > 0 && sCount > 0 ? ' · ' : ''}{sCount > 0 ? `${sCount}s` : ''}
+                  </text>
+                )}
+                {rp.ref.online && (
+                  <circle cx={rp.cx + REFERRED_R - 12} cy={rp.cy - REFERRED_R * 0.42} r={4} fill="var(--status-success)" />
+                )}
+              </g>
+            )
+          })}
+
           {/* ─── Ripple effects ─── */}
           {swarmRipples.map(r => {
             const pos = roomPositionMap.get(r.roomId)
@@ -893,7 +1020,7 @@ export function SwarmPanel({ rooms, queenRunning, onNavigateToRoom }: SwarmPanel
             <span className="flex items-center gap-1.5"><span className="inline-block w-2.5 h-2.5 rounded-full bg-status-warning" /> Paused</span>
             <span className="flex items-center gap-1.5"><span className="inline-block w-2.5 h-2.5 rounded-full bg-surface-tertiary" /> Idle / stopped</span>
           </div>
-          <p>Each large hexagon is a <strong className="text-text-secondary">room</strong> — an autonomous agent collective with a queen, workers, and optional stations. Small hexagons on the border are <strong className="text-text-secondary">workers</strong> (agents) and <strong className="text-text-secondary">stations</strong> (cloud compute). Click a room to open it.</p>
+          <p>Each large hexagon is a <strong className="text-text-secondary">room</strong> — an autonomous agent collective with a queen, workers, and optional stations. Small hexagons on the border are <strong className="text-text-secondary">workers</strong> (agents) and <strong className="text-text-secondary">stations</strong> (cloud compute). Smaller hexagons with dashed borders are rooms in your <strong className="text-text-secondary">network</strong> — created via your invite links. Click a room to open it.</p>
           <p>Toggle the <strong className="text-text-secondary">$</strong> button to show or hide financial info. Use <strong className="text-text-secondary">Share</strong> to export your swarm as an image.</p>
         </div>
 

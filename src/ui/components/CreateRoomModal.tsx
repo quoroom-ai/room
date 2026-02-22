@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef } from 'react'
 import { api } from '../lib/client'
+import { storageGet, storageSet } from '../lib/storage'
 import type { Room } from '@shared/types'
 
 const PLACEHOLDERS = [
@@ -23,13 +24,41 @@ interface CreateRoomModalProps {
 export function CreateRoomModal({ onClose, onCreate }: CreateRoomModalProps): React.JSX.Element {
   const [name, setName] = useState('')
   const [goal, setGoal] = useState('')
+  const [inviteCode, setInviteCode] = useState('')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [placeholderIdx, setPlaceholderIdx] = useState(0)
   const nameRef = useRef<HTMLInputElement>(null)
+  const inviteAutoFilled = useRef(false)
 
   // Auto-focus name input
   useEffect(() => { nameRef.current?.focus() }, [])
+
+  // Auto-fill invite code from: URL param > localStorage > existing rooms
+  useEffect(() => {
+    if (inviteAutoFilled.current) return
+    inviteAutoFilled.current = true
+    const urlParams = new URLSearchParams(window.location.search)
+    const urlCode = urlParams.get('invite')
+    if (urlCode) {
+      setInviteCode(urlCode)
+      storageSet('quoroom_invite_code', urlCode)
+      return
+    }
+    const stored = storageGet('quoroom_invite_code')
+    if (stored) {
+      setInviteCode(stored)
+      return
+    }
+    // Check existing rooms for invite code
+    void api.rooms.list().then(rooms => {
+      const existing = rooms.find(r => r.inviteCode)
+      if (existing?.inviteCode) {
+        setInviteCode(existing.inviteCode)
+        storageSet('quoroom_invite_code', existing.inviteCode)
+      }
+    }).catch(() => {})
+  }, [])
 
   // Rotate placeholder every 3s
   useEffect(() => {
@@ -55,7 +84,9 @@ export function CreateRoomModal({ onClose, onCreate }: CreateRoomModalProps): Re
     setBusy(true)
     setError(null)
     try {
-      const created = await api.rooms.create({ name: trimName, goal: goal.trim() || undefined })
+      const trimCode = inviteCode.trim() || undefined
+      if (trimCode) storageSet('quoroom_invite_code', trimCode)
+      const created = await api.rooms.create({ name: trimName, goal: goal.trim() || undefined, inviteCode: trimCode })
       onCreate(created as Room)
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to create room')
@@ -101,6 +132,18 @@ export function CreateRoomModal({ onClose, onCreate }: CreateRoomModalProps): Re
               rows={6}
               className="w-full px-3 py-2 rounded-lg bg-surface-secondary border border-border-primary text-sm text-text-primary placeholder:text-text-muted focus:outline-none focus:border-interactive resize-none transition-colors"
             />
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium text-text-muted mb-1">Referral Code <span className="text-xs font-normal">(optional)</span></label>
+            <input
+              type="text"
+              value={inviteCode}
+              onChange={e => setInviteCode(e.target.value)}
+              placeholder="Enter invite code"
+              className="w-full px-3 py-2 rounded-lg bg-surface-secondary border border-border-primary text-sm text-text-primary placeholder:text-text-muted focus:outline-none focus:border-interactive"
+            />
+            <p className="text-xs text-text-muted mt-0.5">Links this room to a referrer's network</p>
           </div>
         </div>
 

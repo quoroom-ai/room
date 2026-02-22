@@ -4,7 +4,7 @@ import * as queries from '../../shared/db-queries'
 import { eventBus } from '../event-bus'
 import { triggerAgent, pauseAgent, isAgentRunning } from '../../shared/agent-loop'
 import { initCloudSync } from '../cloud'
-import { getRoomCloudId } from '../../shared/cloud-sync'
+import { getRoomCloudId, fetchReferredRooms } from '../../shared/cloud-sync'
 import { QUEEN_DEFAULTS_BY_PLAN, CHATGPT_DEFAULTS_BY_PLAN, type ClaudePlan, type ChatGptPlan } from '../../shared/constants'
 import type { ActivityEventType } from '../../shared/types'
 import { getModelAuthStatus } from '../../shared/model-provider'
@@ -17,14 +17,15 @@ function parseLimit(raw: string | undefined, fallback: number, max: number): num
 
 export function registerRoomRoutes(router: Router): void {
   router.post('/api/rooms', (ctx) => {
-    const { name, goal, queenSystemPrompt, config } = ctx.body as Record<string, unknown> || {}
+    const { name, goal, queenSystemPrompt, config, inviteCode } = ctx.body as Record<string, unknown> || {}
     if (!name || typeof name !== 'string') return { status: 400, error: 'name is required' }
 
     const result = createRoom(ctx.db, {
       name,
       goal: goal as string | undefined,
       queenSystemPrompt: queenSystemPrompt as string | undefined,
-      config: config as Record<string, unknown> | undefined
+      config: config as Record<string, unknown> | undefined,
+      inviteCode: (inviteCode as string | undefined) || undefined
     })
 
     // Apply plan-aware defaults for queen activity limits
@@ -78,6 +79,15 @@ export function registerRoomRoutes(router: Router): void {
     return { data: { cloudId: getRoomCloudId(id) } }
   })
 
+  router.get('/api/rooms/:id/network', async (ctx) => {
+    const id = Number(ctx.params.id)
+    const room = queries.getRoom(ctx.db, id)
+    if (!room) return { status: 404, error: 'Room not found' }
+    const cloudRoomId = getRoomCloudId(id)
+    const referred = await fetchReferredRooms(cloudRoomId)
+    return { data: referred }
+  })
+
   router.get('/api/rooms/:id/activity', (ctx) => {
     const roomId = Number(ctx.params.id)
     const limit = parseLimit(ctx.query.limit, 50, 500)
@@ -93,7 +103,7 @@ export function registerRoomRoutes(router: Router): void {
     const body = ctx.body as Record<string, unknown> || {}
     const room = queries.getRoom(ctx.db, roomId)
     if (!room) return { status: 404, error: 'Room not found' }
-    const updates: Partial<{ name: string; goal: string | null; status: string; visibility: string; autonomyMode: string; maxConcurrentTasks: number; workerModel: string; queenCycleGapMs: number; queenMaxTurns: number; queenQuietFrom: string | null; queenQuietUntil: string | null }> = {}
+    const updates: Partial<{ name: string; goal: string | null; status: string; visibility: string; autonomyMode: string; maxConcurrentTasks: number; workerModel: string; queenCycleGapMs: number; queenMaxTurns: number; queenQuietFrom: string | null; queenQuietUntil: string | null; inviteCode: string | null }> = {}
     if (body.name !== undefined) updates.name = body.name as string
     if (body.goal !== undefined) updates.goal = body.goal as string | null
     if (body.status === 'stopped') updates.status = 'stopped'
@@ -114,6 +124,7 @@ export function registerRoomRoutes(router: Router): void {
     }
     if (body.queenQuietFrom !== undefined) updates.queenQuietFrom = body.queenQuietFrom as string | null
     if (body.queenQuietUntil !== undefined) updates.queenQuietUntil = body.queenQuietUntil as string | null
+    if (body.inviteCode !== undefined) updates.inviteCode = (body.inviteCode as string | null) || null
     queries.updateRoom(ctx.db, roomId, updates)
 
     // Sync root goal when objective changes

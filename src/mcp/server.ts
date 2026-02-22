@@ -16,6 +16,7 @@ import { registerIdentityTools } from './tools/identity'
 import { registerInboxTools } from './tools/inbox'
 import { registerCredentialTools } from './tools/credentials'
 import { registerResourceTools } from './tools/resources'
+import { registerInviteTools } from './tools/invite'
 import { closeMcpDatabase } from './db'
 
 declare const __APP_VERSION__: string
@@ -42,6 +43,7 @@ async function main(): Promise<void> {
   registerInboxTools(server)
   registerCredentialTools(server)
   registerResourceTools(server)
+  registerInviteTools(server)
 
   // Clean up database on process exit
   const cleanup = (): void => {

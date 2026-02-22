@@ -282,6 +282,13 @@ export const api = {
       request<{ ok: true; running: boolean }>('POST', `/api/rooms/${id}/queen/stop`),
     cloudId: (id: number) =>
       request<{ cloudId: string }>('GET', `/api/rooms/${id}/cloud-id`).then(d => d.cloudId),
+    network: (id: number) =>
+      request<Array<{
+        roomId: string; visibility: 'public' | 'private'; name?: string; goal?: string;
+        workerCount?: number; taskCount?: number; earnings?: string; queenModel?: string | null;
+        workers?: Array<{ name: string; state: string }>; stations?: Array<{ name: string; status: string; tier: string }>;
+        online?: boolean; registeredAt?: string;
+      }>>('GET', `/api/rooms/${id}/network`),
   },
 
   // ─── Goals ───────────────────────────────────────────────
@@ -379,6 +386,10 @@ export const api = {
         deploymentMode?: 'local' | 'cloud'
         updateInfo?: { latestVersion: string; releaseUrl: string; assets: { mac: string | null; windows: string | null; linux: string | null } } | null
       }>('GET', '/api/status'),
+    checkUpdate: () =>
+      request<{
+        updateInfo: { latestVersion: string; releaseUrl: string; assets: { mac: string | null; windows: string | null; linux: string | null } } | null
+      }>('POST', '/api/status/check-update'),
   },
 
   // ─── Providers (cloud subscription auth helpers) ───────

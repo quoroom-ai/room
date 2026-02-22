@@ -1032,16 +1032,17 @@ function mapRoomRow(row: Record<string, unknown>): Room {
     queenQuietUntil: (row.queen_quiet_until as string | null) ?? null,
     config,
     chatSessionId: (row.chat_session_id as string | null) ?? null,
+    inviteCode: (row.invite_code as string | null) ?? null,
     createdAt: row.created_at as string,
     updatedAt: row.updated_at as string
   }
 }
 
-export function createRoom(db: Database.Database, name: string, goal?: string, config?: Partial<RoomConfig>): Room {
+export function createRoom(db: Database.Database, name: string, goal?: string, config?: Partial<RoomConfig>, inviteCode?: string): Room {
   const configJson = config ? JSON.stringify({ ...DEFAULT_ROOM_CONFIG, ...config }) : JSON.stringify(DEFAULT_ROOM_CONFIG)
   const result = db
-    .prepare('INSERT INTO rooms (name, goal, config) VALUES (?, ?, ?)')
-    .run(name, goal ?? null, configJson)
+    .prepare('INSERT INTO rooms (name, goal, config, invite_code) VALUES (?, ?, ?, ?)')
+    .run(name, goal ?? null, configJson, inviteCode ?? null)
   return getRoom(db, result.lastInsertRowid as number)!
 }
 
@@ -1060,7 +1061,7 @@ export function listRooms(db: Database.Database, status?: string): Room[] {
 }
 
 export function updateRoom(db: Database.Database, id: number, updates: Partial<{
-  name: string; queenWorkerId: number | null; goal: string | null; status: string; visibility: string; autonomyMode: string; maxConcurrentTasks: number; workerModel: string; queenCycleGapMs: number; queenMaxTurns: number; queenQuietFrom: string | null; queenQuietUntil: string | null; config: RoomConfig
+  name: string; queenWorkerId: number | null; goal: string | null; status: string; visibility: string; autonomyMode: string; maxConcurrentTasks: number; workerModel: string; queenCycleGapMs: number; queenMaxTurns: number; queenQuietFrom: string | null; queenQuietUntil: string | null; config: RoomConfig; inviteCode: string | null
 }>): void {
   const fieldMap: Record<string, string> = {
     name: 'name', queenWorkerId: 'queen_worker_id', goal: 'goal',
@@ -1068,7 +1069,7 @@ export function updateRoom(db: Database.Database, id: number, updates: Partial<{
     maxConcurrentTasks: 'max_concurrent_tasks', workerModel: 'worker_model',
     queenCycleGapMs: 'queen_cycle_gap_ms', queenMaxTurns: 'queen_max_turns',
     queenQuietFrom: 'queen_quiet_from', queenQuietUntil: 'queen_quiet_until',
-    config: 'config'
+    config: 'config', inviteCode: 'invite_code'
   }
   const fields: string[] = []
   const values: unknown[] = []
