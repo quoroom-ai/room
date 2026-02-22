@@ -10,12 +10,13 @@ import { getDeploymentMode } from '../auth'
 
 const startedAt = Date.now()
 
+declare const __APP_VERSION__: string
+
 let cachedVersion: string | null = null
 function getVersion(): string {
   if (cachedVersion) return cachedVersion
   try {
-    // eslint-disable-next-line @typescript-eslint/no-require-imports
-    cachedVersion = require('../../../package.json').version
+    cachedVersion = typeof __APP_VERSION__ !== 'undefined' ? __APP_VERSION__ : require('../../../package.json').version
   } catch {
     cachedVersion = 'unknown'
   }

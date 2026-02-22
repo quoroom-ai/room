@@ -55,6 +55,11 @@ function parseCreatedRoomId(payload: unknown): number | null {
   return null
 }
 
+function isDevDbPath(dbPath: string | undefined): boolean {
+  if (!dbPath) return false
+  return dbPath.replace(/\\/g, '/').toLowerCase().includes('/.quoroom-dev/')
+}
+
 async function probeLocalServer(port: string): Promise<boolean> {
   try {
     const controller = new AbortController()
@@ -112,6 +117,7 @@ function App(): React.JSX.Element {
     releaseUrl: string
     assets: { mac: string | null; windows: string | null; linux: string | null }
   } | null>(null)
+  const [devDbBanner, setDevDbBanner] = useState<{ dbPath: string; dataDir?: string } | null>(null)
   const [updateDismissed, setUpdateDismissed] = useState(false)
 
   // Remote origin gate: 'probing' → 'connect' or redirect to localhost
@@ -209,6 +215,13 @@ function App(): React.JSX.Element {
     if (gate !== 'app' || !ready) return
     function checkStatus(): void {
       api.status.get().then((status) => {
+        const isDevDb = (status.deploymentMode ?? 'local') === 'local' && isDevDbPath(status.dbPath)
+        if (isDevDb) {
+          setDevDbBanner({ dbPath: status.dbPath, dataDir: status.dataDir })
+        } else {
+          setDevDbBanner(null)
+        }
+
         const ui = status.updateInfo
         if (!ui) return
         if (!semverGt(ui.latestVersion, status.version)) return
@@ -532,6 +545,20 @@ function App(): React.JSX.Element {
 
       {/* Main content */}
       <div className="flex-1 flex flex-col min-w-0">
+        {devDbBanner && (
+          <div className="px-4 py-2 bg-status-warning-bg border-b border-amber-200 shrink-0">
+            <div className="text-[11px] font-semibold uppercase tracking-wide text-status-warning">Dev Mode · Isolated DB</div>
+            <div className="text-xs text-text-secondary break-all">
+              DB: <span className="font-mono">{devDbBanner.dbPath}</span>
+            </div>
+            {devDbBanner.dataDir && (
+              <div className="text-xs text-text-secondary break-all">
+                Data: <span className="font-mono">{devDbBanner.dataDir}</span>
+              </div>
+            )}
+          </div>
+        )}
+
         {(installPrompt.canInstall || installPrompt.isManualInstallPlatform) && !installPrompt.isInstalled && !installDismissed && (
           <div className="flex items-center gap-3 px-4 py-2 bg-brand-50 border-b border-brand-200">
             <span className="text-sm text-brand-700 flex-1">
@@ -629,12 +656,17 @@ function App(): React.JSX.Element {
             document.body.appendChild(a)
             a.click()
             document.body.removeChild(a)
+            storageSet('quoroom_update_dismissed', serverUpdateInfo.latestVersion)
+            setUpdateDismissed(true)
           }}
           onSkip={() => {
             storageSet('quoroom_update_dismissed', serverUpdateInfo.latestVersion)
             setUpdateDismissed(true)
           }}
-          onDismiss={() => setUpdateDismissed(true)}
+          onDismiss={() => {
+            storageSet('quoroom_update_dismissed', serverUpdateInfo.latestVersion)
+            setUpdateDismissed(true)
+          }}
         />
       )}
     </div>
