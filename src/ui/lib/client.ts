@@ -479,12 +479,6 @@ export const api = {
       request<Station[]>('GET', `/api/rooms/${roomId}/stations`),
     get: (id: number) =>
       request<Station>('GET', `/api/stations/${id}`),
-    create: (roomId: number, body: Record<string, unknown>) =>
-      request<Station>('POST', `/api/rooms/${roomId}/stations`, body),
-    update: (id: number, body: Record<string, unknown>) =>
-      request<Station>('PATCH', `/api/stations/${id}`, body),
-    delete: (id: number) =>
-      request<{ ok: true }>('DELETE', `/api/stations/${id}`),
   },
 
   // ─── Cloud Stations (remote control via local proxy) ──────

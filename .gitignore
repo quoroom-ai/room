@@ -36,3 +36,9 @@ vitest.config.ts
 
 # Internal ops docs
 docs/RELEASE_RUNBOOK.md
+
+# Keep selected browser E2E specs tracked in this repo.
+!e2e/
+e2e/*
+!e2e/setup-flow.test.ts
+!e2e/test-buttons.test.ts

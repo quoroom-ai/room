@@ -2,10 +2,12 @@ import { useState, useRef, useEffect } from 'react'
 import { usePolling } from '../hooks/usePolling'
 import { api } from '../lib/client'
 import { getCachedToken } from '../lib/auth'
+import { storageGet, storageRemove } from '../lib/storage'
 import { wsClient, type WsMessage } from '../lib/ws'
 import { Select } from './Select'
 import { CopyAddressButton } from './CopyAddressButton'
 import { PromptDialog } from './PromptDialog'
+import { RoomSetupGuideModal } from './RoomSetupGuideModal'
 import type { Room, Wallet, RevenueSummary, OnChainBalance } from '@shared/types'
 import { FREE_OLLAMA_MODEL_OPTIONS } from '@shared/ollama-models'
 
@@ -81,6 +83,10 @@ interface ProviderStatusEntry {
   authSession: ProviderAuthSession | null
   installRequestedAt: string | null
   installSession: ProviderInstallSession | null
+}
+
+function getErrorMessage(err: unknown): string {
+  return err instanceof Error ? err.message : 'Unknown error'
 }
 
 export function RoomSettingsPanel({ roomId }: RoomSettingsPanelProps): React.JSX.Element {
@@ -160,7 +166,9 @@ export function RoomSettingsPanel({ roomId }: RoomSettingsPanelProps): React.JSX
   const [queenModelSetup, setQueenModelSetup] = useState<{ roomId: number; phase: QueenModelSetupPhase; startedAt: number } | null>(null)
   const [queenModelSetupTick, setQueenModelSetupTick] = useState<number>(Date.now())
   const [archiveBusy, setArchiveBusy] = useState(false)
+  const [archiveError, setArchiveError] = useState<string | null>(null)
   const [showCryptoTopUp, setShowCryptoTopUp] = useState(false)
+  const [showSetupGuide, setShowSetupGuide] = useState(false)
 
   // Sync editingName/editingGoal when selected room changes
   const currentRoom = rooms?.find(r => r.id === roomId) ?? null
@@ -170,6 +178,16 @@ export function RoomSettingsPanel({ roomId }: RoomSettingsPanelProps): React.JSX
       setEditingGoal(currentRoom.goal ?? '')
     }
   }, [currentRoom?.name, currentRoom?.goal, currentRoom?.id])
+
+  // Auto-open setup popup flow once immediately after creating a room.
+  useEffect(() => {
+    if (!roomId) return
+    const requestedRoom = storageGet('quoroom_setup_flow_room')
+    if (requestedRoom && Number(requestedRoom) === roomId) {
+      setShowSetupGuide(true)
+      storageRemove('quoroom_setup_flow_room')
+    }
+  }, [roomId])
 
   useEffect(() => {
     if (!queenModelSetup) return
@@ -734,6 +752,36 @@ export function RoomSettingsPanel({ roomId }: RoomSettingsPanelProps): React.JSX
     workerModelOptions.unshift({ value: room.workerModel, label: `Current: ${room.workerModel}` })
   }
 
+  const hasClaudeSubscription = providerStatus?.claude.connected === true
+  const hasCodexSubscription = providerStatus?.codex.connected === true
+  const currentIsCodex = queenModelValue === 'codex' || queenModelValue.startsWith('codex')
+  const currentIsClaude = queenModelValue === 'claude' || queenModelValue.startsWith('claude')
+  const recommendedQueenModel = currentIsCodex && hasCodexSubscription
+    ? 'codex'
+    : currentIsClaude && hasClaudeSubscription
+      ? 'claude'
+      : hasClaudeSubscription
+        ? 'claude'
+        : hasCodexSubscription
+          ? 'codex'
+          : null
+  const recommendationLabel = recommendedQueenModel === 'claude'
+    ? 'Claude subscription'
+    : recommendedQueenModel === 'codex'
+      ? 'Codex subscription'
+      : queenModelValue.startsWith('ollama:')
+        ? 'Free Ollama path'
+        : activeQueenAuth?.mode === 'api'
+          ? 'API key path'
+          : 'Choose a setup path'
+  const recommendationHint = recommendedQueenModel
+    ? 'Subscription detected in this runtime. Subscription models are the fastest setup and usually the most stable for autonomous loops.'
+    : activeQueenAuth?.mode === 'api'
+      ? 'API model selected. Add and validate API key below to avoid queen auth failures.'
+      : queenModelValue.startsWith('ollama:')
+        ? 'Free setup path selected. First run can be slower while Ollama starts and model files are prepared.'
+        : 'No subscription detected yet. Use API key models or free Ollama, or connect Claude/Codex in Status.'
+
   function row(label: string, children: React.ReactNode, description?: string): React.JSX.Element {
     return (
       <div className="py-2">
@@ -785,21 +833,46 @@ export function RoomSettingsPanel({ roomId }: RoomSettingsPanelProps): React.JSX
   async function handleArchiveRoom(): Promise<void> {
     if (!window.confirm(`Archive "${room.name}"? This will stop the queen, cancel all stations, and hide the room.`)) return
     setArchiveBusy(true)
+    setArchiveError(null)
+    const issues: string[] = []
     try {
-      // Stop the queen
-      await api.rooms.queenStop(room.id).catch(() => {})
-      // Cancel all cloud stations immediately
-      const stations = await api.stations.list(room.id).catch(() => [])
-      for (const s of stations) {
-        await api.stations.delete(room.id, (s as Record<string, unknown>).id as number).catch(() => {})
+      // Stop the queen first so no new jobs are created during archival.
+      try {
+        await api.rooms.queenStop(room.id)
+      } catch (err) {
+        issues.push(`Failed to stop queen: ${getErrorMessage(err)}`)
       }
-      // Set room status to stopped (also pauses all agents server-side)
-      await api.rooms.update(room.id, { status: 'stopped' } as Record<string, unknown>)
-      refresh()
-    } catch {
-      // ignore
+
+      // Delete all cloud stations to prevent lingering spend.
+      try {
+        const stations = await api.cloudStations.list(room.id)
+        for (const station of stations) {
+          const stationId = Number((station as Record<string, unknown>).id)
+          if (!Number.isFinite(stationId)) continue
+          try {
+            await api.cloudStations.delete(room.id, stationId)
+          } catch (err) {
+            issues.push(`Station #${stationId}: ${getErrorMessage(err)}`)
+          }
+        }
+      } catch (err) {
+        issues.push(`Failed to list cloud stations: ${getErrorMessage(err)}`)
+      }
+
+      // Archive room (server also pauses agents).
+      try {
+        await api.rooms.update(room.id, { status: 'stopped' } as Record<string, unknown>)
+      } catch (err) {
+        issues.push(`Failed to archive room: ${getErrorMessage(err)}`)
+      }
+
+      await refresh()
+      if (issues.length > 0) {
+        setArchiveError(issues.slice(0, 2).join(' | '))
+      }
+    } finally {
+      setArchiveBusy(false)
     }
-    setArchiveBusy(false)
   }
 
   return (
@@ -852,7 +925,15 @@ export function RoomSettingsPanel({ roomId }: RoomSettingsPanelProps): React.JSX
         <div className="space-y-4">
           {/* Queen */}
           <div>
-            <h3 className="text-sm font-semibold text-text-secondary mb-1">Queen</h3>
+            <div className="flex items-center justify-between mb-1">
+              <h3 className="text-sm font-semibold text-text-secondary">Queen</h3>
+              <button
+                onClick={() => setShowSetupGuide(true)}
+                className="text-xs px-2 py-1 rounded-lg border border-border-primary text-text-secondary hover:bg-surface-hover"
+              >
+                Setup guide
+              </button>
+            </div>
             <div className="bg-surface-secondary shadow-sm rounded-lg p-3 divide-y divide-border-primary">
 
               {/* Autonomy mode */}
@@ -900,6 +981,23 @@ export function RoomSettingsPanel({ roomId }: RoomSettingsPanelProps): React.JSX
                 </div>,
                 'LLM provider for the queen. Selecting an Ollama model will auto-install and start it if needed.'
               )}
+
+              {row(
+                'Recommended path',
+                <span className={`text-xs font-medium ${recommendedQueenModel ? 'text-status-success' : 'text-status-warning'}`}>
+                  {recommendationLabel}
+                </span>,
+                recommendationHint
+              )}
+
+              <div className="py-2">
+                <p className="text-xs text-text-muted leading-relaxed">
+                  <span className="font-medium text-text-secondary">Setup outcomes:</span>{' '}
+                  Subscription models usually give best quality with lowest setup friction.
+                  API models are good for strict key-based billing.
+                  Ollama is free and fully self-hosted, but quality and speed depend on local/server hardware.
+                </p>
+              </div>
 
               {activeQueenAuth?.mode === 'api' && (
                 row('API key',
@@ -1340,8 +1438,26 @@ export function RoomSettingsPanel({ roomId }: RoomSettingsPanelProps): React.JSX
           >
             {archiveBusy ? 'Archiving...' : 'Archive Room'}
           </button>
+          {archiveError && (
+            <p className="text-xs text-status-error mt-2 break-words">
+              Archived with issues: {archiveError}
+            </p>
+          )}
         </div>
       </div>
+
+      {showSetupGuide && (
+        <RoomSetupGuideModal
+          roomName={room.name}
+          currentModel={queenModelValue}
+          claude={providerStatus?.claude ? { installed: providerStatus.claude.installed, connected: providerStatus.claude.connected } : null}
+          codex={providerStatus?.codex ? { installed: providerStatus.codex.installed, connected: providerStatus.codex.connected } : null}
+          onApplyModel={async (model) => {
+            await handleSetQueenModel(room, model)
+          }}
+          onClose={() => setShowSetupGuide(false)}
+        />
+      )}
 
       {apiKeyPrompt && (
         <PromptDialog

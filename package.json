@@ -41,6 +41,8 @@
     "test:smart-e2e": "git diff --cached --name-only | grep -qE '^(src/ui/|src/server/|e2e/|playwright)' && npm run test:e2e || echo 'No UI/server changes — skipping E2E'",
     "test:e2e": "npm run build && npx playwright test",
     "test:e2e:ui": "npm run build && npx playwright test e2e/ui.test.ts",
+    "test:e2e:setup": "npm run build && npx playwright test e2e/setup-flow.test.ts",
+    "test:e2e:setup:headed": "npm run build && npx playwright test e2e/setup-flow.test.ts --headed --project=chromium",
     "rebuild:native:node": "node -e \"try{require('better-sqlite3')(':memory:').close()}catch{process.exit(1)}\" || npx --yes node-gyp rebuild --directory=node_modules/better-sqlite3",
     "prepublishOnly": "npm run build:mcp"
   },

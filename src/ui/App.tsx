@@ -326,6 +326,8 @@ function App(): React.JSX.Element {
     if (resolvedRoomId !== null) {
       handleRoomChange(resolvedRoomId)
       setExpandedRoomId(resolvedRoomId)
+      // Trigger room-setup popup flow once after creating a room.
+      storageSet('quoroom_setup_flow_room', String(resolvedRoomId))
     }
     handleTabChange('room-settings')
     setShowCreateRoomModal(false)
