@@ -43,10 +43,11 @@ export function MessagesPanel({ roomId, autonomyMode }: MessagesPanelProps): Rea
   const [replyingTo, setReplyingTo] = useState<number | null>(null)
   const [replyText, setReplyText] = useState('')
   const [showCreateForm, setShowCreateForm] = useState(false)
-  const [fromAgentId, setFromAgentId] = useState<number | ''>('')
   const [toAgentId, setToAgentId] = useState<number | ''>('')
   const [messageBody, setMessageBody] = useState('')
   const [createError, setCreateError] = useState<string | null>(null)
+  const [replyingToMsg, setReplyingToMsg] = useState<number | null>(null)
+  const [roomMsgReplyText, setRoomMsgReplyText] = useState('')
   const messagesEndRef = useRef<HTMLDivElement>(null)
 
   // Auto-scroll to bottom on new messages
@@ -58,7 +59,7 @@ export function MessagesPanel({ roomId, autonomyMode }: MessagesPanelProps): Rea
   const workerMap = new Map(workerList.map(w => [w.id, w]))
 
   function getWorkerName(id: number | null): string {
-    if (id === null) return 'System'
+    if (id === null) return 'Keeper'
     return workerMap.get(id)?.name ?? `Worker #${id}`
   }
 
@@ -71,17 +72,16 @@ export function MessagesPanel({ roomId, autonomyMode }: MessagesPanelProps): Rea
   }
 
   async function handleCreateMessage(): Promise<void> {
-    if (!roomId || fromAgentId === '' || !messageBody.trim()) return
+    if (!roomId || !messageBody.trim()) return
     setCreateError(null)
     try {
       await api.escalations.create(
         roomId,
-        fromAgentId,
+        null,
         messageBody.trim(),
         toAgentId === '' ? undefined : toAgentId,
       )
       setMessageBody('')
-      setFromAgentId('')
       setToAgentId('')
       setShowCreateForm(false)
       refresh()
@@ -89,6 +89,14 @@ export function MessagesPanel({ roomId, autonomyMode }: MessagesPanelProps): Rea
       const message = err instanceof Error ? err.message : 'Failed to send message'
       setCreateError(message)
     }
+  }
+
+  async function handleRoomMsgReply(messageId: number): Promise<void> {
+    if (!roomMsgReplyText.trim()) return
+    await api.roomMessages.reply(messageId, roomMsgReplyText.trim())
+    setRoomMsgReplyText('')
+    setReplyingToMsg(null)
+    refreshMessages()
   }
 
   async function handleMarkAllRead(): Promise<void> {
@@ -161,28 +169,16 @@ export function MessagesPanel({ roomId, autonomyMode }: MessagesPanelProps): Rea
       {/* Create message form (semi-mode only) */}
       {semi && showCreateForm && roomId && (
         <div className="p-4 border-b-2 border-border-primary bg-surface-secondary space-y-2">
-          <div className="flex gap-2">
-            <Select
-              value={String(fromAgentId)}
-              onChange={(v) => { setFromAgentId(v === '' ? '' : Number(v)); setCreateError(null) }}
-              className="flex-1"
-              placeholder="Send as worker..."
-              options={[
-                { value: '', label: 'Send as worker...' },
-                ...workerList.map(w => ({ value: String(w.id), label: w.name }))
-              ]}
-            />
-            <Select
-              value={String(toAgentId)}
-              onChange={(v) => setToAgentId(v === '' ? '' : Number(v))}
-              className="flex-1"
-              placeholder="To worker (optional)"
-              options={[
-                { value: '', label: 'To worker (optional)' },
-                ...workerList.map(w => ({ value: String(w.id), label: w.name }))
-              ]}
-            />
-          </div>
+          <Select
+            value={String(toAgentId)}
+            onChange={(v) => setToAgentId(v === '' ? '' : Number(v))}
+            className="max-w-xs"
+            placeholder="To worker (optional)"
+            options={[
+              { value: '', label: 'To worker (optional)' },
+              ...workerList.map(w => ({ value: String(w.id), label: w.name }))
+            ]}
+          />
           <textarea
             value={messageBody}
             onChange={(e) => { setMessageBody(e.target.value); setCreateError(null) }}
@@ -197,7 +193,7 @@ export function MessagesPanel({ roomId, autonomyMode }: MessagesPanelProps): Rea
             <div className="flex-1" />
             <button
               onClick={handleCreateMessage}
-              disabled={fromAgentId === '' || !messageBody.trim()}
+              disabled={!messageBody.trim()}
               className="text-sm bg-interactive text-text-invert px-4 py-2 rounded-lg hover:bg-interactive-hover disabled:opacity-50 disabled:cursor-not-allowed"
             >
               Send
@@ -280,6 +276,35 @@ export function MessagesPanel({ roomId, autonomyMode }: MessagesPanelProps): Rea
                   </div>
                   <div className="text-sm font-medium text-text-secondary">{msg.subject}</div>
                   {!collapsed && <div className="text-sm text-text-secondary mt-0.5 whitespace-pre-wrap">{msg.body}</div>}
+                  {/* Reply button for inbound messages that haven't been replied to */}
+                  {!collapsed && msg.direction === 'inbound' && msg.status !== 'replied' && (
+                    <button
+                      onClick={() => { setReplyingToMsg(replyingToMsg === msg.id ? null : msg.id); setRoomMsgReplyText('') }}
+                      className="mt-1.5 text-xs px-2.5 py-1.5 rounded-lg bg-interactive text-text-invert hover:bg-interactive-hover font-medium"
+                    >
+                      {replyingToMsg === msg.id ? 'Cancel' : 'Reply'}
+                    </button>
+                  )}
+                  {/* Reply input */}
+                  {!collapsed && replyingToMsg === msg.id && (
+                    <div className="flex gap-2 mt-2">
+                      <input
+                        value={roomMsgReplyText}
+                        onChange={(e) => setRoomMsgReplyText(e.target.value)}
+                        onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleRoomMsgReply(msg.id) } }}
+                        placeholder="Type your reply..."
+                        className="flex-1 px-2.5 py-1.5 text-sm border border-border-primary rounded-lg focus:outline-none focus:border-interactive bg-surface-primary"
+                        autoFocus
+                      />
+                      <button
+                        onClick={() => handleRoomMsgReply(msg.id)}
+                        disabled={!roomMsgReplyText.trim()}
+                        className="text-sm bg-interactive text-text-invert px-2.5 py-1.5 rounded-lg hover:bg-interactive-hover disabled:opacity-50"
+                      >
+                        Send
+                      </button>
+                    </div>
+                  )}
                 </div>
               ))}
             </div>

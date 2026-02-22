@@ -634,6 +634,14 @@ export function startServer(options: ServerOptions = {}): void {
 
   listen()
 
+  // Prevent unhandled errors from crashing the server
+  process.on('uncaughtException', (err) => {
+    console.error('[uncaughtException]', err)
+  })
+  process.on('unhandledRejection', (err) => {
+    console.error('[unhandledRejection]', err)
+  })
+
   process.on('SIGINT', () => {
     console.error('Shutting down...')
     _stopAllLoops()

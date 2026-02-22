@@ -6,15 +6,16 @@ export function registerEscalationRoutes(router: Router): void {
   router.post('/api/rooms/:roomId/escalations', (ctx) => {
     const roomId = Number(ctx.params.roomId)
     const body = ctx.body as Record<string, unknown> || {}
-    if (!body.fromAgentId || typeof body.fromAgentId !== 'number') {
-      return { status: 400, error: 'fromAgentId is required' }
+    const fromAgentId = body.fromAgentId != null ? Number(body.fromAgentId) : null
+    if (body.fromAgentId != null && (typeof body.fromAgentId !== 'number' || isNaN(fromAgentId!))) {
+      return { status: 400, error: 'fromAgentId must be a number if provided' }
     }
     if (!body.question || typeof body.question !== 'string') {
       return { status: 400, error: 'question is required' }
     }
 
     const escalation = queries.createEscalation(ctx.db, roomId,
-      body.fromAgentId,
+      fromAgentId,
       body.question,
       body.toAgentId as number | undefined)
     eventBus.emit(`room:${roomId}`, 'escalation:created', escalation)

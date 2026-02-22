@@ -347,7 +347,7 @@ export const api = {
   escalations: {
     list: (roomId: number, toAgentId?: number, status?: string) =>
       request<Escalation[]>('GET', `/api/rooms/${roomId}/escalations${qs({ toAgentId, status })}`),
-    create: (roomId: number, fromAgentId: number, question: string, toAgentId?: number) =>
+    create: (roomId: number, fromAgentId: number | null, question: string, toAgentId?: number) =>
       request<Escalation>('POST', `/api/rooms/${roomId}/escalations`, { fromAgentId, question, toAgentId }),
     resolve: (id: number, answer: string) =>
       request<Escalation>('POST', `/api/escalations/${id}/resolve`, { answer }),

@@ -187,342 +187,373 @@ export function SettingsPanel({ advancedMode, onAdvancedModeChange, installPromp
     { value: 'system', label: 'Auto', icon: '\u2699' },
   ]
 
-  return (
-    <div ref={containerRef} className={`p-5 ${wide ? 'grid grid-cols-2 gap-5' : 'space-y-5'}`}>
-      {/* Preferences */}
-      <div>
-        <h3 className="text-sm font-semibold text-text-primary mb-2">Preferences</h3>
-        <div className="bg-surface-secondary rounded-lg p-3 space-y-1 shadow-sm">
-          {/* Theme toggle */}
-          <div className="py-1.5">
-            <div className="flex items-center justify-between text-sm">
-              <span className="text-text-secondary">Theme</span>
-              <div className="flex rounded-lg overflow-hidden border border-border-primary">
-                {themeOptions.map((opt) => (
-                  <button
-                    key={opt.value}
-                    onClick={() => setTheme(opt.value)}
-                    className={`px-2.5 py-1 text-xs font-medium transition-colors ${
-                      theme === opt.value
-                        ? 'bg-interactive text-text-invert'
-                        : 'bg-surface-primary text-text-muted hover:bg-surface-tertiary'
-                    }`}
-                  >{opt.icon} {opt.label}</button>
-                ))}
-              </div>
-            </div>
-          </div>
-          {toggle('Notifications', notifications, toggleNotifications, 'Notify when workers or queen send messages')}
-          {notifDenied && (
-            <p className="text-xs text-status-error mt-0.5 leading-tight">Permission denied by browser. Allow notifications in browser settings.</p>
-          )}
-          {toggle('Advanced mode', advancedMode, toggleAdvancedMode, 'Show memory, watches, results tabs and extra controls')}
-          {toggle('Telemetry', telemetryEnabled, toggleTelemetry, 'Send heartbeats to quoroom.ai (room appears in online counter and leaderboard)')}
-          <div className="py-1.5">
-            <div className="flex items-center justify-between text-sm">
-              <span className="text-text-secondary">Claude plan</span>
-              <div className="flex rounded-lg overflow-hidden border border-border-primary">
+  const preferencesSection = (
+    <div>
+      <h3 className="text-sm font-semibold text-text-primary mb-2">Preferences</h3>
+      <div className="bg-surface-secondary rounded-lg p-3 space-y-1 shadow-sm">
+        {/* Theme toggle */}
+        <div className="py-1.5">
+          <div className="flex items-center justify-between text-sm">
+            <span className="text-text-secondary">Theme</span>
+            <div className="flex rounded-lg overflow-hidden border border-border-primary">
+              {themeOptions.map((opt) => (
                 <button
-                  onClick={() => setClaudePlanSetting(null)}
+                  key={opt.value}
+                  onClick={() => setTheme(opt.value)}
                   className={`px-2.5 py-1 text-xs font-medium transition-colors ${
-                    claudePlan === null
-                      ? 'bg-text-muted text-text-invert'
+                    theme === opt.value
+                      ? 'bg-interactive text-text-invert'
                       : 'bg-surface-primary text-text-muted hover:bg-surface-tertiary'
                   }`}
-                >{'\u2014'}</button>
-                {(['pro', 'max', 'api'] as const).map((p) => (
-                  <button
-                    key={p}
-                    onClick={() => setClaudePlanSetting(p)}
-                    className={`px-2.5 py-1 text-xs font-medium transition-colors ${
-                      claudePlan === p
-                        ? 'bg-interactive text-text-invert'
-                        : 'bg-surface-primary text-text-muted hover:bg-surface-tertiary'
-                    }`}
-                  >{p === 'api' ? 'API' : p.charAt(0).toUpperCase() + p.slice(1)}</button>
-                ))}
-              </div>
+                >{opt.icon} {opt.label}</button>
+              ))}
             </div>
-            <p className="text-xs text-text-muted mt-0.5 leading-tight">Optimizes queen cycle gap and max turns for your plan's token limits</p>
-          </div>
-          <div className="py-1.5">
-            <div className="flex items-center justify-between text-sm">
-              <span className="text-text-secondary">ChatGPT plan</span>
-              <div className="flex rounded-lg overflow-hidden border border-border-primary">
-                <button
-                  onClick={() => setChatGptPlanSetting(null)}
-                  className={`px-2.5 py-1 text-xs font-medium transition-colors ${
-                    chatGptPlan === null
-                      ? 'bg-text-muted text-text-invert'
-                      : 'bg-surface-primary text-text-muted hover:bg-surface-tertiary'
-                  }`}
-                >{'\u2014'}</button>
-                {(['plus', 'pro', 'api'] as const).map((p) => (
-                  <button
-                    key={p}
-                    onClick={() => setChatGptPlanSetting(p)}
-                    className={`px-2.5 py-1 text-xs font-medium transition-colors ${
-                      chatGptPlan === p
-                        ? 'bg-interactive text-text-invert'
-                        : 'bg-surface-primary text-text-muted hover:bg-surface-tertiary'
-                    }`}
-                  >{p === 'api' ? 'API' : p.charAt(0).toUpperCase() + p.slice(1)}</button>
-                ))}
-              </div>
-            </div>
-            <p className="text-xs text-text-muted mt-0.5 leading-tight">Optimizes queen defaults when using Codex. Plus and Pro have different rate limits.</p>
-          </div>
-          <div className="py-1.5">
-            <div className="flex items-center justify-between text-sm">
-              <span className="text-text-secondary">Queen model</span>
-              <div className="flex rounded-lg overflow-hidden border border-border-primary">
-                {([
-                  ['claude', 'Claude'],
-                  ['codex', 'Codex'],
-                  ['openai:gpt-4o-mini', 'OpenAI API'],
-                  ['anthropic:claude-3-5-sonnet-latest', 'Claude API']
-                ] as const).map(([id, label]) => (
-                  <button
-                    key={id}
-                    onClick={() => setQueenModelSetting(id)}
-                    className={`px-2.5 py-1 text-xs font-medium transition-colors ${
-                      (queenModel ?? 'claude') === id
-                        ? 'bg-interactive text-text-invert'
-                        : 'bg-surface-primary text-text-muted hover:bg-surface-tertiary'
-                    }`}
-                  >{label}</button>
-                ))}
-              </div>
-            </div>
-            <p className="text-xs text-text-muted mt-0.5 leading-tight">Default queen provider for new rooms. API modes require key in room credentials or env.</p>
           </div>
         </div>
-      </div>
-
-      {/* Connection */}
-      <div>
-        <h3 className="text-sm font-semibold text-text-primary mb-2">Connection</h3>
-        <div className="bg-surface-secondary rounded-lg p-3 space-y-1.5 shadow-sm">
+        {toggle('Notifications', notifications, toggleNotifications, 'Notify when workers or queen send messages')}
+        {notifDenied && (
+          <p className="text-xs text-status-error mt-0.5 leading-tight">Permission denied by browser. Allow notifications in browser settings.</p>
+        )}
+        {toggle('Advanced mode', advancedMode, toggleAdvancedMode, 'Show memory, watches, results tabs and extra controls')}
+        {toggle('Telemetry', telemetryEnabled, toggleTelemetry, 'Send heartbeats to quoroom.ai (room appears in online counter and leaderboard)')}
+        <div className="py-1.5">
           <div className="flex items-center justify-between text-sm">
-            <span className="text-text-secondary">API Server</span>
-            <span className="flex items-center gap-1.5">
-              <span className={`w-2 h-2 rounded-full ${serverStatus ? 'bg-status-success' : 'bg-status-error'}`} />
-              <span className={serverStatus ? 'text-status-success' : 'text-status-error'}>
-                {serverStatus ? 'Connected' : 'Disconnected'}
-              </span>
-            </span>
-          </div>
-          <div className="flex items-center justify-between text-sm">
-            <span className="text-text-secondary">Server URL</span>
-            <span className="text-text-muted font-mono text-xs">{API_BASE || location.origin}</span>
-          </div>
-          {API_BASE && API_BASE.includes('localhost') && (
-            <div className="flex items-center justify-between text-sm">
-              <span className="text-text-secondary">Port</span>
-              <div className="flex items-center gap-1">
-                <input
-                  type="number"
-                  defaultValue={storageGet('quoroom_port') || '3700'}
-                  className="w-16 px-2 py-1 text-xs border border-border-primary rounded text-center font-mono bg-surface-primary text-text-primary"
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter') {
-                      storageSet('quoroom_port', (e.target as HTMLInputElement).value)
-                      clearToken()
-                      location.reload()
-                    }
-                  }}
-                />
-              </div>
+            <span className="text-text-secondary">Claude plan</span>
+            <div className="flex rounded-lg overflow-hidden border border-border-primary">
+              <button
+                onClick={() => setClaudePlanSetting(null)}
+                className={`px-2.5 py-1 text-xs font-medium transition-colors ${
+                  claudePlan === null
+                    ? 'bg-text-muted text-text-invert'
+                    : 'bg-surface-primary text-text-muted hover:bg-surface-tertiary'
+                }`}
+              >{'\u2014'}</button>
+              {(['pro', 'max', 'api'] as const).map((p) => (
+                <button
+                  key={p}
+                  onClick={() => setClaudePlanSetting(p)}
+                  className={`px-2.5 py-1 text-xs font-medium transition-colors ${
+                    claudePlan === p
+                      ? 'bg-interactive text-text-invert'
+                      : 'bg-surface-primary text-text-muted hover:bg-surface-tertiary'
+                  }`}
+                >{p === 'api' ? 'API' : p.charAt(0).toUpperCase() + p.slice(1)}</button>
+              ))}
             </div>
-          )}
-          <div className="flex items-center justify-between text-sm">
-            <span className="text-text-secondary">Claude Code</span>
-            <span className="flex items-center gap-1.5">
-              {claudePlan && (
-                <span className="px-1.5 py-0.5 rounded text-xs font-medium bg-interactive-bg text-interactive uppercase tracking-wide">
-                  {claudePlan}
-                </span>
-              )}
-              <span className={serverStatus?.claude.available ? 'text-status-success' : 'text-text-muted'}>
-                {serverStatus === null
-                  ? '...'
-                  : serverStatus.claude.available
-                    ? serverStatus.claude.version || 'Found'
-                    : 'Not found'}
-              </span>
-            </span>
           </div>
+          <p className="text-xs text-text-muted mt-0.5 leading-tight">Optimizes queen cycle gap and max turns for your plan's token limits</p>
+        </div>
+        <div className="py-1.5">
           <div className="flex items-center justify-between text-sm">
-            <span className="text-text-secondary">Codex</span>
-            <span className="flex items-center gap-1.5">
-              {chatGptPlan && (
-                <span className="px-1.5 py-0.5 rounded text-xs font-medium bg-interactive-bg text-interactive uppercase tracking-wide">
-                  {chatGptPlan}
-                </span>
-              )}
-              <span className={serverStatus?.codex.available ? 'text-status-success' : 'text-text-muted'}>
-                {serverStatus === null
-                  ? '...'
-                  : serverStatus.codex.available
-                    ? serverStatus.codex.version || 'Found'
-                    : 'Not found'}
-              </span>
-            </span>
+            <span className="text-text-secondary">ChatGPT plan</span>
+            <div className="flex rounded-lg overflow-hidden border border-border-primary">
+              <button
+                onClick={() => setChatGptPlanSetting(null)}
+                className={`px-2.5 py-1 text-xs font-medium transition-colors ${
+                  chatGptPlan === null
+                    ? 'bg-text-muted text-text-invert'
+                    : 'bg-surface-primary text-text-muted hover:bg-surface-tertiary'
+                }`}
+              >{'\u2014'}</button>
+              {(['plus', 'pro', 'api'] as const).map((p) => (
+                <button
+                  key={p}
+                  onClick={() => setChatGptPlanSetting(p)}
+                  className={`px-2.5 py-1 text-xs font-medium transition-colors ${
+                    chatGptPlan === p
+                      ? 'bg-interactive text-text-invert'
+                      : 'bg-surface-primary text-text-muted hover:bg-surface-tertiary'
+                  }`}
+                >{p === 'api' ? 'API' : p.charAt(0).toUpperCase() + p.slice(1)}</button>
+              ))}
+            </div>
           </div>
+          <p className="text-xs text-text-muted mt-0.5 leading-tight">Optimizes queen defaults when using Codex. Plus and Pro have different rate limits.</p>
+        </div>
+        <div className="py-1.5">
           <div className="flex items-center justify-between text-sm">
-            <span className="text-text-secondary">Ollama</span>
-            <span className={serverStatus?.ollama?.available ? 'text-status-success' : 'text-text-muted'}>
+            <span className="text-text-secondary">Queen model</span>
+            <div className="flex rounded-lg overflow-hidden border border-border-primary">
+              {([
+                ['claude', 'Claude'],
+                ['codex', 'Codex'],
+                ['openai:gpt-4o-mini', 'OpenAI API'],
+                ['anthropic:claude-3-5-sonnet-latest', 'Claude API']
+              ] as const).map(([id, label]) => (
+                <button
+                  key={id}
+                  onClick={() => setQueenModelSetting(id)}
+                  className={`px-2.5 py-1 text-xs font-medium transition-colors ${
+                    (queenModel ?? 'claude') === id
+                      ? 'bg-interactive text-text-invert'
+                      : 'bg-surface-primary text-text-muted hover:bg-surface-tertiary'
+                  }`}
+                >{label}</button>
+              ))}
+            </div>
+          </div>
+          <p className="text-xs text-text-muted mt-0.5 leading-tight">Default queen provider for new rooms. API modes require key in room credentials or env.</p>
+        </div>
+      </div>
+    </div>
+  )
+
+  const connectionSection = (
+    <div>
+      <h3 className="text-sm font-semibold text-text-primary mb-2">Connection</h3>
+      <div className="bg-surface-secondary rounded-lg p-3 space-y-1.5 shadow-sm">
+        <div className="flex items-center justify-between text-sm">
+          <span className="text-text-secondary">API Server</span>
+          <span className="flex items-center gap-1.5">
+            <span className={`w-2 h-2 rounded-full ${serverStatus ? 'bg-status-success' : 'bg-status-error'}`} />
+            <span className={serverStatus ? 'text-status-success' : 'text-status-error'}>
+              {serverStatus ? 'Connected' : 'Disconnected'}
+            </span>
+          </span>
+        </div>
+        <div className="flex items-center justify-between text-sm">
+          <span className="text-text-secondary">Server URL</span>
+          <span className="text-text-muted font-mono text-xs">{API_BASE || location.origin}</span>
+        </div>
+        {API_BASE && API_BASE.includes('localhost') && (
+          <div className="flex items-center justify-between text-sm">
+            <span className="text-text-secondary">Port</span>
+            <div className="flex items-center gap-1">
+              <input
+                type="number"
+                defaultValue={storageGet('quoroom_port') || '3700'}
+                className="w-16 px-2 py-1 text-xs border border-border-primary rounded text-center font-mono bg-surface-primary text-text-primary"
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') {
+                    storageSet('quoroom_port', (e.target as HTMLInputElement).value)
+                    clearToken()
+                    location.reload()
+                  }
+                }}
+              />
+            </div>
+          </div>
+        )}
+        <div className="flex items-center justify-between text-sm">
+          <span className="text-text-secondary">Claude Code</span>
+          <span className="flex items-center gap-1.5">
+            {claudePlan && (
+              <span className="px-1.5 py-0.5 rounded text-xs font-medium bg-interactive-bg text-interactive uppercase tracking-wide">
+                {claudePlan}
+              </span>
+            )}
+            <span className={serverStatus?.claude.available ? 'text-status-success' : 'text-text-muted'}>
               {serverStatus === null
                 ? '...'
-                : serverStatus.ollama?.available
-                  ? `${serverStatus.ollama.models.length} model${serverStatus.ollama.models.length !== 1 ? 's' : ''}`
-                  : 'Not running'}
+                : serverStatus.claude.available
+                  ? serverStatus.claude.version || 'Found'
+                  : 'Not found'}
+            </span>
+          </span>
+        </div>
+        <div className="flex items-center justify-between text-sm">
+          <span className="text-text-secondary">Codex</span>
+          <span className="flex items-center gap-1.5">
+            {chatGptPlan && (
+              <span className="px-1.5 py-0.5 rounded text-xs font-medium bg-interactive-bg text-interactive uppercase tracking-wide">
+                {chatGptPlan}
+              </span>
+            )}
+            <span className={serverStatus?.codex.available ? 'text-status-success' : 'text-text-muted'}>
+              {serverStatus === null
+                ? '...'
+                : serverStatus.codex.available
+                  ? serverStatus.codex.version || 'Found'
+                  : 'Not found'}
+            </span>
+          </span>
+        </div>
+        <div className="flex items-center justify-between text-sm">
+          <span className="text-text-secondary">Ollama</span>
+          <span className={serverStatus?.ollama?.available ? 'text-status-success' : 'text-text-muted'}>
+            {serverStatus === null
+              ? '...'
+              : serverStatus.ollama?.available
+                ? `${serverStatus.ollama.models.length} model${serverStatus.ollama.models.length !== 1 ? 's' : ''}`
+                : 'Not running'}
+          </span>
+        </div>
+        {serverStatus?.ollama?.available && serverStatus.ollama.models.length > 0 && (
+          <div className="text-xs text-text-muted pl-2 leading-tight">
+            {serverStatus.ollama.models.map(m => m.name).join(' \u00B7 ')}
+          </div>
+        )}
+        {serverStatus?.resources && (
+          <div className="flex items-center justify-between text-sm">
+            <span className="text-text-secondary">Load</span>
+            <span className={serverStatus.resources.memUsedPct > 85 || serverStatus.resources.loadAvg1m > serverStatus.resources.cpuCount * 0.8 ? 'text-status-warning' : 'text-text-muted'}>
+              CPU {Math.round(serverStatus.resources.loadAvg1m / serverStatus.resources.cpuCount * 100)}%
+              {' \u00B7 '}RAM {serverStatus.resources.memUsedPct}%
             </span>
           </div>
-          {serverStatus?.ollama?.available && serverStatus.ollama.models.length > 0 && (
-            <div className="text-xs text-text-muted pl-2 leading-tight">
-              {serverStatus.ollama.models.map(m => m.name).join(' \u00B7 ')}
-            </div>
-          )}
-          {serverStatus?.resources && (
-            <div className="flex items-center justify-between text-sm">
-              <span className="text-text-secondary">Load</span>
-              <span className={serverStatus.resources.memUsedPct > 85 || serverStatus.resources.loadAvg1m > serverStatus.resources.cpuCount * 0.8 ? 'text-status-warning' : 'text-text-muted'}>
-                CPU {Math.round(serverStatus.resources.loadAvg1m / serverStatus.resources.cpuCount * 100)}%
-                {' \u00B7 '}RAM {serverStatus.resources.memUsedPct}%
-              </span>
-            </div>
-          )}
-          {serverStatus && (
-            <div className="flex items-center justify-between text-sm">
-              <span className="text-text-secondary">Uptime</span>
-              <span className="text-text-muted">{formatUptime(serverStatus.uptime)}</span>
-            </div>
-          )}
-        </div>
-      </div>
-
-
-      {/* App */}
-      <div>
-        <h3 className="text-sm font-semibold text-text-primary mb-2">App</h3>
-        <div className="bg-surface-secondary rounded-lg p-3 space-y-1.5 shadow-sm">
+        )}
+        {serverStatus && (
           <div className="flex items-center justify-between text-sm">
-            <span className="text-text-secondary">Installation</span>
-            {installPrompt.isInstalled ? (
-              <span className="flex items-center gap-1.5">
-                <span className="w-2 h-2 rounded-full bg-status-success" />
-                <span className="text-status-success">Installed</span>
-              </span>
-            ) : installPrompt.canInstall ? (
-              <button
-                onClick={installPrompt.install}
-                className="text-sm px-3 py-1 bg-interactive text-text-invert rounded-lg hover:bg-interactive-hover font-medium transition-colors"
-              >
-                Install
-              </button>
-            ) : installPrompt.isManualInstallPlatform ? (
-              <button
-                onClick={() => onNavigate?.('help')}
-                className="text-xs px-2.5 py-1.5 rounded-lg bg-interactive text-text-invert hover:bg-interactive-hover transition-colors"
-              >
-                Manual install &rarr;
-              </button>
-            ) : (
-              <button
-                onClick={() => onNavigate?.('help')}
-                className="text-xs px-2.5 py-1.5 rounded-lg bg-interactive text-text-invert hover:bg-interactive-hover transition-colors"
-              >
-                Help tab &rarr;
-              </button>
-            )}
+            <span className="text-text-secondary">Uptime</span>
+            <span className="text-text-muted">{formatUptime(serverStatus.uptime)}</span>
           </div>
-          <p className="text-xs text-text-muted leading-tight">
-            Standalone app with Dock/taskbar icon and badge notifications.
-          </p>
-        </div>
+        )}
       </div>
+    </div>
+  )
 
-      {/* Server */}
-      <div>
-        <h3 className="text-sm font-semibold text-text-primary mb-2">Server</h3>
-        <div className="bg-surface-secondary rounded-lg p-3 divide-y divide-border-secondary shadow-sm">
-          <div className="flex items-center justify-between text-sm py-2">
-            <span className="font-medium text-text-secondary">Version</span>
-            <div className="flex items-center gap-2">
-              <span className="text-text-muted">{serverStatus?.version ?? '...'}</span>
-              {(() => {
-                const ui = serverStatus?.updateInfo
-                const hasUpdate = ui && serverStatus && semverGt(ui.latestVersion, serverStatus.version)
-                if (hasUpdate) return null
-                if (updateChecking) return <span className="text-text-muted">Checking...</span>
-                if (updateChecked) return <span className="text-status-success">Up to date</span>
-                return (
-                  <button
-                    onClick={() => void handleCheckForUpdates()}
-                    className="px-2.5 py-1 text-xs bg-interactive text-text-invert rounded-lg hover:bg-interactive-hover transition-colors"
-                  >
-                    Check
-                  </button>
-                )
-              })()}
-            </div>
-          </div>
-          {(() => {
-            const ui = serverStatus?.updateInfo
-            if (!ui || !serverStatus) return null
-            if (!semverGt(ui.latestVersion, serverStatus.version)) return null
-            return (
-              <div className="flex items-center justify-between text-sm py-2">
-                <span className="font-medium text-status-success">v{ui.latestVersion} available</span>
+  const appSection = (
+    <div>
+      <h3 className="text-sm font-semibold text-text-primary mb-2">App</h3>
+      <div className="bg-surface-secondary rounded-lg p-3 space-y-1.5 shadow-sm">
+        <div className="flex items-center justify-between text-sm">
+          <span className="text-text-secondary">Installation</span>
+          {installPrompt.isInstalled ? (
+            <span className="flex items-center gap-1.5">
+              <span className="w-2 h-2 rounded-full bg-status-success" />
+              <span className="text-status-success">Installed</span>
+            </span>
+          ) : installPrompt.canInstall ? (
+            <button
+              onClick={installPrompt.install}
+              className="text-sm px-3 py-1 bg-interactive text-text-invert rounded-lg hover:bg-interactive-hover font-medium transition-colors"
+            >
+              Install
+            </button>
+          ) : installPrompt.isManualInstallPlatform ? (
+            <button
+              onClick={() => onNavigate?.('help')}
+              className="text-xs px-2.5 py-1.5 rounded-lg bg-interactive text-text-invert hover:bg-interactive-hover transition-colors"
+            >
+              Manual install &rarr;
+            </button>
+          ) : (
+            <button
+              onClick={() => onNavigate?.('help')}
+              className="text-xs px-2.5 py-1.5 rounded-lg bg-interactive text-text-invert hover:bg-interactive-hover transition-colors"
+            >
+              Help tab &rarr;
+            </button>
+          )}
+        </div>
+        <p className="text-xs text-text-muted leading-tight">
+          Standalone app with Dock/taskbar icon and badge notifications.
+        </p>
+      </div>
+    </div>
+  )
+
+  const serverSection = (
+    <div>
+      <h3 className="text-sm font-semibold text-text-primary mb-2">Server</h3>
+      <div className="bg-surface-secondary rounded-lg p-3 divide-y divide-border-secondary shadow-sm">
+        <div className="flex items-center justify-between text-sm py-2">
+          <span className="font-medium text-text-secondary">Version</span>
+          <div className="flex items-center gap-2">
+            <span className="text-text-muted">{serverStatus?.version ?? '...'}</span>
+            {(() => {
+              const ui = serverStatus?.updateInfo
+              const hasUpdate = ui && serverStatus && semverGt(ui.latestVersion, serverStatus.version)
+              if (hasUpdate) return null
+              if (updateChecking) return <span className="text-text-muted">Checking...</span>
+              if (updateChecked) return <span className="text-status-success">Up to date</span>
+              return (
                 <button
-                  onClick={async () => {
-                    const token = await getToken()
-                    const a = document.createElement('a')
-                    a.href = `${API_BASE}/api/status/update/download?token=${encodeURIComponent(token)}`
-                    document.body.appendChild(a)
-                    a.click()
-                    document.body.removeChild(a)
-                  }}
-                  className="px-3 py-1 bg-interactive text-text-invert rounded-lg hover:bg-interactive-hover transition-colors"
+                  onClick={() => void handleCheckForUpdates()}
+                  className="px-2.5 py-1 text-xs bg-interactive text-text-invert rounded-lg hover:bg-interactive-hover transition-colors"
                 >
-                  Download
+                  Check
                 </button>
-              </div>
-            )
-          })()}
-          {row('Database', serverStatus?.dbPath ?? null)}
-          {row('Data Directory', serverStatus?.dataDir ?? null)}
+              )
+            })()}
+          </div>
+        </div>
+        {(() => {
+          const ui = serverStatus?.updateInfo
+          if (!ui || !serverStatus) return null
+          if (!semverGt(ui.latestVersion, serverStatus.version)) return null
+          return (
+            <div className="flex items-center justify-between text-sm py-2">
+              <span className="font-medium text-status-success">v{ui.latestVersion} available</span>
+              <button
+                onClick={async () => {
+                  const token = await getToken()
+                  const a = document.createElement('a')
+                  a.href = `${API_BASE}/api/status/update/download?token=${encodeURIComponent(token)}`
+                  document.body.appendChild(a)
+                  a.click()
+                  document.body.removeChild(a)
+                }}
+                className="px-3 py-1 bg-interactive text-text-invert rounded-lg hover:bg-interactive-hover transition-colors"
+              >
+                Download
+              </button>
+            </div>
+          )
+        })()}
+        {row('Database', serverStatus?.dbPath ?? null)}
+        {row('Data Directory', serverStatus?.dataDir ?? null)}
+      </div>
+    </div>
+  )
+
+  const actionsSection = (
+    <div>
+      <h3 className="text-sm font-semibold text-text-primary mb-2">Actions</h3>
+      <div className="bg-surface-secondary rounded-lg p-3 shadow-sm">
+        <div className={`${wide ? 'grid grid-cols-2 gap-3' : 'space-y-3'}`}>
+          <button
+            onClick={() => window.open('https://github.com/quoroom-ai/room/issues/new')}
+            className="w-full py-2 text-sm bg-interactive text-text-invert rounded-lg hover:bg-interactive-hover transition-colors"
+          >
+            Report Bug
+          </button>
+          <button
+            onClick={() => window.open('mailto:hello@quoroom.ai')}
+            className="w-full py-2 text-sm bg-interactive text-text-invert rounded-lg hover:bg-interactive-hover transition-colors"
+          >
+            Email Developer
+          </button>
+          <button
+            onClick={() => window.open('https://github.com/quoroom-ai/room')}
+            className="w-full py-2 text-sm bg-interactive text-text-invert rounded-lg hover:bg-interactive-hover transition-colors"
+          >
+            Star on GitHub
+          </button>
+          <button
+            onClick={() => window.open('mailto:hello@quoroom.ai?subject=Subscribe&body=Subscribe me for Quoroom updates')}
+            className="w-full py-2 text-sm bg-interactive text-text-invert rounded-lg hover:bg-interactive-hover transition-colors"
+          >
+            Subscribe for Updates
+          </button>
         </div>
       </div>
+    </div>
+  )
 
-      {/* Actions */}
-      <div className={`${wide ? 'col-span-2 grid grid-cols-2 gap-3' : 'space-y-3'}`}>
-        <button
-          onClick={() => window.open('https://github.com/quoroom-ai/room/issues/new')}
-          className="w-full py-2 text-sm bg-interactive text-text-invert rounded-lg hover:bg-interactive-hover transition-colors"
-        >
-          Report Bug
-        </button>
-        <button
-          onClick={() => window.open('mailto:hello@quoroom.ai')}
-          className="w-full py-2 text-sm bg-interactive text-text-invert rounded-lg hover:bg-interactive-hover transition-colors"
-        >
-          Email Developer
-        </button>
-        <button
-          onClick={() => window.open('https://github.com/quoroom-ai/room')}
-          className="w-full py-2 text-sm bg-interactive text-text-invert rounded-lg hover:bg-interactive-hover transition-colors"
-        >
-          Star on GitHub
-        </button>
-        <button
-          onClick={() => window.open('mailto:hello@quoroom.ai?subject=Subscribe&body=Subscribe me for Quoroom updates')}
-          className="w-full py-2 text-sm bg-interactive text-text-invert rounded-lg hover:bg-interactive-hover transition-colors"
-        >
-          Subscribe for Updates
-        </button>
-      </div>
+  return (
+    <div ref={containerRef} className="p-5">
+      {wide ? (
+        <div className="grid grid-cols-2 gap-5 items-start">
+          <div className="space-y-5">
+            {preferencesSection}
+            {appSection}
+            {actionsSection}
+          </div>
+          <div className="space-y-5">
+            {connectionSection}
+            {serverSection}
+          </div>
+        </div>
+      ) : (
+        <div className="space-y-5">
+          {preferencesSection}
+          {connectionSection}
+          {appSection}
+          {serverSection}
+          {actionsSection}
+        </div>
+      )}
     </div>
   )
 }

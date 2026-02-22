@@ -19,6 +19,12 @@ interface SwarmPanelProps {
   onNavigateToRoom: (roomId: number) => void
 }
 
+interface InviteCard {
+  imagePath: string
+  previewText: string
+  label: string
+}
+
 // ─── Hexagon math (flat-top orientation) ───────────────────
 
 const ROOM_R = 140
@@ -405,6 +411,79 @@ async function shareToTikTok(svgEl: SVGSVGElement, hideMoney: boolean): Promise<
   await downloadImage(svgEl, hideMoney)
 }
 
+const INVITE_URL = 'https://quoroom.ai'
+
+const INVITE_CARDS: InviteCard[] = [
+  {
+    imagePath: '/social-variants/social-01.png',
+    label: 'AUTONOMOUS INCOME SYSTEMS',
+    previewText: 'Is it a game, a money machine, or your new AI team?',
+  },
+  {
+    imagePath: '/social-variants/social-02.png',
+    label: 'AUTONOMOUS INCOME SYSTEMS',
+    previewText: 'Is this your next competitive game, or your first autonomous business?',
+  },
+  {
+    imagePath: '/social-variants/social-03.png',
+    label: 'AUTONOMOUS INCOME SYSTEMS',
+    previewText: 'Autonomous AI agents earning for their keeper, day and night',
+  },
+  {
+    imagePath: '/social-variants/social-04.png',
+    label: 'LIVE RESEARCH EXPERIMENT',
+    previewText: 'Can AI agents turn consistent action into income?',
+  },
+  {
+    imagePath: '/social-variants/social-06.png',
+    label: 'LIVE RESEARCH EXPERIMENT',
+    previewText: 'Built like research, shared like a social experiment, focused on making money with AI',
+  },
+  {
+    imagePath: '/social-variants/social-07.png',
+    label: 'SELF-EVOLVING WORKFLOWS',
+    previewText: 'Persistent AI that learns, adapts, and keeps earning',
+  },
+  {
+    imagePath: '/social-variants/social-09.png',
+    label: 'SELF-EVOLVING WORKFLOWS',
+    previewText: 'Persistent by design, self-evolving by default, focused on real income for their keeper',
+  },
+  {
+    imagePath: '/social-variants-upgraded/social-v1-research.png',
+    label: 'LIVE RESEARCH EXPERIMENT',
+    previewText: 'Research in public: testing how AI can help ordinary people make money online',
+  },
+  {
+    imagePath: '/social-variants-upgraded/social-v2-money.png',
+    label: 'AUTONOMOUS INCOME SYSTEMS',
+    previewText: 'Autonomous AI agents that make money for their keeper',
+  },
+  {
+    imagePath: '/social-variants-upgraded/social-v3-persist.png',
+    label: 'SELF-EVOLVING WORKFLOWS',
+    previewText: 'Persistent by design, self-evolving by default, focused on real income for their keeper',
+  },
+]
+
+function pickDifferentIndex(current: number, total: number): number {
+  if (total <= 1) return 0
+  let next = current
+  while (next === current) {
+    next = Math.floor(Math.random() * total)
+  }
+  return next
+}
+
+async function copyText(text: string): Promise<boolean> {
+  try {
+    await navigator.clipboard.writeText(text)
+    return true
+  } catch {
+    return false
+  }
+}
+
 // ─── Component ─────────────────────────────────────────────
 
 export function SwarmPanel({ rooms, queenRunning, onNavigateToRoom }: SwarmPanelProps): React.JSX.Element {
@@ -412,8 +491,10 @@ export function SwarmPanel({ rooms, queenRunning, onNavigateToRoom }: SwarmPanel
   const [hoveredRoomId, setHoveredRoomId] = useState<number | null>(null)
   const [tooltipPos, setTooltipPos] = useState<{ x: number; y: number }>({ x: 0, y: 0 })
   const [shareOpen, setShareOpen] = useState(false)
+  const [inviteOpen, setInviteOpen] = useState(false)
   const [shareStatus, setShareStatus] = useState<string | null>(null)
   const [showMoney, setShowMoney] = useState<boolean>(() => storageGet('quoroom_swarm_money') !== 'false')
+  const [inviteCardIndex, setInviteCardIndex] = useState<number>(() => Math.floor(Math.random() * INVITE_CARDS.length))
   const svgRef = useRef<SVGSVGElement>(null)
 
   const { data: allWorkers } = usePolling<Worker[]>(() => api.workers.list(), 15000)
@@ -592,6 +673,55 @@ export function SwarmPanel({ rooms, queenRunning, onNavigateToRoom }: SwarmPanel
     setShowMoney(prev => { const next = !prev; storageSet('quoroom_swarm_money', String(next)); return next })
   }, [])
 
+  const handleRegenerateInvite = useCallback(() => {
+    setInviteCardIndex(prev => pickDifferentIndex(prev, INVITE_CARDS.length))
+  }, [])
+
+  const handleInviteShare = useCallback(async (platform: 'twitter' | 'instagram' | 'facebook' | 'sms' | 'telegram') => {
+    const card = INVITE_CARDS[inviteCardIndex]
+    const imageUrl = `${window.location.origin}${card.imagePath}`
+    const shareText = `${card.previewText}\n\n${INVITE_URL}`
+    switch (platform) {
+      case 'twitter': {
+        // X/Twitter web intent cannot upload a local file, so we attach the selected
+        // hosted image URL and keep quoroom.ai in the tweet body.
+        const text = encodeURIComponent(`${card.previewText}\n${INVITE_URL}`)
+        const url = encodeURIComponent(imageUrl)
+        window.open(`https://twitter.com/intent/tweet?text=${text}&url=${url}`, '_blank')
+        setShareStatus('Opened Twitter')
+        break
+      }
+      case 'facebook': {
+        const quote = encodeURIComponent(card.previewText)
+        const url = encodeURIComponent(INVITE_URL)
+        window.open(`https://www.facebook.com/sharer/sharer.php?u=${url}&quote=${quote}`, '_blank')
+        setShareStatus('Opened Facebook')
+        break
+      }
+      case 'telegram': {
+        const text = encodeURIComponent(card.previewText)
+        const url = encodeURIComponent(INVITE_URL)
+        window.open(`https://t.me/share/url?url=${url}&text=${text}`, '_blank')
+        setShareStatus('Opened Telegram')
+        break
+      }
+      case 'sms': {
+        const body = encodeURIComponent(shareText)
+        window.open(`sms:?&body=${body}`, '_self')
+        setShareStatus('Opened SMS')
+        break
+      }
+      case 'instagram': {
+        const copied = await copyText(`${card.previewText}\n${INVITE_URL}`)
+        window.open(imageUrl, '_blank')
+        window.open('https://www.instagram.com/', '_blank')
+        setShareStatus(copied ? 'Caption copied. Upload image in Instagram.' : 'Opened Instagram and image.')
+        break
+      }
+    }
+    setTimeout(() => setShareStatus(null), 3500)
+  }, [inviteCardIndex])
+
   const handleShare = useCallback(async (platform: 'download' | 'twitter' | 'instagram' | 'tiktok') => {
     if (!svgRef.current) return
     setShareStatus('Generating image...')
@@ -625,7 +755,7 @@ export function SwarmPanel({ rooms, queenRunning, onNavigateToRoom }: SwarmPanel
   // ─── Render ──────────────────────────────────────────────
 
   return (
-    <div ref={containerRef} className="flex flex-col h-full">
+    <div ref={containerRef} className="relative flex flex-col h-full">
       {/* Header */}
       <div className="flex items-center flex-wrap gap-2 px-4 py-2.5 border-b border-border-primary shrink-0">
         <div className="flex items-center gap-2">
@@ -662,9 +792,25 @@ export function SwarmPanel({ rooms, queenRunning, onNavigateToRoom }: SwarmPanel
             title={showMoney ? 'Hide financials' : 'Show financials'}
           >$</button>
 
+          <button
+            onClick={() => {
+              setInviteOpen(true)
+              setShareOpen(false)
+            }}
+            className="px-4 py-2 text-sm font-medium rounded-lg bg-surface-secondary text-text-secondary border border-border-primary hover:bg-surface-hover transition-colors flex items-center gap-1.5"
+          >
+            <svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" className="shrink-0">
+              <path d="M8 2v12M2 8h12" strokeLinecap="round" />
+            </svg>
+            Invite
+          </button>
+
           <div className="relative">
             <button
-              onClick={() => setShareOpen(!shareOpen)}
+              onClick={() => {
+                setShareOpen(!shareOpen)
+                setInviteOpen(false)
+              }}
               className="px-4 py-2 text-sm font-medium rounded-lg bg-interactive text-text-invert hover:bg-interactive-hover transition-colors flex items-center gap-1.5 shadow-sm"
             >
               <svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" className="shrink-0">
@@ -705,6 +851,64 @@ export function SwarmPanel({ rooms, queenRunning, onNavigateToRoom }: SwarmPanel
 
       {shareStatus && (
         <div className="px-4 py-2 bg-surface-secondary border-b border-border-primary text-xs text-text-muted shrink-0">{shareStatus}</div>
+      )}
+
+      {inviteOpen && (
+        <div
+          className="absolute inset-0 z-30 bg-black/60 flex items-center justify-center p-4"
+          onClick={() => setInviteOpen(false)}
+        >
+          <div
+            className="w-full max-w-[760px] bg-surface-primary border border-border-primary rounded-xl shadow-2xl overflow-hidden"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between px-4 py-3 border-b border-border-primary">
+              <div>
+                <h3 className="text-sm font-semibold text-text-primary">Invite Preview</h3>
+                <p className="text-xs text-text-muted">Preview text + image before sharing</p>
+              </div>
+              <button
+                onClick={() => setInviteOpen(false)}
+                className="px-2 py-1 text-xs rounded-md text-text-muted hover:text-text-secondary hover:bg-surface-hover"
+              >
+                Close
+              </button>
+            </div>
+
+            <div className="grid gap-4 p-4 md:grid-cols-[1.4fr_1fr]">
+              <div className="rounded-lg border border-border-primary bg-surface-secondary p-2">
+                <img
+                  src={INVITE_CARDS[inviteCardIndex].imagePath}
+                  alt={`Invite preview: ${INVITE_CARDS[inviteCardIndex].previewText}`}
+                  className="w-full h-auto rounded-md"
+                />
+              </div>
+
+              <div className="flex flex-col gap-3">
+                <div className="rounded-lg border border-border-primary bg-surface-secondary px-3 py-2">
+                  <div className="text-[11px] tracking-[0.16em] uppercase text-text-muted mb-2">{INVITE_CARDS[inviteCardIndex].label}</div>
+                  <p className="text-sm text-text-secondary leading-relaxed">{INVITE_CARDS[inviteCardIndex].previewText}</p>
+                  <p className="text-xs text-interactive mt-2">{INVITE_URL}</p>
+                </div>
+
+                <button
+                  onClick={handleRegenerateInvite}
+                  className="w-full px-3 py-2 text-sm rounded-lg border border-border-primary bg-surface-secondary text-text-secondary hover:bg-surface-hover transition-colors"
+                >
+                  Regenerate
+                </button>
+
+                <div className="grid grid-cols-2 gap-2">
+                  <button onClick={() => void handleInviteShare('twitter')} className="px-3 py-2 text-sm rounded-lg bg-interactive text-text-invert hover:bg-interactive-hover transition-colors">Twitter</button>
+                  <button onClick={() => void handleInviteShare('instagram')} className="px-3 py-2 text-sm rounded-lg bg-surface-secondary border border-border-primary text-text-secondary hover:bg-surface-hover transition-colors">IG</button>
+                  <button onClick={() => void handleInviteShare('telegram')} className="px-3 py-2 text-sm rounded-lg bg-surface-secondary border border-border-primary text-text-secondary hover:bg-surface-hover transition-colors">TG</button>
+                  <button onClick={() => void handleInviteShare('facebook')} className="px-3 py-2 text-sm rounded-lg bg-surface-secondary border border-border-primary text-text-secondary hover:bg-surface-hover transition-colors">FB</button>
+                  <button onClick={() => void handleInviteShare('sms')} className="px-3 py-2 text-sm rounded-lg bg-surface-secondary border border-border-primary text-text-secondary hover:bg-surface-hover transition-colors">SMS</button>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
       )}
 
       {/* Honeycomb */}
