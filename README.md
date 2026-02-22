@@ -8,7 +8,7 @@
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![npm version](https://img.shields.io/npm/v/quoroom)](https://www.npmjs.com/package/quoroom)
-[![Tests](https://img.shields.io/badge/tests-804%20passing-brightgreen)](#)
+[![Tests](https://img.shields.io/badge/tests-907%20passing-brightgreen)](#)
 [![GitHub stars](https://img.shields.io/github/stars/quoroom-ai/room)](https://github.com/quoroom-ai/room/stargazers)
 [![macOS](https://img.shields.io/badge/macOS-.pkg-000000?logo=apple&logoColor=white)](https://github.com/quoroom-ai/room/releases/latest)
 [![Windows](https://img.shields.io/badge/Windows-.exe-0078D4?logo=windows&logoColor=white)](https://github.com/quoroom-ai/room/releases/latest)
@@ -38,6 +38,7 @@ Official channels only:
 
 - `https://quoroom.ai`
 - `https://github.com/quoroom-ai`
+- Telegram: `@quoroom_ai_bot`
 
 If you see impersonation or scam activity, report it to `hello@quoroom.ai`.
 See `TRADEMARKS.md` for full trademark usage terms.
@@ -107,6 +108,12 @@ Quoroom is an open research project exploring autonomous agent collectives. Each
 **HTTP Server + REST API** — Full REST API with dual-token auth (agent + user) and WebSocket real-time events. Role-based access control per autonomy mode. Run `quoroom serve` to start.
 
 **Dashboard** — React SPA served directly by your local Quoroom server at `http://localhost:3700` (or your configured port). Manage rooms, agents, goals, memory, wallet — all from the browser, with local-first data storage.
+
+**Cloud Mode** — Deploy to the cloud and control your room remotely. Same dashboard works in both local and cloud mode. Cloud instances auto-detect their environment, support JWT-based auth, and serve the UI over HTTPS with strict CORS. Connect your Claude or Codex subscription from the remote Settings panel.
+
+**Inbox** — Rooms can message the keeper and other rooms. Cross-room communication with reply threading. Agents escalate decisions, share updates, or request resources from neighboring rooms.
+
+**Credentials** — Secure credential storage for API keys and secrets. Agents list and retrieve credentials at runtime without exposing raw values in prompts or logs.
 
 **Auto-updates** — The server polls GitHub for new releases every 4 hours. When a new version is available, the dashboard shows a notification popup and a download row in Settings. One click downloads the installer for your platform directly — no browser redirect.
 
@@ -213,6 +220,7 @@ The room engine exposes an MCP server over stdio. All tools use the `quoroom_` p
 | `quoroom_pause_room` | Pause a running room |
 | `quoroom_restart_room` | Restart a paused room |
 | `quoroom_delete_room` | Delete a room |
+| `quoroom_configure_room` | Update room configuration |
 
 ### Quorum
 
@@ -304,6 +312,7 @@ The room engine exposes an MCP server over stdio. All tools use the `quoroom_` p
 | `quoroom_wallet_balance` | Check on-chain balance (USDC/USDT, all chains) |
 | `quoroom_wallet_send` | Send USDC or USDT on any supported chain |
 | `quoroom_wallet_history` | View transaction history |
+| `quoroom_wallet_topup` | Get wallet top-up URL |
 
 ### Identity
 
@@ -324,9 +333,32 @@ The room engine exposes an MCP server over stdio. All tools use the `quoroom_` p
 | `quoroom_station_stop` | Stop a running station |
 | `quoroom_station_exec` | Execute a command on a station |
 | `quoroom_station_logs` | View station logs |
-| `quoroom_station_deploy` | Deploy to a station |
-| `quoroom_station_domain` | Manage station domain |
 | `quoroom_station_delete` | Delete a station |
+| `quoroom_station_cancel` | Cancel a pending station |
+| `quoroom_station_create_crypto` | Provision a station with crypto payment |
+| `quoroom_station_renew_crypto` | Renew a station with crypto payment |
+
+### Inbox
+
+| Tool | Description |
+|------|-------------|
+| `quoroom_inbox_send_keeper` | Send a message to the keeper |
+| `quoroom_inbox_send_room` | Send a message to another room |
+| `quoroom_inbox_list` | List inbox messages |
+| `quoroom_inbox_reply` | Reply to a room message |
+
+### Credentials
+
+| Tool | Description |
+|------|-------------|
+| `quoroom_credentials_list` | List stored credentials |
+| `quoroom_credentials_get` | Get a credential value |
+
+### Resources
+
+| Tool | Description |
+|------|-------------|
+| `quoroom_resources_get` | Get local system resources (CPU, memory, disk) |
 
 ### Settings
 
@@ -351,6 +383,13 @@ npm run test:watch       # Watch mode
 npm run test:e2e         # End-to-end tests (Playwright)
 ```
 
+### Docker (cloud runtime)
+
+```bash
+docker build -t quoroom .
+docker run -p 3700:3700 quoroom
+```
+
 ## Releasing
 
 Use the release runbook: [`docs/RELEASE_RUNBOOK.md`](docs/RELEASE_RUNBOOK.md)
@@ -365,19 +404,19 @@ room/
 │   ├── mcp/               # MCP server (stdio)
 │   │   ├── server.ts      # Tool registration
 │   │   ├── db.ts          # Database initialization
-│   │   └── tools/         # 13 tool modules
+│   │   └── tools/         # 17 tool modules
 │   ├── server/            # HTTP/WebSocket API server
-│   │   ├── index.ts       # Server bootstrap
+│   │   ├── index.ts       # Server bootstrap (local + cloud mode)
 │   │   ├── router.ts      # Request router
-│   │   ├── auth.ts        # Dual-token auth + CORS
+│   │   ├── auth.ts        # Dual-token auth + CORS + cloud JWT
 │   │   ├── access.ts      # Role-based access control
 │   │   ├── ws.ts          # WebSocket real-time events
-│   │   └── routes/        # REST API routes
+│   │   └── routes/        # REST API routes (20 modules)
 │   ├── ui/                # React SPA dashboard
 │   │   ├── App.tsx        # Root component
-│   │   ├── components/    # UI components
+│   │   ├── components/    # UI components (32 modules)
 │   │   ├── hooks/         # React hooks
-│   │   └── lib/           # API client, auth, WebSocket
+│   │   └── lib/           # API client, auth, storage, WebSocket
 │   └── shared/            # Core engine
 │       ├── agent-loop.ts       # Worker agent loop with rate limiting
 │       ├── agent-executor.ts   # Claude Code CLI execution
@@ -389,15 +428,17 @@ room/
 │       ├── identity.ts         # ERC-8004 on-chain identity
 │       ├── station.ts          # Cloud provisioning
 │       ├── task-runner.ts      # Task execution engine
+│       ├── model-provider.ts   # Multi-provider LLM support
+│       ├── cloud-sync.ts       # Cloud registration + heartbeat
 │       ├── db-queries.ts       # Database query layer
 │       ├── schema.ts           # SQLite schema (WAL mode)
 │       ├── embeddings.ts       # Vector embeddings (all-MiniLM-L6-v2)
-│       ├── cloud-sync.ts      # Cloud registration + heartbeat
-│       └── __tests__/          # Test suite
+│       └── __tests__/          # Test suite (907 tests)
 ├── e2e/                    # Playwright end-to-end tests
 ├── scripts/
 │   └── build-mcp.js       # esbuild bundling
-└── docs/                   # Media assets
+├── Dockerfile              # Cloud runtime image
+└── docs/                   # Media assets + architecture docs
 ```
 
 **Tech stack**: TypeScript (strict), React, Tailwind CSS, better-sqlite3, sqlite-vec, viem, MCP SDK, HuggingFace Transformers, node-cron, zod, esbuild, Vite, Vitest

@@ -306,7 +306,7 @@ Status update (2026-02-21, follow-up):
   - Updated Room Settings UI to show live login output, detected verification URL/device code, and cancel/refresh controls.
   - WebSocket client now auto-connects on first subscription to prevent silent no-stream cases.
 
-## Phase 3: Mobile + PWA hardening (2-4 days)
+## Phase 3: Mobile + PWA hardening (2-4 days) — COMPLETE
 
 - Verify responsive behavior for all primary tabs on narrow widths.
 - Ensure install prompt behavior on iOS/Android.
@@ -316,7 +316,7 @@ Exit criteria:
 
 - Lighthouse PWA pass + manual install verified on iOS Safari and Android Chrome.
 
-Execution checklist (implemented baseline):
+Execution checklist (implemented):
 
 - Service worker upgraded to build-versioned caches via `sw.js?v={buildId}` registration.
 - Added offline fallback page (`/offline.html`) for navigation failures.
@@ -332,8 +332,10 @@ Execution checklist (implemented baseline):
   - no-store for HTML + `sw.js`
   - long immutable cache for hashed `/assets/*`
   - bounded cache for icons/fonts/manifest
+- ErrorBoundary component for graceful crash recovery.
+- Safe localStorage wrapper (storage.ts) for environments with restricted storage.
 
-## Phase 4: Ops + Safety (3-5 days)
+## Phase 4: Ops + Safety (3-5 days) — IN PROGRESS
 
 - Instance quotas and abuse protections.
 - Runtime logs/metrics, alerts, restart policies.
@@ -343,6 +345,27 @@ Execution checklist (implemented baseline):
 Exit criteria:
 
 - On-call runbook and failure drills completed.
+
+Status update (2026-02-22):
+
+- Self-healing station checkout when Stripe webhook is missed.
+- Per-instance JWT secrets for provisioning isolation.
+- `update-fly-machines.js` script with `--image` arg, tier guest config sync, and error handling.
+- Room token re-issue on master auth (engine crash recovery).
+- Station billing/payments endpoint aggregating Stripe + crypto history.
+
+## Phase 5: Telegram Mini App (2026-02-22) — COMPLETE
+
+Telegram users can access cloud swarms directly inside Telegram.
+
+Implementation (in `cloud` repo):
+
+- Telegram initData validation (HMAC-SHA256) with auto-account creation.
+- `telegram_users` table linking Telegram IDs to user accounts.
+- Webhook handler for `/start` command (inline keyboard with web_app button).
+- Existing `app.html` and `app-swarm.html` detect Telegram environment and adapt UI (hide header/footer, BackButton, expand).
+- Magic-link browser auth (`browser-token` / `browser-validate`) for opening Stripe checkout in external browser (Telegram forbids third-party payment processing).
+- Bot menu button set via API: "Open Swarms" → `https://quoroom.ai/app`.
 
 ## 8) Code Touchpoints
 
