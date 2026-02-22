@@ -2,6 +2,7 @@ import { useState, useEffect, useRef } from 'react'
 import { usePolling } from '../hooks/usePolling'
 import { useWebSocket } from '../hooks/useWebSocket'
 import { api } from '../lib/client'
+import { storageGet, storageSet } from '../lib/storage'
 import { formatRelativeTime } from '../utils/time'
 import { Select } from './Select'
 import type { Escalation, Worker, RoomMessage } from '@shared/types'
@@ -20,7 +21,7 @@ interface MessagesPanelProps {
 export function MessagesPanel({ roomId, autonomyMode }: MessagesPanelProps): React.JSX.Element {
   const semi = autonomyMode === 'semi'
   const [viewSection, setViewSection] = useState<'escalations' | 'rooms'>('escalations')
-  const [collapsed, setCollapsed] = useState(() => localStorage.getItem('quoroom_messages_collapsed') === 'true')
+  const [collapsed, setCollapsed] = useState(() => storageGet('quoroom_messages_collapsed') === 'true')
 
   const { data: escalations, refresh } = usePolling<Escalation[]>(
     () => roomId ? api.escalations.list(roomId) : Promise.resolve([]),
@@ -142,7 +143,7 @@ export function MessagesPanel({ roomId, autonomyMode }: MessagesPanelProps): Rea
           </button>
         )}
         <button
-          onClick={() => setCollapsed(c => { const next = !c; localStorage.setItem('quoroom_messages_collapsed', String(next)); return next })}
+          onClick={() => setCollapsed(c => { const next = !c; storageSet('quoroom_messages_collapsed', String(next)); return next })}
           className="text-xs px-2.5 py-1.5 rounded-lg bg-interactive text-text-invert hover:bg-interactive-hover"
         >
           {collapsed ? 'Expand all' : 'Collapse all'}

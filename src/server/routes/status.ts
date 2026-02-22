@@ -242,12 +242,12 @@ export function registerStatusRoutes(router: Router): void {
     const resources = getResources()
     const deploymentMode = getDeploymentMode()
 
+    const isCloud = deploymentMode === 'cloud'
     return {
       data: {
         version: getVersion(),
         uptime: Math.floor((Date.now() - startedAt) / 1000),
-        dataDir,
-        dbPath,
+        ...(!isCloud && { dataDir, dbPath }),
         claude,
         codex,
         ollama,

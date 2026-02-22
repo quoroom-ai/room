@@ -27,6 +27,7 @@ import { useNotifications } from './hooks/useNotifications'
 import { semverGt } from './lib/releases'
 import { useInstallPrompt, type InstallPrompt } from './hooks/useInstallPrompt'
 import { api } from './lib/client'
+import { storageGet, storageSet, storageRemove } from './lib/storage'
 import type { Room, Escalation, RoomMessage, QuorumDecision } from '@shared/types'
 
 const ADVANCED_TABS = new Set<Tab>(
@@ -40,7 +41,7 @@ const isRemoteOrigin = location.hostname !== 'localhost' && location.hostname !=
 const shouldProbeLocalServer = APP_MODE === 'local' && isRemoteOrigin
 
 function getLocalPort(): string {
-  return localStorage.getItem('quoroom_port') || DEFAULT_PORT
+  return storageGet('quoroom_port') || DEFAULT_PORT
 }
 
 function parseCreatedRoomId(payload: unknown): number | null {
@@ -72,7 +73,7 @@ async function probeLocalServer(port: string): Promise<boolean> {
 
 function App(): React.JSX.Element {
   const [tab, setTab] = useState<Tab>(() => {
-    const saved = localStorage.getItem('quoroom_tab')
+    const saved = storageGet('quoroom_tab')
     if (saved && ALL_TAB_IDS.includes(saved as Tab)) return saved as Tab
     return 'swarm'
   })
@@ -83,11 +84,11 @@ function App(): React.JSX.Element {
 
   // Global room selection
   const [selectedRoomId, setSelectedRoomId] = useState<number | null>(() => {
-    const saved = localStorage.getItem('quoroom_room')
+    const saved = storageGet('quoroom_room')
     return saved ? Number(saved) : null
   })
   const [expandedRoomId, setExpandedRoomId] = useState<number | null>(() => {
-    const saved = localStorage.getItem('quoroom_room')
+    const saved = storageGet('quoroom_room')
     return saved ? Number(saved) : null
   })
   const [rooms, setRooms] = useState<Room[]>([])
@@ -100,8 +101,8 @@ function App(): React.JSX.Element {
 
   useNotifications()
   const installPrompt = useInstallPrompt()
-  const [installDismissed, setInstallDismissed] = useState(() => localStorage.getItem('quoroom_install_dismissed') === 'true')
-  const [showWalkthrough, setShowWalkthrough] = useState(() => !localStorage.getItem('quoroom_walkthrough_seen'))
+  const [installDismissed, setInstallDismissed] = useState(() => storageGet('quoroom_install_dismissed') === 'true')
+  const [showWalkthrough, setShowWalkthrough] = useState(() => !storageGet('quoroom_walkthrough_seen'))
   const [sidebarOpen, setSidebarOpen] = useState(false)
 
   // Update check — fetch /api/status once on startup (and every 30 min) to detect new releases
@@ -211,7 +212,7 @@ function App(): React.JSX.Element {
         const ui = status.updateInfo
         if (!ui) return
         if (!semverGt(ui.latestVersion, status.version)) return
-        const dismissed = localStorage.getItem('quoroom_update_dismissed')
+        const dismissed = storageGet('quoroom_update_dismissed')
         if (dismissed === ui.latestVersion) return
         setServerUpdateInfo({
           currentVersion: status.version,
@@ -268,7 +269,7 @@ function App(): React.JSX.Element {
 
   function handleTabChange(t: Tab): void {
     setTab(t)
-    localStorage.setItem('quoroom_tab', t)
+    storageSet('quoroom_tab', t)
     setSidebarOpen(false)
   }
 
@@ -282,9 +283,9 @@ function App(): React.JSX.Element {
   function handleRoomChange(roomId: number | null): void {
     setSelectedRoomId(roomId)
     if (roomId !== null) {
-      localStorage.setItem('quoroom_room', String(roomId))
+      storageSet('quoroom_room', String(roomId))
     } else {
-      localStorage.removeItem('quoroom_room')
+      storageRemove('quoroom_room')
     }
   }
 
@@ -544,12 +545,12 @@ function App(): React.JSX.Element {
                   const accepted = await installPrompt.install()
                   if (!accepted) {
                     setInstallDismissed(true)
-                    localStorage.setItem('quoroom_install_dismissed', 'true')
+                    storageSet('quoroom_install_dismissed', 'true')
                   }
                 } else {
                   handleTabChange('help')
                   setInstallDismissed(true)
-                  localStorage.setItem('quoroom_install_dismissed', 'true')
+                  storageSet('quoroom_install_dismissed', 'true')
                 }
               }}
               className="text-sm px-4 py-1.5 bg-interactive text-text-invert rounded-lg hover:bg-interactive-hover shrink-0 font-medium transition-colors"
@@ -559,7 +560,7 @@ function App(): React.JSX.Element {
             <button
               onClick={() => {
                 setInstallDismissed(true)
-                localStorage.setItem('quoroom_install_dismissed', 'true')
+                storageSet('quoroom_install_dismissed', 'true')
               }}
               className="text-brand-400 hover:text-brand-600 text-lg leading-none shrink-0 transition-colors"
             >
@@ -630,7 +631,7 @@ function App(): React.JSX.Element {
             document.body.removeChild(a)
           }}
           onSkip={() => {
-            localStorage.setItem('quoroom_update_dismissed', serverUpdateInfo.latestVersion)
+            storageSet('quoroom_update_dismissed', serverUpdateInfo.latestVersion)
             setUpdateDismissed(true)
           }}
           onDismiss={() => setUpdateDismissed(true)}

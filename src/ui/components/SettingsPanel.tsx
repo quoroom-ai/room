@@ -3,6 +3,7 @@ import { useContainerWidth } from '../hooks/useContainerWidth'
 import { useTheme } from '../hooks/useTheme'
 import { api } from '../lib/client'
 import { API_BASE, clearToken, getToken } from '../lib/auth'
+import { storageGet, storageSet } from '../lib/storage'
 import * as notif from '../lib/notifications'
 import type { InstallPrompt } from '../hooks/useInstallPrompt'
 import { semverGt } from '../lib/releases'
@@ -320,11 +321,11 @@ export function SettingsPanel({ advancedMode, onAdvancedModeChange, installPromp
               <div className="flex items-center gap-1">
                 <input
                   type="number"
-                  defaultValue={localStorage.getItem('quoroom_port') || '3700'}
+                  defaultValue={storageGet('quoroom_port') || '3700'}
                   className="w-16 px-2 py-1 text-xs border border-border-primary rounded text-center font-mono bg-surface-primary text-text-primary"
                   onKeyDown={(e) => {
                     if (e.key === 'Enter') {
-                      localStorage.setItem('quoroom_port', (e.target as HTMLInputElement).value)
+                      storageSet('quoroom_port', (e.target as HTMLInputElement).value)
                       clearToken()
                       location.reload()
                     }

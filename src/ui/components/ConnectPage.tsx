@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react'
+import { storageSet } from '../lib/storage'
 import {
   detectPlatform,
   pickLatestStableRelease,
@@ -66,7 +67,7 @@ export function ConnectPage({ port, onRetry }: ConnectPageProps): React.JSX.Elem
   const { assets, releaseUrl } = useReleaseAssets()
 
   function handleRetry(): void {
-    localStorage.setItem('quoroom_port', editPort)
+    storageSet('quoroom_port', editPort)
     setRetrying(true)
     onRetry()
   }

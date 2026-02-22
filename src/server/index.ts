@@ -243,6 +243,48 @@ function serveStatic(staticDir: string, pathname: string, res: http.ServerRespon
   }
 }
 
+// ─── Rate limiting (cloud mode only) ───────────────────────────
+const RATE_LIMIT_WINDOW_MS = 60_000
+const RATE_LIMIT_READ = 300   // GET requests per minute per IP
+const RATE_LIMIT_WRITE = 120  // mutation requests per minute per IP
+
+interface RateBucket { count: number; resetAt: number }
+const rateBuckets = new Map<string, RateBucket>()
+
+// Periodic cleanup of stale buckets (every 2 minutes)
+setInterval(() => {
+  const now = Date.now()
+  for (const [key, bucket] of rateBuckets) {
+    if (now >= bucket.resetAt) rateBuckets.delete(key)
+  }
+}, 120_000).unref()
+
+function checkRateLimit(ip: string, method: string): { allowed: boolean; retryAfter: number } {
+  const isWrite = method !== 'GET' && method !== 'HEAD' && method !== 'OPTIONS'
+  const limit = isWrite ? RATE_LIMIT_WRITE : RATE_LIMIT_READ
+  const key = `${ip}:${isWrite ? 'w' : 'r'}`
+  const now = Date.now()
+  let bucket = rateBuckets.get(key)
+  if (!bucket || now >= bucket.resetAt) {
+    bucket = { count: 0, resetAt: now + RATE_LIMIT_WINDOW_MS }
+    rateBuckets.set(key, bucket)
+  }
+  bucket.count++
+  if (bucket.count > limit) {
+    const retryAfter = Math.ceil((bucket.resetAt - now) / 1000)
+    return { allowed: false, retryAfter }
+  }
+  return { allowed: true, retryAfter: 0 }
+}
+
+// ─── Security headers (cloud mode only) ────────────────────────
+const CLOUD_SECURITY_HEADERS: Record<string, string> = {
+  'Strict-Transport-Security': 'max-age=31536000; includeSubDomains',
+  'X-Content-Type-Options': 'nosniff',
+  'X-Frame-Options': 'DENY',
+  'Referrer-Policy': 'strict-origin-when-cross-origin',
+}
+
 export function createApiServer(options: ServerOptions = {}): {
   server: http.Server
   token: string
@@ -278,7 +320,23 @@ export function createApiServer(options: ServerOptions = {}): {
     const responseHeaders: Record<string, string> = {
       'Content-Type': 'application/json'
     }
+    // Security headers for cloud mode
+    if (isCloudDeployment()) {
+      Object.assign(responseHeaders, CLOUD_SECURITY_HEADERS)
+    }
     setCorsHeaders(origin, responseHeaders)
+
+    // Rate limiting for cloud mode (API routes only)
+    if (isCloudDeployment() && pathname.startsWith('/api/')) {
+      const clientIp = req.socket.remoteAddress || 'unknown'
+      const rl = checkRateLimit(clientIp, req.method || 'GET')
+      if (!rl.allowed) {
+        responseHeaders['Retry-After'] = String(rl.retryAfter)
+        res.writeHead(429, responseHeaders)
+        res.end(JSON.stringify({ error: 'Too many requests' }))
+        return
+      }
+    }
 
     // Origin validation for all /api/ requests
     // Allow same-origin: if Origin host matches request Host, it's the app's own UI

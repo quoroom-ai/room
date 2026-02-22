@@ -1,6 +1,7 @@
 import React from 'react'
 import ReactDOM from 'react-dom/client'
 import App from './App'
+import { ErrorBoundary } from './components/ErrorBoundary'
 import './styles/globals.css'
 
 function redirectMisroutedGoogleCallback(): boolean {
@@ -26,7 +27,9 @@ if (redirectMisroutedGoogleCallback()) {
 } else {
 ReactDOM.createRoot(document.getElementById('root')!).render(
   <React.StrictMode>
-    <App />
+    <ErrorBoundary>
+      <App />
+    </ErrorBoundary>
   </React.StrictMode>
 )
 }
@@ -37,7 +40,8 @@ if ('serviceWorker' in navigator) {
   const host = location.hostname
   const isLocalhost = host === 'localhost' || host === '127.0.0.1' || host === '::1' || host === '[::1]'
 
-  if (isLocalhost) {
+  if (isLocalhost && import.meta.env.DEV) {
+    // Dev only: unregister SW to avoid stale caches during development.
     navigator.serviceWorker.getRegistrations().then((regs) => {
       for (const reg of regs) {
         void reg.unregister()
@@ -49,7 +53,9 @@ if ('serviceWorker' in navigator) {
     }
   } else {
     let refreshing = false
+    const hadController = !!navigator.serviceWorker.controller
     navigator.serviceWorker.addEventListener('controllerchange', () => {
+      if (!hadController) return // First install — don't reload.
       if (refreshing) return
       refreshing = true
       window.location.reload()

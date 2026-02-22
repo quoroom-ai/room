@@ -101,13 +101,13 @@ jobs:
       - name: Package tarball
         run: |
           VERSION="${GITHUB_REF_NAME#v}"
-          mkdir -p staging/quoroom/bin staging/quoroom/lib staging/quoroom/runtime
+          mkdir -p staging/quoroom/bin staging/quoroom/lib staging/quoroom/runtime staging/quoroom/ui
 
           # Bundled Node.js runtime (universal)
           cp node-universal staging/quoroom/runtime/node
           chmod +x staging/quoroom/runtime/node
 
-          # Shell wrapper — uses bundled runtime
+          # Shell wrapper — prefer bundled runtime, fallback to system node on runtime crash
           cat > staging/quoroom/bin/quoroom << 'WRAPPER'
           #!/bin/sh
           SOURCE="$0"
@@ -120,12 +120,38 @@ jobs:
             esac
           done
           DIR="$(cd -P "$(dirname "$SOURCE")" && pwd)"
-          exec "$DIR/../runtime/node" "$DIR/../lib/cli.js" "$@"
+          RUNTIME="$DIR/../runtime/node"
+          CLI="$DIR/../lib/cli.js"
+          STATUS=1
+
+          if [ -x "$RUNTIME" ]; then
+            { "$RUNTIME" -e "" >/dev/null 2>&1; } 2>/dev/null
+            STATUS=$?
+            if [ "$STATUS" -eq 0 ]; then
+              exec "$RUNTIME" "$CLI" "$@"
+            fi
+            # Bundled runtime may crash on some hosts (e.g. CodeRange OOM -> 133).
+            if [ "$STATUS" -lt 128 ] && [ "$STATUS" -ne 126 ] && [ "$STATUS" -ne 127 ]; then
+              exit "$STATUS"
+            fi
+          fi
+
+          if command -v node >/dev/null 2>&1; then
+            exec node "$CLI" "$@"
+          fi
+
+          if [ -x /usr/bin/node ]; then
+            exec /usr/bin/node "$CLI" "$@"
+          fi
+
+          echo "Quoroom failed to start: bundled runtime exited with code ${STATUS}, and no system node was found." >&2
+          exit "$STATUS"
           WRAPPER
           chmod +x staging/quoroom/bin/quoroom
 
           # Copy built output
           cp -r out/mcp/* staging/quoroom/lib/
+          cp -r out/ui/* staging/quoroom/ui/
 
           tar czf "quoroom-v${VERSION}-darwin-universal.tar.gz" -C staging quoroom
 
@@ -334,7 +360,7 @@ jobs:
       - name: Package tarball
         run: |
           VERSION="${GITHUB_REF_NAME#v}"
-          mkdir -p staging/quoroom/bin staging/quoroom/lib staging/quoroom/runtime
+          mkdir -p staging/quoroom/bin staging/quoroom/lib staging/quoroom/runtime staging/quoroom/ui
 
           cp node-linux/bin/node staging/quoroom/runtime/node
           chmod +x staging/quoroom/runtime/node
@@ -351,11 +377,36 @@ jobs:
             esac
           done
           DIR="$(cd -P "$(dirname "$SOURCE")" && pwd)"
-          exec "$DIR/../runtime/node" "$DIR/../lib/cli.js" "$@"
+          RUNTIME="$DIR/../runtime/node"
+          CLI="$DIR/../lib/cli.js"
+          STATUS=1
+
+          if [ -x "$RUNTIME" ]; then
+            { "$RUNTIME" -e "" >/dev/null 2>&1; } 2>/dev/null
+            STATUS=$?
+            if [ "$STATUS" -eq 0 ]; then
+              exec "$RUNTIME" "$CLI" "$@"
+            fi
+            if [ "$STATUS" -lt 128 ] && [ "$STATUS" -ne 126 ] && [ "$STATUS" -ne 127 ]; then
+              exit "$STATUS"
+            fi
+          fi
+
+          if command -v node >/dev/null 2>&1; then
+            exec node "$CLI" "$@"
+          fi
+
+          if [ -x /usr/bin/node ]; then
+            exec /usr/bin/node "$CLI" "$@"
+          fi
+
+          echo "Quoroom failed to start: bundled runtime exited with code ${STATUS}, and no system node was found." >&2
+          exit "$STATUS"
           WRAPPER
           chmod +x staging/quoroom/bin/quoroom
 
           cp -r out/mcp/* staging/quoroom/lib/
+          cp -r out/ui/* staging/quoroom/ui/
 
           tar czf "quoroom-v${VERSION}-linux-x64.tar.gz" -C staging quoroom
 
@@ -434,16 +485,46 @@ jobs:
         run: |
           $VERSION = $env:GITHUB_REF_NAME -replace '^v', ''
 
-          New-Item -ItemType Directory -Force -Path staging/quoroom/bin, staging/quoroom/lib, staging/quoroom/runtime
+          New-Item -ItemType Directory -Force -Path staging/quoroom/bin, staging/quoroom/lib, staging/quoroom/runtime, staging/quoroom/ui
 
           # Bundled Node.js runtime
           Copy-Item node-win/node.exe staging/quoroom/runtime/node.exe
 
-          # CMD wrapper — uses bundled runtime
-          Set-Content -Path staging/quoroom/bin/quoroom.cmd -Value '@"%~dp0\..\runtime\node.exe" "%~dp0\..\lib\cli.js" %*'
+          # CMD wrapper — prefer bundled runtime, fallback to system node on runtime crash
+          @'
+          @echo off
+          setlocal
+          set "RUNTIME=%~dp0\..\runtime\node.exe"
+          set "CLI=%~dp0\..\lib\cli.js"
+          set "STATUS=1"
+
+          if not exist "%RUNTIME%" goto fallback
+          "%RUNTIME%" -e "" >NUL 2>NUL
+          set "STATUS=%ERRORLEVEL%"
+          if "%STATUS%"=="0" goto run_bundled
+          rem Runtime crash exits are often >=128 (e.g. 133). For normal runtime failures, keep original code.
+          if "%STATUS%"=="9009" goto fallback
+          if %STATUS% GEQ 128 goto fallback
+          exit /b %STATUS%
+
+          :run_bundled
+          "%RUNTIME%" "%CLI%" %*
+          exit /b %ERRORLEVEL%
+
+          :fallback
+          where node >NUL 2>NUL
+          if errorlevel 1 (
+            echo Quoroom failed to start: bundled runtime exited with code %STATUS%, and no system node was found. 1>&2
+            exit /b %STATUS%
+          )
+
+          node "%CLI%" %*
+          exit /b %ERRORLEVEL%
+          '@ | Set-Content -Path staging/quoroom/bin/quoroom.cmd
 
           # Copy built output
           Copy-Item -Recurse -Force out/mcp/* staging/quoroom/lib/
+          Copy-Item -Recurse -Force out/ui/* staging/quoroom/ui/
 
           Compress-Archive -Path staging/quoroom -DestinationPath "quoroom-v${VERSION}-win-x64.zip"
 

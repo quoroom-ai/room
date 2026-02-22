@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { APP_MODE } from '../lib/auth'
+import { storageSet } from '../lib/storage'
 
 const isCloud = APP_MODE === 'cloud'
 
@@ -44,7 +45,7 @@ export function WalkthroughModal({ onClose }: WalkthroughModalProps): React.JSX.
 
   function handleNext() {
     if (isLast) {
-      localStorage.setItem('quoroom_walkthrough_seen', '1')
+      storageSet('quoroom_walkthrough_seen', '1')
       onClose()
     } else {
       setStep(step + 1)

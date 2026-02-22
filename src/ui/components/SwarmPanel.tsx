@@ -3,6 +3,7 @@ import { usePolling } from '../hooks/usePolling'
 import { useContainerWidth } from '../hooks/useContainerWidth'
 import { useSwarmEvents, type SwarmEventKind } from '../hooks/useSwarmEvents'
 import { api } from '../lib/client'
+import { storageGet, storageSet } from '../lib/storage'
 import type { Room, Worker, Station, RevenueSummary, OnChainBalance } from '@shared/types'
 
 interface SwarmPanelProps {
@@ -404,7 +405,7 @@ export function SwarmPanel({ rooms, queenRunning, onNavigateToRoom }: SwarmPanel
   const [tooltipPos, setTooltipPos] = useState<{ x: number; y: number }>({ x: 0, y: 0 })
   const [shareOpen, setShareOpen] = useState(false)
   const [shareStatus, setShareStatus] = useState<string | null>(null)
-  const [showMoney, setShowMoney] = useState<boolean>(() => localStorage.getItem('quoroom_swarm_money') !== 'false')
+  const [showMoney, setShowMoney] = useState<boolean>(() => storageGet('quoroom_swarm_money') !== 'false')
   const svgRef = useRef<SVGSVGElement>(null)
 
   const { data: allWorkers } = usePolling<Worker[]>(() => api.workers.list(), 15000)
@@ -528,7 +529,7 @@ export function SwarmPanel({ rooms, queenRunning, onNavigateToRoom }: SwarmPanel
   }, [])
 
   const toggleMoney = useCallback(() => {
-    setShowMoney(prev => { const next = !prev; localStorage.setItem('quoroom_swarm_money', String(next)); return next })
+    setShowMoney(prev => { const next = !prev; storageSet('quoroom_swarm_money', String(next)); return next })
   }, [])
 
   const handleShare = useCallback(async (platform: 'download' | 'twitter' | 'instagram' | 'tiktok') => {

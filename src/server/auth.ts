@@ -56,10 +56,6 @@ function getCloudAllowedOrigins(): Set<string> {
   return new Set(origins.map(normalizeOrigin).filter(Boolean))
 }
 
-function getCloudUserToken(): string {
-  return (process.env.QUOROOM_CLOUD_USER_TOKEN || '').trim()
-}
-
 function getCloudJwtSecret(): string {
   return (process.env.QUOROOM_CLOUD_JWT_SECRET || '').trim()
 }
@@ -186,10 +182,10 @@ export function generateToken(dataDir?: string): string {
     }
   }
 
-  agentToken = dataDir ? (readLegacyAgentToken(dataDir) ?? crypto.randomBytes(32).toString('hex')) : crypto.randomBytes(32).toString('hex')
+  agentToken = dataDir && !isCloudDeployment() ? (readLegacyAgentToken(dataDir) ?? crypto.randomBytes(32).toString('hex')) : crypto.randomBytes(32).toString('hex')
   userToken = crypto.randomBytes(32).toString('hex')
 
-  if (dataDir) writePersistedTokens(dataDir, agentToken, userToken)
+  if (dataDir && !isCloudDeployment()) writePersistedTokens(dataDir, agentToken, userToken)
 
   return agentToken
 }
@@ -231,12 +227,12 @@ export function validateToken(authHeader: string | undefined): TokenRole | null 
     const cloudRole = validateCloudJwt(provided)
     if (cloudRole) return cloudRole
   }
-  if (isCloudDeployment() && tokenEquals(getCloudUserToken(), provided)) return 'user'
 
   return null
 }
 
 export function writeTokenFile(dataDir: string, token: string, port: number): void {
+  if (isCloudDeployment()) return
   mkdirSync(dataDir, { recursive: true })
   writeFileSync(join(dataDir, 'api.token'), token, { mode: 0o600 })
   writeFileSync(join(dataDir, 'api.port'), String(port))

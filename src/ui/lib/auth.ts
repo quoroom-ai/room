@@ -1,6 +1,9 @@
+import { storageGet, storageSet, storageRemove } from './storage'
+
 const DEFAULT_PORT = 3700
 const CLOUD_TOKEN_STORAGE_KEY = 'quoroom_cloud_token'
 const CLOUD_TOKEN_QUERY_KEY = 'token'
+const CLOUD_MODE_FLAG_KEY = 'quoroom_cloud_mode'
 
 export type AppMode = 'local' | 'cloud'
 
@@ -8,17 +11,25 @@ function normalizeApiBase(url: string): string {
   return url.replace(/\/+$/, '')
 }
 
+function isLocalHost(): boolean {
+  if (typeof location === 'undefined') return true
+  const host = location.hostname
+  return host === 'localhost' || host === '127.0.0.1' || host === '::1' || host === '[::1]'
+}
+
 function detectAppMode(envValue: string | undefined): AppMode {
   if (envValue?.trim().toLowerCase() === 'cloud') return 'cloud'
-  // Auto-detect: if running on a non-localhost origin with a token param or stored token, it's cloud
   if (typeof location !== 'undefined') {
-    const host = location.hostname
-    const isLocal = host === 'localhost' || host === '127.0.0.1' || host === '::1' || host === '[::1]'
-    if (!isLocal) {
-      const hasTokenParam = new URLSearchParams(location.search).has('token')
-      const hasStoredToken = !!localStorage.getItem('quoroom_cloud_token')
-      if (hasTokenParam || hasStoredToken) return 'cloud'
+    if (isLocalHost()) {
+      // On localhost, clear any stale cloud flag and use local mode
+      storageRemove(CLOUD_MODE_FLAG_KEY)
+      return 'local'
     }
+    // Non-localhost: check token presence or persisted cloud mode flag
+    const hasTokenParam = new URLSearchParams(location.search).has('token')
+    const hasStoredToken = !!storageGet(CLOUD_TOKEN_STORAGE_KEY)
+    const hasCloudFlag = !!storageGet(CLOUD_MODE_FLAG_KEY)
+    if (hasTokenParam || hasStoredToken || hasCloudFlag) return 'cloud'
   }
   return 'local'
 }
@@ -34,7 +45,7 @@ export function getApiBase(): string {
   const host = location.hostname
   if (host === 'localhost' || host === '127.0.0.1' || host === '::1' || host === '[::1]') return ''
   // Fallback for unusual local setups where UI origin differs from API origin.
-  const savedPort = localStorage.getItem('quoroom_port') || String(DEFAULT_PORT)
+  const savedPort = storageGet('quoroom_port') || String(DEFAULT_PORT)
   return `http://127.0.0.1:${savedPort}`
 }
 
@@ -67,12 +78,13 @@ function removeCloudTokenFromQuery(): void {
 }
 
 function getCloudTokenFromStorage(): string | null {
-  const token = localStorage.getItem(CLOUD_TOKEN_STORAGE_KEY)?.trim()
+  const token = storageGet(CLOUD_TOKEN_STORAGE_KEY)?.trim()
   return token && token.length > 0 ? token : null
 }
 
 function saveCloudToken(token: string): void {
-  localStorage.setItem(CLOUD_TOKEN_STORAGE_KEY, token)
+  storageSet(CLOUD_TOKEN_STORAGE_KEY, token)
+  storageSet(CLOUD_MODE_FLAG_KEY, '1')
 }
 
 async function fetchCloudToken(): Promise<string> {
@@ -81,6 +93,7 @@ async function fetchCloudToken(): Promise<string> {
     if (await verifyToken(queryToken)) {
       saveCloudToken(queryToken)
       removeCloudTokenFromQuery()
+      scheduleCloudTokenRefresh(queryToken)
       return queryToken
     }
     removeCloudTokenFromQuery()
@@ -88,11 +101,12 @@ async function fetchCloudToken(): Promise<string> {
 
   const storedToken = getCloudTokenFromStorage()
   if (storedToken && await verifyToken(storedToken)) {
+    scheduleCloudTokenRefresh(storedToken)
     return storedToken
   }
 
   if (storedToken) {
-    localStorage.removeItem(CLOUD_TOKEN_STORAGE_KEY)
+    storageRemove(CLOUD_TOKEN_STORAGE_KEY)
   }
   throw new Error('Cloud session missing or expired. Launch the app from your cloud dashboard again.')
 }
@@ -141,4 +155,76 @@ export function getCachedToken(): string | null {
 export function clearToken(): void {
   cachedToken = null
   inFlightTokenRequest = null
+  stopCloudTokenRefresh()
+}
+
+// ─── Cloud JWT auto-refresh ──────────────────────────────────
+
+let refreshTimer: ReturnType<typeof setTimeout> | null = null
+
+/** Decode a JWT payload without verification (browser-side, used for scheduling only). */
+function decodeJwtPayload(token: string): Record<string, unknown> | null {
+  try {
+    const parts = token.split('.')
+    if (parts.length !== 3) return null
+    const json = atob(parts[1].replace(/-/g, '+').replace(/_/g, '/'))
+    return JSON.parse(json) as Record<string, unknown>
+  } catch {
+    return null
+  }
+}
+
+function getCloudControlOrigin(): string {
+  return (import.meta.env.VITE_CLOUD_CONTROL_ORIGIN || 'https://quoroom.ai').replace(/\/+$/, '')
+}
+
+async function refreshCloudToken(currentToken: string): Promise<string | null> {
+  const payload = decodeJwtPayload(currentToken)
+  if (!payload?.instanceId) return null
+
+  const controlOrigin = getCloudControlOrigin()
+  try {
+    const res = await fetch(`${controlOrigin}/api/cloud/instances/${payload.instanceId}/refresh-token`, {
+      method: 'POST',
+      credentials: 'include',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ token: currentToken }),
+    })
+    if (!res.ok) return null
+    const data = await res.json() as { ok?: boolean; token?: string }
+    if (data.ok && typeof data.token === 'string') return data.token
+  } catch {
+    // Network error — will retry on next cycle
+  }
+  return null
+}
+
+function scheduleCloudTokenRefresh(token: string): void {
+  stopCloudTokenRefresh()
+  const payload = decodeJwtPayload(token)
+  if (!payload?.exp || typeof payload.exp !== 'number') return
+
+  // Refresh at 80% of remaining TTL (e.g., 12 min into a 15-min token)
+  const nowSec = Math.floor(Date.now() / 1000)
+  const remainingSec = payload.exp - nowSec
+  if (remainingSec <= 0) return
+  const refreshInMs = Math.max(30_000, remainingSec * 0.8 * 1000)
+
+  refreshTimer = setTimeout(async () => {
+    const current = getCloudTokenFromStorage()
+    if (!current) return
+    const newToken = await refreshCloudToken(current)
+    if (newToken) {
+      saveCloudToken(newToken)
+      cachedToken = newToken
+      scheduleCloudTokenRefresh(newToken)
+    }
+  }, refreshInMs)
+}
+
+function stopCloudTokenRefresh(): void {
+  if (refreshTimer) {
+    clearTimeout(refreshTimer)
+    refreshTimer = null
+  }
 }
