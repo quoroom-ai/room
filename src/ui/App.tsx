@@ -390,7 +390,7 @@ function App(): React.JSX.Element {
         <div className="text-text-muted text-xs mb-3">{error}</div>
         <button
           onClick={() => { setError(null); clearToken(); getToken().then(() => setReady(true)).catch((e) => setError(e instanceof Error ? e.message : 'Auth failed')) }}
-          className="text-sm text-interactive hover:text-interactive-hover transition-colors"
+          className="text-sm px-3 py-1.5 rounded-lg bg-interactive text-text-invert hover:bg-interactive-hover transition-colors"
         >
           Retry
         </button>
@@ -418,7 +418,7 @@ function App(): React.JSX.Element {
       {/* Left sidebar — overlay on mobile, static on desktop */}
       <div
         data-testid="sidebar"
-        className={`fixed inset-y-0 left-0 z-50 w-64 flex flex-col bg-surface-secondary border-r border-border-primary py-2 px-2 transform transition-transform duration-200 ease-out ${sidebarOpen ? 'translate-x-0' : '-translate-x-full'} md:static md:translate-x-0 md:w-48 md:flex-shrink-0 md:z-auto`}
+        className={`fixed inset-y-0 left-0 z-50 w-64 flex flex-col bg-surface-secondary border-r border-border-primary py-2 px-2 transform transition-transform duration-200 ease-out ${sidebarOpen ? 'translate-x-0' : '-translate-x-full'} md:static md:translate-x-0 md:w-72 md:flex-shrink-0 md:z-auto`}
       >
         {/* Navigation links */}
         <div className="pb-2 mb-2 border-b border-border-primary">
@@ -452,6 +452,11 @@ function App(): React.JSX.Element {
               <polygon points="7,1 12.5,4 12.5,10 7,13 1.5,10 1.5,4" fill="none" stroke="currentColor" strokeWidth="1.3"/>
             </svg>
             My Swarm
+            {totalBalance !== null && (
+              <span className="ml-auto inline-flex items-center justify-center min-w-[40px] h-5 px-1.5 rounded-full bg-status-success-bg text-status-success text-[11px] font-semibold leading-none">
+                ${totalBalance.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+              </span>
+            )}
           </button>
         </div>
 
@@ -521,12 +526,6 @@ function App(): React.JSX.Element {
           })}
         </div>
 
-        {totalBalance !== null && (
-          <div className="mx-2 mb-1.5 px-3 py-2 rounded-lg bg-status-success-bg">
-            <div className="text-xs text-text-muted">Total Balance</div>
-            <div className="text-sm font-semibold text-status-success">${totalBalance.toFixed(2)}</div>
-          </div>
-        )}
         <TabBar active={tab} onChange={handleTabChange} />
       </div>
 

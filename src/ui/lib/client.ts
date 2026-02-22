@@ -499,6 +499,8 @@ export const api = {
       request<{ ok: true }>('POST', `/api/rooms/${roomId}/cloud-stations/${id}/cancel`),
     delete: (roomId: number, id: number) =>
       request<{ ok: true }>('DELETE', `/api/rooms/${roomId}/cloud-stations/${id}`),
+    payments: (roomId: number) =>
+      request<Array<{ id: string; sourceName: string; status: string; amount: number; currency: string; date: string; paymentMethod: string; cryptoTxHash?: string; cryptoChain?: string }>>('GET', `/api/rooms/${roomId}/cloud-station-payments`),
     cryptoPrices: (roomId: number) =>
       request<CryptoPricing>('GET', `/api/rooms/${roomId}/cloud-stations/crypto-prices`),
     cryptoCheckout: (roomId: number, body: {

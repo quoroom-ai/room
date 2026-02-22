@@ -420,9 +420,19 @@ export function SettingsPanel({ advancedMode, onAdvancedModeChange, installPromp
                 Install
               </button>
             ) : installPrompt.isManualInstallPlatform ? (
-              <button onClick={() => onNavigate?.('help')} className="text-interactive hover:text-interactive-hover transition-colors">Manual install &rarr;</button>
+              <button
+                onClick={() => onNavigate?.('help')}
+                className="text-xs px-2.5 py-1.5 rounded-lg bg-interactive text-text-invert hover:bg-interactive-hover transition-colors"
+              >
+                Manual install &rarr;
+              </button>
             ) : (
-              <button onClick={() => onNavigate?.('help')} className="text-interactive hover:text-interactive-hover transition-colors">Help tab &rarr;</button>
+              <button
+                onClick={() => onNavigate?.('help')}
+                className="text-xs px-2.5 py-1.5 rounded-lg bg-interactive text-text-invert hover:bg-interactive-hover transition-colors"
+              >
+                Help tab &rarr;
+              </button>
             )}
           </div>
           <p className="text-xs text-text-muted leading-tight">
@@ -448,7 +458,7 @@ export function SettingsPanel({ advancedMode, onAdvancedModeChange, installPromp
                 return (
                   <button
                     onClick={() => void handleCheckForUpdates()}
-                    className="text-interactive hover:text-interactive-hover transition-colors"
+                    className="px-2.5 py-1 text-xs bg-interactive text-text-invert rounded-lg hover:bg-interactive-hover transition-colors"
                   >
                     Check
                   </button>
@@ -488,25 +498,25 @@ export function SettingsPanel({ advancedMode, onAdvancedModeChange, installPromp
       <div className={`${wide ? 'col-span-2 grid grid-cols-2 gap-3' : 'space-y-3'}`}>
         <button
           onClick={() => window.open('https://github.com/quoroom-ai/room/issues/new')}
-          className="w-full py-2 text-sm text-interactive hover:text-interactive-hover border border-border-primary hover:border-interactive rounded-lg transition-colors"
+          className="w-full py-2 text-sm bg-interactive text-text-invert rounded-lg hover:bg-interactive-hover transition-colors"
         >
           Report Bug
         </button>
         <button
           onClick={() => window.open('mailto:hello@quoroom.ai')}
-          className="w-full py-2 text-sm text-interactive hover:text-interactive-hover border border-border-primary hover:border-interactive rounded-lg transition-colors"
+          className="w-full py-2 text-sm bg-interactive text-text-invert rounded-lg hover:bg-interactive-hover transition-colors"
         >
           Email Developer
         </button>
         <button
           onClick={() => window.open('https://github.com/quoroom-ai/room')}
-          className="w-full py-2 text-sm text-brand-600 hover:text-brand-700 border border-brand-200 hover:border-brand-400 rounded-lg transition-colors"
+          className="w-full py-2 text-sm bg-interactive text-text-invert rounded-lg hover:bg-interactive-hover transition-colors"
         >
           Star on GitHub
         </button>
         <button
           onClick={() => window.open('mailto:hello@quoroom.ai?subject=Subscribe&body=Subscribe me for Quoroom updates')}
-          className="w-full py-2 text-sm text-status-success hover:opacity-80 border border-border-primary hover:border-status-success rounded-lg transition-colors"
+          className="w-full py-2 text-sm bg-interactive text-text-invert rounded-lg hover:bg-interactive-hover transition-colors"
         >
           Subscribe for Updates
         </button>

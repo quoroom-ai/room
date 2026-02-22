@@ -114,11 +114,12 @@ export function RoomsPanel({ selectedRoomId, onSelectRoom }: RoomsPanelProps): R
   return (
     <div ref={containerRef} className="p-4 space-y-4">
       {/* Header */}
-      <div className="flex items-center justify-between">
-        <h3 className="text-sm font-semibold text-text-secondary">Rooms</h3>
+      <div className="flex items-center gap-2 flex-wrap">
+        <h2 className="text-base font-semibold text-text-primary">Rooms</h2>
+        <span className="text-xs text-text-muted">{rooms ? `${rooms.length} total` : 'Loading...'}</span>
         <button
           onClick={() => setShowCreate(!showCreate)}
-          className="text-sm text-interactive hover:text-interactive-hover"
+          className="text-xs px-2.5 py-1.5 bg-interactive text-text-invert rounded-lg hover:bg-interactive-hover"
         >
           {showCreate ? 'Cancel' : '+ New Room'}
         </button>
@@ -222,8 +223,18 @@ export function RoomsPanel({ selectedRoomId, onSelectRoom }: RoomsPanelProps): R
                         }}
                         autoFocus
                       />
-                      <button onClick={() => handleSaveGoal(room.id)} className="text-interactive hover:text-interactive-hover text-sm">Save</button>
-                      <button onClick={() => setEditingGoalId(null)} className="text-text-muted hover:text-text-secondary text-sm">Cancel</button>
+                      <button
+                        onClick={() => handleSaveGoal(room.id)}
+                        className="text-xs px-2.5 py-1.5 rounded-lg bg-interactive text-text-invert hover:bg-interactive-hover"
+                      >
+                        Save
+                      </button>
+                      <button
+                        onClick={() => setEditingGoalId(null)}
+                        className="text-xs px-2.5 py-1.5 rounded-lg border border-border-primary text-text-muted hover:text-text-secondary hover:bg-surface-hover"
+                      >
+                        Cancel
+                      </button>
                     </div>
                   ) : (
                     <span

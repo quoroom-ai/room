@@ -78,9 +78,9 @@ function SelfModSection({ roomId, semi }: { roomId: number | null; semi: boolean
       <div className="px-3 py-1 text-xs font-medium text-text-muted uppercase tracking-wide bg-surface-secondary border-y border-border-primary">
         Code Modifications
       </div>
-      <div className="divide-y divide-border-primary">
+      <div className="grid gap-2 mt-2 md:grid-cols-2">
         {entries.map(entry => (
-          <div key={entry.id} className="px-3 py-2">
+          <div key={entry.id} className="px-3 py-2 bg-surface-secondary border border-border-primary rounded-lg">
             <div className="flex items-center gap-1.5 mb-0.5">
               <span className="text-sm font-mono text-text-secondary truncate flex-1">{entry.filePath}</span>
               <span className={`px-2.5 py-1.5 rounded-lg text-xs font-medium shrink-0 ${
@@ -161,7 +161,7 @@ export function ResultsPanel({ roomId, autonomyMode }: ResultsPanelProps): React
   function renderRun(run: TaskRun, index: number): React.JSX.Element {
     const wideAutoExpand = wide && index < 2
     return (
-      <div key={run.id} className={wide ? 'border border-border-primary rounded-lg overflow-hidden' : ''}>
+      <div key={run.id} className="border border-border-primary rounded-lg overflow-hidden bg-surface-secondary">
         <div
           className="px-3 py-2 hover:bg-surface-hover cursor-pointer"
           onClick={() => setExpandedId(expandedId === run.id ? null : run.id)}
@@ -205,12 +205,8 @@ export function ResultsPanel({ roomId, autonomyMode }: ResultsPanelProps): React
       )}
       {runs.length === 0 ? (
         <div className="p-4 text-center text-sm text-text-muted">No task runs yet.</div>
-      ) : wide ? (
-        <div className="grid grid-cols-2 gap-3 p-4">
-          {runs.map((run: TaskRun, i: number) => renderRun(run, i))}
-        </div>
       ) : (
-        <div className="divide-y divide-border-primary">
+        <div className={`grid gap-3 p-4 ${wide ? 'grid-cols-2' : 'grid-cols-1'}`}>
           {runs.map((run: TaskRun, i: number) => renderRun(run, i))}
         </div>
       )}

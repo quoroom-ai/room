@@ -109,12 +109,15 @@ export function MessagesPanel({ roomId, autonomyMode }: MessagesPanelProps): Rea
   return (
     <div className="flex flex-col h-full">
       {/* Header */}
-      <div className="px-4 py-2 border-b border-border-primary flex items-center gap-2">
-        <div className="flex gap-1 bg-surface-tertiary rounded-lg p-0.5">
+      <div className="px-4 py-2 border-b border-border-primary flex items-center gap-2 flex-wrap">
+        <h2 className="text-base font-semibold text-text-primary mr-1">Messages</h2>
+        <div className="flex gap-1 bg-interactive-bg rounded-lg p-0.5">
           <button
             onClick={() => setViewSection('escalations')}
             className={`px-2.5 py-1.5 rounded-lg text-xs font-medium transition-colors ${
-              viewSection === 'escalations' ? 'bg-surface-primary text-text-primary shadow-sm' : 'text-text-muted hover:text-text-secondary'
+              viewSection === 'escalations'
+                ? 'bg-interactive text-text-invert shadow-sm'
+                : 'bg-interactive-bg text-interactive hover:bg-interactive hover:text-text-invert'
             }`}
           >
             My Room{pending.length > 0 ? ` (${pending.length})` : ''}
@@ -122,7 +125,9 @@ export function MessagesPanel({ roomId, autonomyMode }: MessagesPanelProps): Rea
           <button
             onClick={() => setViewSection('rooms')}
             className={`px-2.5 py-1.5 rounded-lg text-xs font-medium transition-colors ${
-              viewSection === 'rooms' ? 'bg-surface-primary text-text-primary shadow-sm' : 'text-text-muted hover:text-text-secondary'
+              viewSection === 'rooms'
+                ? 'bg-interactive text-text-invert shadow-sm'
+                : 'bg-interactive-bg text-interactive hover:bg-interactive hover:text-text-invert'
             }`}
           >
             Outside Rooms{unreadMessages.length > 0 ? ` (${unreadMessages.length})` : ''}
@@ -131,21 +136,21 @@ export function MessagesPanel({ roomId, autonomyMode }: MessagesPanelProps): Rea
         {((viewSection === 'escalations' && pending.length > 0) || (viewSection === 'rooms' && unreadMessages.length > 0)) && (
           <button
             onClick={handleMarkAllRead}
-            className="text-xs text-text-muted hover:text-text-secondary"
+            className="text-xs px-2.5 py-1.5 rounded-lg bg-interactive text-text-invert hover:bg-interactive-hover"
           >
             Mark all read
           </button>
         )}
         <button
           onClick={() => setCollapsed(c => { const next = !c; localStorage.setItem('quoroom_messages_collapsed', String(next)); return next })}
-          className="text-xs text-text-muted hover:text-text-secondary"
+          className="text-xs px-2.5 py-1.5 rounded-lg bg-interactive text-text-invert hover:bg-interactive-hover"
         >
           {collapsed ? 'Expand all' : 'Collapse all'}
         </button>
         {semi && roomId && viewSection === 'escalations' && (
           <button
             onClick={() => setShowCreateForm(!showCreateForm)}
-            className="text-sm text-interactive hover:text-interactive-hover font-medium ml-auto"
+            className="text-xs px-2.5 py-1.5 rounded-lg bg-interactive text-text-invert hover:bg-interactive-hover"
           >
             {showCreateForm ? 'Cancel' : '+ New'}
           </button>
@@ -339,7 +344,7 @@ function MessageBubble({
             {isPending && (
               <button
                 onClick={onReplyToggle}
-                className="mt-1.5 text-xs text-interactive hover:text-interactive-hover font-medium"
+                className="mt-1.5 text-xs px-2.5 py-1.5 rounded-lg bg-interactive text-text-invert hover:bg-interactive-hover font-medium"
               >
                 {isReplying ? 'Cancel' : 'Reply'}
               </button>

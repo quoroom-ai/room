@@ -46,13 +46,13 @@ export function UpdateModal({
               href={releaseUrl}
               target="_blank"
               rel="noopener noreferrer"
-              className="text-xs text-text-muted hover:text-text-secondary underline"
+              className="text-xs px-2.5 py-1.5 rounded-lg bg-interactive text-text-invert hover:bg-interactive-hover no-underline transition-colors"
             >
               Release notes
             </a>
             <button
               onClick={onSkip}
-              className="text-xs text-text-muted hover:text-text-secondary transition-colors"
+              className="text-xs px-2.5 py-1.5 rounded-lg border border-border-primary text-text-muted hover:text-text-secondary hover:bg-surface-hover transition-colors"
             >
               Skip this version
             </button>

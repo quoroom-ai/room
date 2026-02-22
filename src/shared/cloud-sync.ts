@@ -14,8 +14,12 @@ import { dirname, join } from 'path'
 import { mkdirSync, readFileSync, writeFileSync } from 'fs'
 import { getMachineId } from './telemetry'
 
-const CLOUD_API = 'https://quoroom.ai/api'
-const CLOUD_MASTER_TOKEN = (process.env.QUOROOM_CLOUD_API_KEY ?? '').trim()
+function getCloudApi(): string {
+  return (process.env.QUOROOM_CLOUD_API ?? 'https://quoroom.ai/api').replace(/\/$/, '')
+}
+function getCloudMasterToken(): string {
+  return (process.env.QUOROOM_CLOUD_API_KEY ?? '').trim()
+}
 const TOKEN_FILE_NAME = 'cloud-room-tokens.json'
 
 type CloudTokenStore = Record<string, string>
@@ -68,7 +72,7 @@ function clearRoomToken(roomId: string): void {
 
 function cloudHeaders(roomId?: string, extra: Record<string, string> = {}): Record<string, string> {
   const roomToken = roomId ? getRoomToken(roomId) : undefined
-  const token = roomToken || CLOUD_MASTER_TOKEN
+  const token = roomToken || getCloudMasterToken()
   if (!token) return extra
   return { ...extra, 'X-Room-Token': token }
 }
@@ -105,7 +109,7 @@ export async function ensureCloudRoomToken(data: CloudRegistration): Promise<boo
  */
 export async function registerWithCloud(data: CloudRegistration): Promise<void> {
   try {
-    const res = await fetch(`${CLOUD_API}/rooms/register`, {
+    const res = await fetch(`${getCloudApi()}/rooms/register`, {
       method: 'POST',
       headers: cloudHeaders(data.roomId, { 'Content-Type': 'application/json' }),
       body: JSON.stringify(data),
@@ -126,7 +130,7 @@ export async function registerWithCloud(data: CloudRegistration): Promise<void> 
  */
 export async function sendCloudHeartbeat(data: CloudHeartbeat): Promise<void> {
   try {
-    const res = await fetch(`${CLOUD_API}/rooms/${encodeURIComponent(data.roomId)}/heartbeat`, {
+    const res = await fetch(`${getCloudApi()}/rooms/${encodeURIComponent(data.roomId)}/heartbeat`, {
       method: 'POST',
       headers: cloudHeaders(data.roomId, { 'Content-Type': 'application/json' }),
       body: JSON.stringify(data),
@@ -136,7 +140,7 @@ export async function sendCloudHeartbeat(data: CloudHeartbeat): Promise<void> {
       clearRoomToken(data.roomId)
       await registerWithCloud({ roomId: data.roomId, name: data.name, goal: data.goal, visibility: 'public' })
       if (!getRoomToken(data.roomId)) return
-      await fetch(`${CLOUD_API}/rooms/${encodeURIComponent(data.roomId)}/heartbeat`, {
+      await fetch(`${getCloudApi()}/rooms/${encodeURIComponent(data.roomId)}/heartbeat`, {
         method: 'POST',
         headers: cloudHeaders(data.roomId, { 'Content-Type': 'application/json' }),
         body: JSON.stringify(data),
@@ -158,7 +162,7 @@ export async function pushActivityToCloud(
   summary: string
 ): Promise<void> {
   try {
-    await fetch(`${CLOUD_API}/rooms/${encodeURIComponent(cloudRoomId)}/activity`, {
+    await fetch(`${getCloudApi()}/rooms/${encodeURIComponent(cloudRoomId)}/activity`, {
       method: 'POST',
       headers: cloudHeaders(cloudRoomId, { 'Content-Type': 'application/json' }),
       body: JSON.stringify({ eventType, summary, isPublic: true }),
@@ -252,13 +256,43 @@ export interface CloudStation {
  */
 export async function listCloudStations(cloudRoomId: string): Promise<CloudStation[]> {
   try {
-    const res = await fetch(`${CLOUD_API}/rooms/${encodeURIComponent(cloudRoomId)}/stations`, {
+    const res = await fetch(`${getCloudApi()}/rooms/${encodeURIComponent(cloudRoomId)}/stations`, {
       headers: cloudHeaders(cloudRoomId),
       signal: AbortSignal.timeout(10000)
     })
     if (!res.ok) return []
     const data = await res.json() as { stations: CloudStation[] }
     return data.stations ?? []
+  } catch {
+    return []
+  }
+}
+
+export interface CloudStationPayment {
+  id: string
+  sourceName: string
+  status: string
+  amount: number
+  currency: string
+  date: string
+  paymentMethod: 'stripe' | 'crypto'
+  cryptoTxHash?: string
+  cryptoChain?: string
+}
+
+/**
+ * List payment history for a room's cloud stations.
+ * Returns empty array on failure.
+ */
+export async function listCloudStationPayments(cloudRoomId: string): Promise<CloudStationPayment[]> {
+  try {
+    const res = await fetch(`${getCloudApi()}/rooms/${encodeURIComponent(cloudRoomId)}/billing/payments`, {
+      headers: cloudHeaders(cloudRoomId),
+      signal: AbortSignal.timeout(10000)
+    })
+    if (!res.ok) return []
+    const data = await res.json() as { payments: CloudStationPayment[] }
+    return data.payments ?? []
   } catch {
     return []
   }
@@ -276,7 +310,7 @@ export async function execOnCloudStation(
 ): Promise<{ stdout: string; stderr: string; exitCode: number } | null> {
   try {
     const res = await fetch(
-      `${CLOUD_API}/rooms/${encodeURIComponent(cloudRoomId)}/stations/${subId}/exec`,
+      `${getCloudApi()}/rooms/${encodeURIComponent(cloudRoomId)}/stations/${subId}/exec`,
       {
         method: 'POST',
         headers: cloudHeaders(cloudRoomId, { 'Content-Type': 'application/json' }),
@@ -303,7 +337,7 @@ export async function getCloudStationLogs(
   try {
     const query = lines ? `?lines=${lines}` : ''
     const res = await fetch(
-      `${CLOUD_API}/rooms/${encodeURIComponent(cloudRoomId)}/stations/${subId}/logs${query}`,
+      `${getCloudApi()}/rooms/${encodeURIComponent(cloudRoomId)}/stations/${subId}/logs${query}`,
       {
         headers: cloudHeaders(cloudRoomId),
         signal: AbortSignal.timeout(15000)
@@ -323,7 +357,7 @@ export async function getCloudStationLogs(
 export async function startCloudStation(cloudRoomId: string, subId: number): Promise<void> {
   try {
     await fetch(
-      `${CLOUD_API}/rooms/${encodeURIComponent(cloudRoomId)}/stations/${subId}/start`,
+      `${getCloudApi()}/rooms/${encodeURIComponent(cloudRoomId)}/stations/${subId}/start`,
       {
         method: 'POST',
         headers: cloudHeaders(cloudRoomId),
@@ -341,7 +375,7 @@ export async function startCloudStation(cloudRoomId: string, subId: number): Pro
 export async function stopCloudStation(cloudRoomId: string, subId: number): Promise<void> {
   try {
     await fetch(
-      `${CLOUD_API}/rooms/${encodeURIComponent(cloudRoomId)}/stations/${subId}/stop`,
+      `${getCloudApi()}/rooms/${encodeURIComponent(cloudRoomId)}/stations/${subId}/stop`,
       {
         method: 'POST',
         headers: cloudHeaders(cloudRoomId),
@@ -359,7 +393,7 @@ export async function stopCloudStation(cloudRoomId: string, subId: number): Prom
 export async function deleteCloudStation(cloudRoomId: string, subId: number): Promise<void> {
   try {
     await fetch(
-      `${CLOUD_API}/rooms/${encodeURIComponent(cloudRoomId)}/stations/${subId}`,
+      `${getCloudApi()}/rooms/${encodeURIComponent(cloudRoomId)}/stations/${subId}`,
       {
         method: 'DELETE',
         headers: cloudHeaders(cloudRoomId),
@@ -377,7 +411,7 @@ export async function deleteCloudStation(cloudRoomId: string, subId: number): Pr
 export async function cancelCloudStation(cloudRoomId: string, subId: number): Promise<void> {
   try {
     await fetch(
-      `${CLOUD_API}/rooms/${encodeURIComponent(cloudRoomId)}/billing/cancel/${subId}`,
+      `${getCloudApi()}/rooms/${encodeURIComponent(cloudRoomId)}/billing/cancel/${subId}`,
       {
         method: 'POST',
         headers: cloudHeaders(cloudRoomId),
@@ -406,7 +440,7 @@ export interface CryptoPricing {
 export async function getCloudCryptoPrices(cloudRoomId: string): Promise<CryptoPricing | null> {
   try {
     const res = await fetch(
-      `${CLOUD_API}/rooms/${encodeURIComponent(cloudRoomId)}/billing/crypto-prices`,
+      `${getCloudApi()}/rooms/${encodeURIComponent(cloudRoomId)}/billing/crypto-prices`,
       { signal: AbortSignal.timeout(10000) }
     )
     if (!res.ok) return null
@@ -429,7 +463,7 @@ export async function getCloudOnrampUrl(
     const params = new URLSearchParams({ address: walletAddress })
     if (amount) params.set('amount', String(amount))
     const res = await fetch(
-      `${CLOUD_API}/rooms/${encodeURIComponent(cloudRoomId)}/billing/onramp-url?${params}`,
+      `${getCloudApi()}/rooms/${encodeURIComponent(cloudRoomId)}/billing/onramp-url?${params}`,
       { signal: AbortSignal.timeout(15000) }
     )
     if (!res.ok) return null
@@ -452,7 +486,7 @@ export async function cryptoCheckoutStation(
 ): Promise<{ ok: boolean; subscriptionId?: number; status?: string; currentPeriodEnd?: string; error?: string }> {
   try {
     const res = await fetch(
-      `${CLOUD_API}/rooms/${encodeURIComponent(cloudRoomId)}/billing/crypto-checkout`,
+      `${getCloudApi()}/rooms/${encodeURIComponent(cloudRoomId)}/billing/crypto-checkout`,
       {
         method: 'POST',
         headers: cloudHeaders(cloudRoomId, { 'Content-Type': 'application/json' }),
@@ -477,7 +511,7 @@ export async function cryptoRenewStation(
 ): Promise<{ ok: boolean; currentPeriodEnd?: string; error?: string }> {
   try {
     const res = await fetch(
-      `${CLOUD_API}/rooms/${encodeURIComponent(cloudRoomId)}/billing/crypto-renew/${subscriptionId}`,
+      `${getCloudApi()}/rooms/${encodeURIComponent(cloudRoomId)}/billing/crypto-renew/${subscriptionId}`,
       {
         method: 'POST',
         headers: cloudHeaders(cloudRoomId, { 'Content-Type': 'application/json' }),
@@ -514,7 +548,7 @@ export async function sendCloudRoomMessage(
   body: string
 ): Promise<boolean> {
   try {
-    const res = await fetch(`${CLOUD_API}/rooms/message`, {
+    const res = await fetch(`${getCloudApi()}/rooms/message`, {
       method: 'POST',
       headers: cloudHeaders(fromRoomId, { 'Content-Type': 'application/json' }),
       body: JSON.stringify({ fromRoomId, toRoomId, subject, body }),
@@ -532,7 +566,7 @@ export async function sendCloudRoomMessage(
  */
 export async function fetchCloudRoomMessages(roomId: string): Promise<CloudRoomMessage[]> {
   try {
-    const res = await fetch(`${CLOUD_API}/rooms/${encodeURIComponent(roomId)}/messages`, {
+    const res = await fetch(`${getCloudApi()}/rooms/${encodeURIComponent(roomId)}/messages`, {
       headers: cloudHeaders(roomId),
       signal: AbortSignal.timeout(10000)
     })
@@ -561,7 +595,7 @@ export interface PublicRoom {
  */
 export async function fetchPublicRooms(): Promise<PublicRoom[]> {
   try {
-    const res = await fetch(`${CLOUD_API}/rooms/public`, {
+    const res = await fetch(`${getCloudApi()}/rooms/public`, {
       signal: AbortSignal.timeout(10000)
     })
     if (!res.ok) return []
@@ -584,7 +618,7 @@ export interface PublicRoomFeedEntry {
  */
 export async function fetchRoomFeed(roomId: string): Promise<PublicRoomFeedEntry[]> {
   try {
-    const res = await fetch(`${CLOUD_API}/rooms/public/${encodeURIComponent(roomId)}/feed`, {
+    const res = await fetch(`${getCloudApi()}/rooms/public/${encodeURIComponent(roomId)}/feed`, {
       signal: AbortSignal.timeout(10000)
     })
     if (!res.ok) return []

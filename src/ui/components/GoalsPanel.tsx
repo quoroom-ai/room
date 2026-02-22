@@ -131,19 +131,18 @@ export function GoalsPanel({ roomId, autonomyMode }: GoalsPanelProps): React.JSX
 
   return (
     <div className="flex flex-col h-full">
-      <div className="px-4 py-2 border-b border-border-primary flex items-center justify-between">
-        <div className="flex items-center gap-2">
-          <span className="text-sm text-text-muted">
-            {goals ? `${goals.length} goal(s)` : 'Loading...'}
-          </span>
-          {!roomId && (
-            <span className="text-sm text-text-muted">Select a room</span>
-          )}
-        </div>
+      <div className="px-4 py-2 border-b border-border-primary flex items-center gap-2 flex-wrap">
+        <h2 className="text-base font-semibold text-text-primary">Goals</h2>
+        <span className="text-xs text-text-muted">
+          {goals ? `${goals.length} total` : 'Loading...'}
+        </span>
+        {!roomId && (
+          <span className="text-xs text-text-muted">Select a room</span>
+        )}
         {semi && (
           <button
             onClick={() => setShowCreate(!showCreate)}
-            className="text-sm text-interactive hover:text-interactive-hover font-medium"
+            className="text-xs px-2.5 py-1.5 rounded-lg bg-interactive text-text-invert hover:bg-interactive-hover"
           >
             {showCreate ? 'Cancel' : '+ New Goal'}
           </button>
@@ -197,14 +196,14 @@ export function GoalsPanel({ roomId, autonomyMode }: GoalsPanelProps): React.JSX
         ) : tree.length === 0 && goals ? (
           <div className="p-4 text-sm text-text-muted">No goals yet.{semi ? ' Create one to get started.' : ' Goals are created by agents.'}</div>
         ) : (
-          <div className="divide-y divide-border-primary">
+          <div className="p-3 space-y-2">
             {tree.map(goal => {
               const progressPct = toPercent(goal.progress)
+              const indent = Math.min(goal.depth, 5) * 16
               return (
-                <div key={goal.id}>
+                <div key={goal.id} className="bg-surface-secondary border border-border-primary rounded-lg overflow-hidden" style={{ marginLeft: `${indent}px` }}>
                   <div
                     className="flex items-center gap-2 px-3 py-2 hover:bg-surface-hover cursor-pointer"
-                    style={{ paddingLeft: `${12 + Math.min(goal.depth, 5) * 16}px` }}
                     onClick={() => toggleExpand(goal.id)}
                   >
                     <div className="min-w-0 flex-1">
@@ -233,7 +232,7 @@ export function GoalsPanel({ roomId, autonomyMode }: GoalsPanelProps): React.JSX
                   </div>
 
                   {expandedId === goal.id && (
-                    <div className="px-3 pb-3 bg-surface-secondary space-y-2" style={{ paddingLeft: `${12 + Math.min(goal.depth, 5) * 16}px` }}>
+                    <div className="px-3 pb-3 pt-2 border-t border-border-primary bg-surface-secondary space-y-2">
                       {/* Status actions */}
                       {semi && (
                         <div className="flex gap-2 flex-wrap">

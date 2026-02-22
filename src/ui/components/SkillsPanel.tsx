@@ -68,16 +68,15 @@ export function SkillsPanel({ roomId, autonomyMode }: SkillsPanelProps): React.J
 
   return (
     <div className="flex flex-col h-full" ref={containerRef}>
-      <div className="px-4 py-2 border-b border-border-primary flex items-center justify-between">
-        <div className="flex items-center gap-2">
-          <span className="text-sm text-text-muted">
-            {skills ? `${skills.length} skill(s)` : 'Loading...'}
-          </span>
-        </div>
+      <div className="px-4 py-2 border-b border-border-primary flex items-center gap-2 flex-wrap">
+        <h2 className="text-base font-semibold text-text-primary">Skills</h2>
+        <span className="text-xs text-text-muted">
+          {skills ? `${skills.length} total` : 'Loading...'}
+        </span>
         {semi && (
           <button
             onClick={() => setShowCreate(!showCreate)}
-            className="text-sm text-interactive hover:text-interactive-hover font-medium"
+            className="text-xs px-2.5 py-1.5 rounded-lg bg-interactive text-text-invert hover:bg-interactive-hover"
           >
             {showCreate ? 'Cancel' : '+ New Skill'}
           </button>
@@ -131,24 +130,8 @@ export function SkillsPanel({ roomId, autonomyMode }: SkillsPanelProps): React.J
           <div className="p-4 text-sm text-text-muted">
             {semi ? 'No skills yet. Create one to get started.' : 'No skills yet. Skills are created by agents.'}
           </div>
-        ) : isWide ? (
-          <div className="grid grid-cols-2 gap-2 p-3">
-            {(skills ?? []).map(skill => (
-              <SkillCard
-                key={skill.id}
-                skill={skill}
-                expanded={expandedId === skill.id}
-                semi={semi}
-                confirmDelete={confirmDeleteId === skill.id}
-                onToggle={() => setExpandedId(expandedId === skill.id ? null : skill.id)}
-                onToggleAutoActivate={() => handleToggleAutoActivate(skill)}
-                onDelete={() => handleDelete(skill.id)}
-                onBlurDelete={() => setConfirmDeleteId(null)}
-              />
-            ))}
-          </div>
         ) : (
-          <div className="divide-y divide-border-primary">
+          <div className={`grid gap-2 p-3 ${isWide ? 'grid-cols-2' : 'grid-cols-1'}`}>
             {(skills ?? []).map(skill => (
               <SkillCard
                 key={skill.id}
@@ -182,7 +165,7 @@ interface SkillCardProps {
 
 function SkillCard({ skill, expanded, semi, confirmDelete, onToggle, onToggleAutoActivate, onDelete, onBlurDelete }: SkillCardProps): React.JSX.Element {
   return (
-    <div>
+    <div className="bg-surface-secondary border border-border-primary rounded-lg overflow-hidden">
       <div
         className="flex items-center gap-2 px-3 py-2 hover:bg-surface-hover cursor-pointer"
         onClick={onToggle}
@@ -217,7 +200,7 @@ function SkillCard({ skill, expanded, semi, confirmDelete, onToggle, onToggleAut
       </div>
 
       {expanded && (
-        <div className="px-3 pb-3 bg-surface-secondary space-y-2">
+        <div className="px-3 pb-3 pt-2 border-t border-border-primary bg-surface-secondary space-y-2">
           <pre className="text-xs text-text-secondary bg-surface-primary border border-border-primary rounded-lg p-3 overflow-x-auto whitespace-pre-wrap font-mono max-h-[200px] overflow-y-auto">
             {skill.content}
           </pre>

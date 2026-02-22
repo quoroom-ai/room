@@ -183,14 +183,15 @@ export function WorkersPanel({ roomId, autonomyMode }: WorkersPanelProps): React
 
   return (
     <div className="flex flex-col h-full">
-      <div className="px-4 py-2 border-b border-border-primary flex items-center justify-between">
-        <span className="text-sm text-text-muted">
-          {workers ? `${workers.length} worker(s)` : 'Loading...'}
+      <div className="px-4 py-2 border-b border-border-primary flex items-center gap-2 flex-wrap">
+        <h2 className="text-base font-semibold text-text-primary">Workers</h2>
+        <span className="text-xs text-text-muted">
+          {workers ? `${workers.length} total` : 'Loading...'}
         </span>
         {semi && (
           <button
             onClick={() => setShowCreate(!showCreate)}
-            className="text-sm text-interactive hover:text-interactive-hover font-medium"
+            className="text-xs px-2.5 py-1.5 rounded-lg bg-interactive text-text-invert hover:bg-interactive-hover"
           >
             {showCreate ? 'Cancel' : '+ New Worker'}
           </button>
@@ -216,9 +217,9 @@ export function WorkersPanel({ roomId, autonomyMode }: WorkersPanelProps): React
           </div>
         )}
         {workers && workers.length > 0 && (
-          <div className="divide-y divide-border-primary">
+          <div className="grid gap-2 p-3 md:grid-cols-2">
             {workers.map((worker: Worker) => (
-              <div key={worker.id}>
+              <div key={worker.id} className="bg-surface-secondary rounded-lg border border-border-primary overflow-hidden">
                 <div
                   className="flex items-center justify-between px-3 py-2 hover:bg-surface-hover cursor-pointer"
                   onClick={() => toggleExpand(worker)}
@@ -238,7 +239,7 @@ export function WorkersPanel({ roomId, autonomyMode }: WorkersPanelProps): React
                 </div>
 
                 {expandedId === worker.id && (
-                  <div className="px-3 pb-3 bg-surface-secondary space-y-2">
+                  <div className="px-3 pb-3 pt-2 border-t border-border-primary bg-surface-secondary space-y-2">
                     {semi ? (
                       <>
                         <input type="text" value={editName} onChange={(e) => setEditName(e.target.value)} className="w-full px-2.5 py-1.5 text-sm border border-border-primary rounded-lg focus:outline-none focus:border-text-muted bg-surface-primary text-text-primary placeholder:text-text-muted" placeholder="Name" />
@@ -247,7 +248,14 @@ export function WorkersPanel({ roomId, autonomyMode }: WorkersPanelProps): React
                         <textarea value={editPrompt} onChange={(e) => setEditPrompt(e.target.value)} rows={6} className="w-full px-2.5 py-1.5 text-sm border border-border-primary rounded-lg focus:outline-none focus:border-text-muted bg-surface-primary text-text-primary placeholder:text-text-muted font-mono resize-y" placeholder="System prompt" />
                         <div className="flex gap-2">
                           <button onClick={() => handleSave(worker.id)} className="text-sm bg-interactive text-text-invert px-4 py-2 rounded-lg hover:bg-interactive-hover">Save</button>
-                          {!worker.isDefault && <button onClick={() => handleSetDefault(worker.id)} className="text-sm text-interactive hover:text-interactive-hover">Set Default</button>}
+                          {!worker.isDefault && (
+                            <button
+                              onClick={() => handleSetDefault(worker.id)}
+                              className="text-sm bg-interactive text-text-invert px-4 py-2 rounded-lg hover:bg-interactive-hover"
+                            >
+                              Set Default
+                            </button>
+                          )}
                           {confirmDeleteId === worker.id ? (
                             <>
                               <span className="text-sm text-status-error">Sure?</span>
@@ -287,16 +295,18 @@ export function WorkersPanel({ roomId, autonomyMode }: WorkersPanelProps): React
         {semi && (
           <div className="p-4 space-y-2">
             <div className="text-sm text-text-muted font-medium">Templates</div>
-            {WORKER_TEMPLATES.map((t) => (
-              <button
-                key={t.name}
-                onClick={() => useTemplate(t)}
-                className="w-full text-left px-3 py-2 rounded-lg border border-border-primary hover:border-interactive hover:bg-interactive-bg transition-colors"
-              >
-                <div className="text-sm font-medium text-text-secondary">{t.name} <span className="text-text-muted font-normal">— {t.role}</span></div>
-                <div className="text-sm text-text-muted">{t.description}</div>
-              </button>
-            ))}
+            <div className="grid gap-2 md:grid-cols-2">
+              {WORKER_TEMPLATES.map((t) => (
+                <button
+                  key={t.name}
+                  onClick={() => useTemplate(t)}
+                  className="w-full text-left px-3 py-2 rounded-lg border border-border-primary hover:border-interactive hover:bg-interactive-bg transition-colors"
+                >
+                  <div className="text-sm font-medium text-text-secondary">{t.name} <span className="text-text-muted font-normal">— {t.role}</span></div>
+                  <div className="text-sm text-text-muted">{t.description}</div>
+                </button>
+              ))}
+            </div>
           </div>
         )}
       </div>

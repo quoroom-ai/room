@@ -81,6 +81,23 @@ export function TransactionsPanel({ roomId }: TransactionsPanelProps): React.JSX
     30000
   )
 
+  interface CloudPayment {
+    id: string
+    sourceName: string
+    status: string
+    amount: number
+    currency: string
+    date: string
+    paymentMethod: string
+    cryptoTxHash?: string
+    cryptoChain?: string
+  }
+
+  const { data: billingPayments } = usePolling<CloudPayment[]>(
+    () => roomId ? (api.cloudStations.payments(roomId) as Promise<CloudPayment[]>).catch(() => []) : Promise.resolve([]),
+    30000
+  )
+
   if (!roomId) {
     return <div className="p-4 text-sm text-text-muted">Select a room to view transactions.</div>
   }
@@ -90,21 +107,39 @@ export function TransactionsPanel({ roomId }: TransactionsPanelProps): React.JSX
 
   return (
     <div className="p-4 space-y-3">
-      <div className="flex items-center justify-between">
+      <div className="flex items-center gap-2 flex-wrap">
         <h2 className="text-base font-semibold text-text-primary">Transactions</h2>
         <div className="flex gap-2">
           <button
             onClick={() => setSubTab('wallet')}
-            className={`text-xs px-2.5 py-1.5 rounded-lg ${subTab === 'wallet' ? 'bg-surface-hover text-text-primary' : 'bg-surface-tertiary text-text-muted hover:bg-surface-hover'}`}
+            className={`text-xs px-2.5 py-1.5 rounded-lg ${
+              subTab === 'wallet'
+                ? 'bg-interactive text-text-invert hover:bg-interactive-hover'
+                : 'bg-interactive-bg text-interactive hover:bg-interactive hover:text-text-invert'
+            }`}
           >
             Wallet
           </button>
           <button
             onClick={() => setSubTab('billing')}
-            className={`text-xs px-2.5 py-1.5 rounded-lg ${subTab === 'billing' ? 'bg-surface-hover text-text-primary' : 'bg-surface-tertiary text-text-muted hover:bg-surface-hover'}`}
+            className={`text-xs px-2.5 py-1.5 rounded-lg ${
+              subTab === 'billing'
+                ? 'bg-interactive text-text-invert hover:bg-interactive-hover'
+                : 'bg-interactive-bg text-interactive hover:bg-interactive hover:text-text-invert'
+            }`}
           >
             Billing
           </button>
+          {subTab === 'wallet' && wallet && (
+            <a
+              href={roomId ? `/api/rooms/${roomId}/wallet/onramp-redirect?token=${encodeURIComponent(getCachedToken() ?? '')}` : '#'}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="text-xs px-2.5 py-1.5 rounded-lg bg-interactive text-text-invert hover:bg-interactive-hover no-underline"
+            >
+              Top Up from Card
+            </a>
+          )}
         </div>
       </div>
 
@@ -113,17 +148,7 @@ export function TransactionsPanel({ roomId }: TransactionsPanelProps): React.JSX
           {/* Wallet Info */}
           {wallet && (
             <div className="bg-surface-secondary rounded-lg p-3 shadow-sm text-sm">
-              <div className="flex items-center justify-between">
-                <div className="text-text-muted">Wallet</div>
-                <a
-                  href={roomId ? `/api/rooms/${roomId}/wallet/onramp-redirect?token=${encodeURIComponent(getCachedToken() ?? '')}` : '#'}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="text-xs px-2.5 py-1.5 rounded-lg bg-interactive text-text-invert hover:bg-interactive-hover no-underline"
-                >
-                  Top Up from Card
-                </a>
-              </div>
+              <div className="text-text-muted">Wallet</div>
               <div className="flex items-center gap-1">
                 <div className="font-mono text-xs text-text-secondary truncate">{wallet.address}</div>
                 <CopyAddressButton address={wallet.address} />
@@ -204,17 +229,21 @@ export function TransactionsPanel({ roomId }: TransactionsPanelProps): React.JSX
             </div>
           )}
 
-          {(!billingStations || billingStations.length === 0) ? (
-            <div className="text-sm text-text-muted py-4 text-center">
-              No station subscriptions.
-            </div>
-          ) : (
-            <div className="space-y-2">
-              {billingStations.map(station => (
-                <div key={station.id} className="bg-surface-secondary rounded-lg p-3 shadow-sm flex items-center gap-2">
-                  <div className="flex-1 min-w-0">
-                    <div className="text-sm font-medium text-text-primary">{station.stationName}</div>
-                    <div className="text-xs text-text-muted flex gap-2 mt-0.5">
+          {billingStations && billingStations.length > 0 && (
+            <>
+              <div className="text-xs font-medium text-text-muted uppercase tracking-wide">Active subscriptions</div>
+              <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-3">
+                {billingStations.map(station => (
+                  <div key={station.id} className="bg-surface-secondary rounded-lg p-3 shadow-sm space-y-2">
+                    <div className="flex items-start justify-between gap-2">
+                      <div className="text-sm font-medium text-text-primary">{station.stationName}</div>
+                      <div className="text-xs text-text-muted text-right">
+                        {station.status === 'canceling' && station.currentPeriodEnd
+                          ? `ends ${formatRelativeTime(station.currentPeriodEnd)}`
+                          : formatRelativeTime(station.createdAt)}
+                      </div>
+                    </div>
+                    <div className="text-xs text-text-muted flex flex-wrap gap-2">
                       <span className={`px-1 rounded-lg ${BILLING_STATUS_COLORS[station.status] ?? 'bg-surface-tertiary text-text-muted'}`}>
                         {BILLING_STATUS_LABEL[station.status] ?? station.status}
                       </span>
@@ -222,17 +251,39 @@ export function TransactionsPanel({ roomId }: TransactionsPanelProps): React.JSX
                       <span>{TIER_COSTS[station.tier] ?? `$${station.monthlyCost}/mo`}</span>
                     </div>
                   </div>
-                  <div className="text-right shrink-0">
-                    <div className="text-xs text-text-muted">
-                      {station.status === 'canceling' && station.currentPeriodEnd
-                        ? `ends ${formatRelativeTime(station.currentPeriodEnd)}`
-                        : formatRelativeTime(station.createdAt)}
+                ))}
+              </div>
+            </>
+          )}
+
+          {billingPayments && billingPayments.length > 0 ? (
+            <>
+              <div className="text-xs font-medium text-text-muted uppercase tracking-wide">Payment history</div>
+              <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-3">
+                {billingPayments.map(p => (
+                  <div key={p.id} className="bg-surface-secondary rounded-lg p-3 shadow-sm space-y-2">
+                    <div className="flex items-start justify-between gap-2">
+                      <div className="text-sm text-text-primary">{p.sourceName}</div>
+                      <div className="text-right shrink-0">
+                        <div className="text-sm font-semibold text-text-secondary">${p.amount}</div>
+                        <div className="text-xs text-text-muted">{formatRelativeTime(p.date)}</div>
+                      </div>
+                    </div>
+                    <div className="text-xs text-text-muted flex flex-wrap gap-2">
+                      <span className={`px-1 rounded ${p.status === 'paid' ? 'bg-status-success-bg text-status-success' : 'bg-surface-tertiary text-text-muted'}`}>
+                        {p.status}
+                      </span>
+                      <span>{p.paymentMethod === 'crypto' ? p.cryptoChain ?? 'crypto' : 'card'}</span>
                     </div>
                   </div>
-                </div>
-              ))}
+                ))}
+              </div>
+            </>
+          ) : (!billingStations || billingStations.length === 0) ? (
+            <div className="text-sm text-text-muted py-4 text-center">
+              No station subscriptions.
             </div>
-          )}
+          ) : null}
         </>
       )}
     </div>

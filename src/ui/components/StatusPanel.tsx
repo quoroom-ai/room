@@ -323,25 +323,36 @@ export function StatusPanel({ onNavigate, advancedMode, roomId }: StatusPanelPro
   const activeView = showToggle ? viewMode : 'console'
 
   const toggleBar = showToggle ? (
-    <div className="flex gap-2 bg-surface-tertiary rounded-lg p-0.5 self-start shrink-0">
+    <div className="flex gap-1 bg-interactive-bg rounded-lg p-0.5 self-start shrink-0">
       <button
         onClick={() => setViewMode('activity')}
-        className={`px-2.5 py-1 rounded-md text-sm font-medium transition-colors ${
-          activeView === 'activity' ? 'bg-surface-primary text-text-primary shadow-sm' : 'text-text-muted hover:text-text-secondary'
+        className={`px-2.5 py-1.5 rounded-lg text-xs font-medium transition-colors ${
+          activeView === 'activity'
+            ? 'bg-interactive text-text-invert shadow-sm'
+            : 'bg-interactive-bg text-interactive hover:bg-interactive hover:text-text-invert'
         }`}
       >
         Timeline
       </button>
       <button
         onClick={() => setViewMode('console')}
-        className={`px-2.5 py-1 rounded-md text-sm font-medium transition-colors ${
-          activeView === 'console' ? 'bg-surface-primary text-text-primary shadow-sm' : 'text-text-muted hover:text-text-secondary'
+        className={`px-2.5 py-1.5 rounded-lg text-xs font-medium transition-colors ${
+          activeView === 'console'
+            ? 'bg-interactive text-text-invert shadow-sm'
+            : 'bg-interactive-bg text-interactive hover:bg-interactive hover:text-text-invert'
         }`}
       >
         Console
       </button>
     </div>
   ) : null
+
+  const header = (
+    <div className="flex items-center gap-2 flex-wrap">
+      <h2 className="text-base font-semibold text-text-primary">Status</h2>
+      {toggleBar}
+    </div>
+  )
 
   function renderMainSection(): React.JSX.Element {
     if (activeView === 'activity') {
@@ -353,6 +364,7 @@ export function StatusPanel({ onNavigate, advancedMode, roomId }: StatusPanelPro
   if (!wide) {
     return (
       <div ref={containerRef} className="p-4 flex flex-col gap-3 min-h-full overflow-x-hidden">
+        {header}
         {errorAlert}
         {memoryCard}
         {workersCard}
@@ -361,7 +373,6 @@ export function StatusPanel({ onNavigate, advancedMode, roomId }: StatusPanelPro
         {runningSection}
         {lastRunCard}
         {walletCard}
-        {toggleBar}
         {renderMainSection()}
       </div>
     )
@@ -371,10 +382,10 @@ export function StatusPanel({ onNavigate, advancedMode, roomId }: StatusPanelPro
 
   return (
     <div ref={containerRef} className="p-4 flex flex-col gap-3 min-h-full overflow-x-hidden">
+      {header}
       {errorAlert}
       <div className="grid grid-cols-2 gap-3">{cards}</div>
       {runningSection}
-      {toggleBar}
       {renderMainSection()}
     </div>
   )

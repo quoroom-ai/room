@@ -513,14 +513,13 @@ export function TasksPanel({ roomId, autonomyMode }: { roomId?: number | null; a
 
   return (
     <div className="flex flex-col h-full">
-      <div className="px-3 py-1.5 border-b border-border-primary flex items-center justify-between">
-        <span className="text-sm text-text-muted">
-          {tasks.length} task(s)
-        </span>
+      <div className="px-3 py-1.5 border-b border-border-primary flex items-center gap-2 flex-wrap">
+        <h2 className="text-base font-semibold text-text-primary">Tasks</h2>
+        <span className="text-xs text-text-muted">{tasks.length} total</span>
         {semi && (
           <button
             onClick={() => setShowCreateForm(!showCreateForm)}
-            className="text-sm text-interactive hover:text-interactive-hover font-medium"
+            className="text-xs px-2.5 py-1.5 rounded-lg bg-interactive text-text-invert hover:bg-interactive-hover"
           >
             {showCreateForm ? 'Cancel' : '+ New Task'}
           </button>
@@ -582,7 +581,7 @@ export function TasksPanel({ roomId, autonomyMode }: { roomId?: number | null; a
               No tasks match filter.{' '}
               <button
                 onClick={() => updateFilter('all')}
-                className="text-interactive hover:text-interactive-hover"
+                className="text-xs px-2.5 py-1.5 rounded-lg bg-interactive text-text-invert hover:bg-interactive-hover"
               >
                 Clear filter
               </button>
@@ -593,189 +592,90 @@ export function TasksPanel({ roomId, autonomyMode }: { roomId?: number | null; a
             'No tasks yet. Tasks are created by agents.'
           )}
         </div>
-      ) : wide ? (
-        <table className="w-full text-sm">
-          <thead>
-            <tr className="text-left text-xs text-text-muted uppercase tracking-wider border-b border-border-primary">
-              <th className="px-3 py-1.5 font-medium">Name</th>
-              <th className="px-3 py-1.5 font-medium">Schedule</th>
-              <th className="px-3 py-1.5 font-medium">Last Run</th>
-              <th className="px-3 py-1.5 font-medium">Status</th>
-              {semi && <th className="px-3 py-1.5 font-medium text-right">Actions</th>}
-            </tr>
-          </thead>
-          <tbody>
+      ) : (
+        <div className={`grid gap-2 p-3 ${wide ? 'grid-cols-2' : 'grid-cols-1'}`}>
           {filteredTasks.map((task) => {
             const activeRun = runningByTaskId.get(task.id)
             const busy = !!activeRun || pendingRuns.has(task.id)
             const source = sourceLabel(task)
             const worker = task.workerId != null ? workerMap.get(task.workerId) : undefined
             return (
-              <tr key={task.id} className="group border-b border-border-secondary hover:bg-surface-hover">
-                <td className="px-3 py-2 max-w-[200px]">
-                  <div className="font-medium text-text-primary truncate">{task.name}</div>
-                  <div className="text-xs text-text-muted flex items-center gap-2 mt-0.5">
-                    {source && <span>via {source}</span>}
-                    {semi && workers && workers.length > 0 ? (
-                      <Select
-                        value={String(task.workerId ?? '')}
-                        onChange={(v) => assignWorker(task.id, v ? Number(v) : null)}
-                        variant="inline"
-                        className="text-purple-400"
-                        placeholder="No worker"
-                        options={[
-                          { value: '', label: 'No worker' },
-                          ...workers.map(w => ({ value: String(w.id), label: `${w.name}${w.isDefault ? ' (default)' : ''}` }))
-                        ]}
-                      />
-                    ) : (
-                      worker && <span className="text-purple-400">{worker.name}</span>
-                    )}
-                    {task.sessionContinuity && (
-                      <span className="px-1 py-0.5 rounded-lg bg-violet-100 text-violet-600 leading-none">cont</span>
-                    )}
-                  </div>
-                  {activeRun && <ProgressBar run={activeRun} />}
-                  {activeRun && consoleTaskId === task.id && (
-                    <ConsoleView runId={activeRun.id} />
-                  )}
-                </td>
-                <td className="px-3 py-2 text-text-muted whitespace-nowrap">
+              <div key={task.id} className="bg-surface-secondary border border-border-primary rounded-lg p-3">
+                <div className="flex items-center justify-between mb-1">
+                  <span className="text-sm font-medium text-text-primary truncate">{task.name}</span>
+                  {statusBadge(task)}
+                </div>
+                <div className="text-sm text-text-muted mb-1">
                   {triggerLabel(task)}
                   {task.maxRuns != null && (
-                    <div className="text-xs text-text-muted">{task.runCount}/{task.maxRuns} runs</div>
-                  )}
-                </td>
-                <td className="px-3 py-2 text-text-muted whitespace-nowrap">
-                  {formatRelativeTime(task.lastRun)}
-                </td>
-                <td className="px-3 py-2">{statusBadge(task)}</td>
-                {semi && (
-                  <td className="px-3 py-2 text-right whitespace-nowrap">
-                    <div className="flex items-center justify-end gap-2">
-                      {activeRun && (
-                        <button
-                          onClick={() => setConsoleTaskId(consoleTaskId === task.id ? null : task.id)}
-                          className="text-sm text-text-muted hover:text-text-secondary"
-                        >
-                          {consoleTaskId === task.id ? 'Hide' : 'Console'}
-                        </button>
-                      )}
-                      <button
-                        onClick={() => runNow(task.id)}
-                        disabled={busy}
-                        className="text-sm text-interactive hover:text-interactive-hover disabled:opacity-40 disabled:cursor-not-allowed"
-                      >
-                        {busy ? 'Running' : 'Run'}
-                      </button>
-                      {task.status !== 'completed' && (
-                        <button
-                          onClick={() => togglePause(task)}
-                          disabled={busy}
-                          className="text-sm text-status-warning hover:text-status-warning disabled:opacity-40 disabled:cursor-not-allowed"
-                        >
-                          {task.status === 'paused' ? 'Resume' : 'Pause'}
-                        </button>
-                      )}
-                      <button
-                        onClick={() => deleteTask(task.id)}
-                        disabled={busy}
-                        className="text-sm text-status-error hover:text-status-error disabled:opacity-40 disabled:cursor-not-allowed"
-                      >
-                        Delete
-                      </button>
-                    </div>
-                  </td>
-                )}
-              </tr>
-            )
-          })}
-          </tbody>
-        </table>
-      ) : (
-        <div className="divide-y divide-border-primary">
-        {filteredTasks.map((task) => {
-          const activeRun = runningByTaskId.get(task.id)
-          const busy = !!activeRun || pendingRuns.has(task.id)
-          const source = sourceLabel(task)
-          const worker = task.workerId != null ? workerMap.get(task.workerId) : undefined
-          return (
-            <div key={task.id} className="px-3 py-2">
-              <div className="flex items-center justify-between mb-1">
-                <span className="text-sm font-medium text-text-primary truncate">{task.name}</span>
-                {statusBadge(task)}
-              </div>
-              <div className="text-sm text-text-muted mb-1">
-                {triggerLabel(task)}
-                {task.maxRuns != null && (
-                  <span className="ml-1.5 text-text-muted">{task.runCount}/{task.maxRuns} runs</span>
-                )}
-                {source && <span className="ml-1.5 text-text-muted">via {source}</span>}
-                {worker && <span className="ml-1.5 text-purple-400">{worker.name}</span>}
-                {task.sessionContinuity && (
-                  <span className="ml-1.5 px-1 py-0.5 rounded-lg bg-violet-100 text-violet-600">continuous</span>
-                )}
-              </div>
-              <div className="text-sm text-text-muted mb-1.5">
-                Last run: {formatRelativeTime(task.lastRun)}
-              </div>
-              {activeRun && <ProgressBar run={activeRun} />}
-              {activeRun && consoleTaskId === task.id && (
-                <ConsoleView runId={activeRun.id} />
-              )}
-              {semi && (
-                <div className="flex gap-2 items-center">
-                  <button
-                    onClick={() => runNow(task.id)}
-                    disabled={busy}
-                    className="text-sm text-interactive hover:text-interactive-hover disabled:opacity-40 disabled:cursor-not-allowed"
-                  >
-                    {busy ? 'Running' : 'Run Now'}
-                  </button>
-                  {task.status !== 'completed' && (
-                    <button
-                      onClick={() => togglePause(task)}
-                      disabled={busy}
-                      className="text-sm text-status-warning hover:text-status-warning disabled:opacity-40 disabled:cursor-not-allowed"
-                    >
-                      {task.status === 'paused' ? 'Resume' : 'Pause'}
-                    </button>
-                  )}
-                  <button
-                    onClick={() => deleteTask(task.id)}
-                    disabled={busy}
-                    className="text-sm text-status-error hover:text-status-error disabled:opacity-40 disabled:cursor-not-allowed"
-                  >
-                    Delete
-                  </button>
-                  {activeRun && (
-                    <button
-                      onClick={() => setConsoleTaskId(consoleTaskId === task.id ? null : task.id)}
-                      className="text-sm text-text-muted hover:text-text-secondary"
-                    >
-                      {consoleTaskId === task.id ? 'Hide Console' : 'Console'}
-                    </button>
-                  )}
-                  {semi && workers && workers.length > 0 && (
-                    <div className="ml-auto flex items-center gap-2">
-                      <Select
-                        value={String(task.workerId ?? '')}
-                        onChange={(v) => assignWorker(task.id, v ? Number(v) : null)}
-                        variant="inline"
-                        className="text-purple-400"
-                        placeholder="No worker"
-                        options={[
-                          { value: '', label: 'No worker' },
-                          ...workers.map(w => ({ value: String(w.id), label: `${w.name}${w.isDefault ? ' (default)' : ''}` }))
-                        ]}
-                      />
-                    </div>
+                    <span className="ml-1.5 text-text-muted">{task.runCount}/{task.maxRuns} runs</span>
                   )}
                 </div>
-              )}
-            </div>
-          )
-        })}
+                <div className="text-sm text-text-muted mb-1.5">
+                  Last run: {formatRelativeTime(task.lastRun)}
+                  {source && <span className="ml-1.5">via {source}</span>}
+                  {worker && <span className="ml-1.5 text-purple-400">{worker.name}</span>}
+                  {task.sessionContinuity && (
+                    <span className="ml-1.5 px-1 py-0.5 rounded-lg bg-violet-100 text-violet-600">continuous</span>
+                  )}
+                </div>
+                {activeRun && <ProgressBar run={activeRun} />}
+                {activeRun && consoleTaskId === task.id && (
+                  <ConsoleView runId={activeRun.id} />
+                )}
+                {semi && (
+                  <div className="flex flex-wrap gap-2 items-center mt-2">
+                    <button
+                      onClick={() => runNow(task.id)}
+                      disabled={busy}
+                      className="text-xs px-2.5 py-1.5 rounded-lg bg-interactive text-text-invert hover:bg-interactive-hover disabled:opacity-40 disabled:cursor-not-allowed"
+                    >
+                      {busy ? 'Running' : 'Run'}
+                    </button>
+                    {task.status !== 'completed' && (
+                      <button
+                        onClick={() => togglePause(task)}
+                        disabled={busy}
+                        className="text-xs px-2.5 py-1.5 rounded-lg bg-status-warning-bg text-status-warning disabled:opacity-40 disabled:cursor-not-allowed"
+                      >
+                        {task.status === 'paused' ? 'Resume' : 'Pause'}
+                      </button>
+                    )}
+                    <button
+                      onClick={() => deleteTask(task.id)}
+                      disabled={busy}
+                      className="text-xs px-2.5 py-1.5 rounded-lg bg-status-error-bg text-status-error disabled:opacity-40 disabled:cursor-not-allowed"
+                    >
+                      Delete
+                    </button>
+                    {activeRun && (
+                      <button
+                        onClick={() => setConsoleTaskId(consoleTaskId === task.id ? null : task.id)}
+                        className="text-xs px-2.5 py-1.5 rounded-lg border border-border-primary text-text-muted hover:text-text-secondary hover:bg-surface-hover"
+                      >
+                        {consoleTaskId === task.id ? 'Hide Console' : 'Console'}
+                      </button>
+                    )}
+                    {semi && workers && workers.length > 0 && (
+                      <div className="ml-auto min-w-[160px]">
+                        <Select
+                          value={String(task.workerId ?? '')}
+                          onChange={(v) => assignWorker(task.id, v ? Number(v) : null)}
+                          variant="inline"
+                          className="text-purple-400"
+                          placeholder="No worker"
+                          options={[
+                            { value: '', label: 'No worker' },
+                            ...workers.map(w => ({ value: String(w.id), label: `${w.name}${w.isDefault ? ' (default)' : ''}` }))
+                          ]}
+                        />
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+            )
+          })}
         </div>
       )}
       </div>

@@ -119,9 +119,9 @@ export function MemoryPanel({ roomId }: MemoryPanelProps): React.JSX.Element {
             ))}
           </div>
         ) : (
-          <div className="divide-y divide-border-primary">
+          <div className="p-3 space-y-2">
             {entities.map((entity: Entity) => (
-              <div key={entity.id}>
+              <div key={entity.id} className="bg-surface-secondary border border-border-primary rounded-lg overflow-hidden">
                 <div
                   className="flex items-center justify-between px-3 py-2 hover:bg-surface-hover cursor-pointer"
                   onClick={() => toggleExpand(entity.id)}
@@ -135,7 +135,7 @@ export function MemoryPanel({ roomId }: MemoryPanelProps): React.JSX.Element {
                   </div>
                 </div>
                 {expandedId === entity.id && (
-                  <div className="px-3 pb-2 bg-surface-secondary">
+                  <div className="px-3 pb-2 pt-2 border-t border-border-primary bg-surface-secondary">
                     {renderObservations(entity.id)}
                   </div>
                 )}

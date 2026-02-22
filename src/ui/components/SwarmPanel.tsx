@@ -566,14 +566,14 @@ export function SwarmPanel({ rooms, queenRunning, onNavigateToRoom }: SwarmPanel
   return (
     <div ref={containerRef} className="flex flex-col h-full">
       {/* Header */}
-      <div className="flex flex-col md:flex-row md:items-center md:justify-between px-4 py-2.5 border-b border-border-primary shrink-0 gap-1 md:gap-0">
+      <div className="flex items-center flex-wrap gap-2 px-4 py-2.5 border-b border-border-primary shrink-0">
         <div className="flex items-center gap-2">
           <svg width="16" height="16" viewBox="0 0 16 16" className="text-interactive shrink-0">
             <polygon points={hexPoints(8, 8, 7)} fill="none" stroke="currentColor" strokeWidth="1.3" />
           </svg>
-          <span className="text-sm font-semibold text-text-secondary">Swarm</span>
+          <h2 className="text-base font-semibold text-text-primary">Swarm</h2>
         </div>
-        <div className="flex items-center gap-3 flex-wrap">
+        <div className="flex items-center gap-2 flex-wrap">
           <span className="text-xs text-text-muted">{rooms.length} room{rooms.length !== 1 ? 's' : ''}</span>
           <span className="text-xs text-text-muted">{(allWorkers ?? []).filter(w => w.roomId !== null).length} workers</span>
           <span className="text-xs text-text-muted">{Object.values(stationMap ?? {}).flat().length} stations</span>
@@ -591,7 +591,9 @@ export function SwarmPanel({ rooms, queenRunning, onNavigateToRoom }: SwarmPanel
           <button
             onClick={toggleMoney}
             className={`px-2 py-1 text-xs rounded-lg transition-colors ${
-              showMoney ? 'bg-status-success-bg text-status-success hover:opacity-80' : 'bg-surface-tertiary text-text-muted hover:bg-surface-hover'
+              showMoney
+                ? 'bg-interactive text-text-invert hover:bg-interactive-hover'
+                : 'bg-interactive-bg text-interactive hover:bg-interactive hover:text-text-invert'
             }`}
             title={showMoney ? 'Hide financials' : 'Show financials'}
           >$</button>

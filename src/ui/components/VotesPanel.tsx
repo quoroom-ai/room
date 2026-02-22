@@ -136,19 +136,18 @@ export function VotesPanel({ roomId, autonomyMode }: VotesPanelProps): React.JSX
 
   return (
     <div className="flex flex-col h-full">
-      <div className="px-4 py-2 border-b border-border-primary flex items-center justify-between">
-        <div className="flex items-center gap-2">
-          <span className="text-sm text-text-muted">
-            {decisions ? `${decisions.length} decision(s)` : 'Loading...'}
-          </span>
-          {!roomId && (
-            <span className="text-sm text-text-muted">Select a room</span>
-          )}
-        </div>
+      <div className="px-4 py-2 border-b border-border-primary flex items-center gap-2 flex-wrap">
+        <h2 className="text-base font-semibold text-text-primary">Decisions</h2>
+        <span className="text-xs text-text-muted">
+          {decisions ? `${decisions.length} total` : 'Loading...'}
+        </span>
+        {!roomId && (
+          <span className="text-xs text-text-muted">Select a room</span>
+        )}
         {semi && (
           <button
             onClick={() => setShowCreate(!showCreate)}
-            className="text-sm text-interactive hover:text-interactive-hover font-medium"
+            className="text-xs px-2.5 py-1.5 rounded-lg bg-interactive text-text-invert hover:bg-interactive-hover"
           >
             {showCreate ? 'Cancel' : '+ New Proposal'}
           </button>
@@ -235,7 +234,7 @@ export function VotesPanel({ roomId, autonomyMode }: VotesPanelProps): React.JSX
                 <div className="px-3 py-1 text-xs font-medium text-text-muted uppercase tracking-wide bg-surface-secondary border-b border-border-primary">
                   Active Voting
                 </div>
-                <div className="divide-y divide-border-primary">
+                <div className="p-3 space-y-2">
                   {active.map(d => (
                     <DecisionRow
                       key={d.id}
@@ -266,7 +265,7 @@ export function VotesPanel({ roomId, autonomyMode }: VotesPanelProps): React.JSX
                 <div className="px-3 py-1 text-xs font-medium text-text-muted uppercase tracking-wide bg-surface-secondary border-b border-border-primary">
                   History
                 </div>
-                <div className="divide-y divide-border-primary">
+                <div className="p-3 space-y-2">
                   {resolved.map(d => (
                     <DecisionRow
                       key={d.id}
@@ -323,7 +322,7 @@ function DecisionRow({
   const isVoting = d.status === 'voting'
 
   return (
-    <div>
+    <div className="bg-surface-secondary border border-border-primary rounded-lg overflow-hidden">
       <div
         className="flex items-center gap-2 px-3 py-2 hover:bg-surface-hover cursor-pointer"
         onClick={onToggle}
@@ -355,7 +354,7 @@ function DecisionRow({
       </div>
 
       {expanded && (
-        <div className="px-3 pb-3 bg-surface-secondary space-y-2">
+        <div className="px-3 pb-3 pt-2 border-t border-border-primary bg-surface-secondary space-y-2">
           {/* Keeper vote */}
           {isVoting && (
             <div className="flex items-center gap-2 py-1">

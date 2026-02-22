@@ -82,12 +82,13 @@ export function WatchesPanel({ roomId, autonomyMode }: WatchesPanelProps): React
 
   return (
     <div className="flex flex-col h-full">
-      <div className="px-4 py-2 border-b border-border-primary flex items-center justify-between">
-        <span className="text-sm text-text-muted">{watches.length} watch(es)</span>
+      <div className="px-4 py-2 border-b border-border-primary flex items-center gap-2 flex-wrap">
+        <h2 className="text-base font-semibold text-text-primary">Watches</h2>
+        <span className="text-xs text-text-muted">{watches.length} total</span>
         {semi && (
           <button
             onClick={() => setShowCreateForm(!showCreateForm)}
-            className="text-sm text-interactive hover:text-interactive-hover font-medium"
+            className="text-xs px-2.5 py-1.5 rounded-lg bg-interactive text-text-invert hover:bg-interactive-hover"
           >
             {showCreateForm ? 'Cancel' : '+ New Watch'}
           </button>
@@ -137,45 +138,49 @@ export function WatchesPanel({ roomId, autonomyMode }: WatchesPanelProps): React
         </div>
       )}
 
-      <div className="flex-1 overflow-y-auto divide-y divide-border-primary">
+      <div className="flex-1 overflow-y-auto p-3">
         {watches.length === 0 && (
           <div className="p-4 text-center text-sm text-text-muted">
             {semi ? 'No watches yet.' : 'No watches yet. Watches are created by agents.'}
           </div>
         )}
-        {watches.map((watch: Watch) => (
-          <div key={watch.id} className={`px-4 py-2 ${watch.status === 'paused' ? 'opacity-60' : ''}`}>
-            <div className={semi ? 'flex items-center justify-between gap-2' : ''}>
-              <div className={`min-w-0${semi ? ' flex-1' : ''}`}>
-                <div className="text-sm font-medium text-text-primary truncate">
-                  {watch.path}
-                  {watch.status === 'paused' && (
-                    <span className="ml-1.5 text-xs font-medium text-status-warning bg-status-warning-bg px-1 py-0.5 rounded">Paused</span>
+        {watches.length > 0 && (
+          <div className="grid gap-2 md:grid-cols-2">
+            {watches.map((watch: Watch) => (
+              <div key={watch.id} className={`bg-surface-secondary border border-border-primary rounded-lg p-3 ${watch.status === 'paused' ? 'opacity-60' : ''}`}>
+                <div className={semi ? 'flex items-center justify-between gap-2' : ''}>
+                  <div className={`min-w-0${semi ? ' flex-1' : ''}`}>
+                    <div className="text-sm font-medium text-text-primary truncate">
+                      {watch.path}
+                      {watch.status === 'paused' && (
+                        <span className="ml-1.5 text-xs font-medium text-status-warning bg-status-warning-bg px-1 py-0.5 rounded">Paused</span>
+                      )}
+                    </div>
+                    <div className="text-sm text-text-muted">{watch.description ?? 'No description'}</div>
+                  </div>
+                  {semi && (
+                    <div className="flex items-center gap-2 shrink-0">
+                      <button onClick={() => togglePause(watch)} className="text-sm text-status-warning hover:text-yellow-800">
+                        {watch.status === 'paused' ? 'Resume' : 'Pause'}
+                      </button>
+                      <button
+                        onClick={() => deleteWatch(watch.id)}
+                        onBlur={() => setConfirmDeleteId(null)}
+                        className={`text-sm ${confirmDeleteId === watch.id ? 'text-red-600 font-medium' : 'text-status-error hover:text-red-600'}`}
+                      >
+                        {confirmDeleteId === watch.id ? 'Confirm?' : 'Delete'}
+                      </button>
+                    </div>
                   )}
                 </div>
-                <div className="text-sm text-text-muted">{watch.description ?? 'No description'}</div>
-              </div>
-              {semi && (
-                <div className="flex items-center gap-2 shrink-0">
-                  <button onClick={() => togglePause(watch)} className="text-sm text-status-warning hover:text-yellow-800">
-                    {watch.status === 'paused' ? 'Resume' : 'Pause'}
-                  </button>
-                  <button
-                    onClick={() => deleteWatch(watch.id)}
-                    onBlur={() => setConfirmDeleteId(null)}
-                    className={`text-sm ${confirmDeleteId === watch.id ? 'text-red-600 font-medium' : 'text-status-error hover:text-red-600'}`}
-                  >
-                    {confirmDeleteId === watch.id ? 'Confirm?' : 'Delete'}
-                  </button>
+                <div className="mt-1 text-sm text-text-muted">
+                  Triggered {watch.triggerCount} time(s)
+                  {watch.lastTriggered && <span> &middot; last {formatRelativeTime(watch.lastTriggered)}</span>}
                 </div>
-              )}
-            </div>
-            <div className="mt-1 text-sm text-text-muted">
-              Triggered {watch.triggerCount} time(s)
-              {watch.lastTriggered && <span> &middot; last {formatRelativeTime(watch.lastTriggered)}</span>}
-            </div>
+              </div>
+            ))}
           </div>
-        ))}
+        )}
       </div>
     </div>
   )

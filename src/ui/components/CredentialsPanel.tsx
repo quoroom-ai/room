@@ -59,11 +59,11 @@ export function CredentialsPanel({ roomId }: CredentialsPanelProps): React.JSX.E
 
   return (
     <div className="p-4 space-y-4">
-      <div className="flex items-center justify-between">
+      <div className="flex items-center gap-2 flex-wrap">
         <h2 className="text-base font-semibold text-text-primary">Credentials</h2>
         <button
           onClick={() => setShowForm(!showForm)}
-          className="text-xs px-2.5 py-1.5 bg-surface-tertiary rounded-lg hover:bg-surface-tertiary text-text-secondary"
+          className="text-xs px-2.5 py-1.5 bg-interactive text-text-invert rounded-lg hover:bg-interactive-hover"
         >
           {showForm ? 'Cancel' : '+ Add'}
         </button>

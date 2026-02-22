@@ -5,6 +5,7 @@ import {
   getRoomCloudId,
   ensureCloudRoomToken,
   listCloudStations,
+  listCloudStationPayments,
   startCloudStation,
   stopCloudStation,
   deleteCloudStation,
@@ -42,6 +43,21 @@ export function registerStationRoutes(router: Router): void {
     })
     const stations = await listCloudStations(cloudRoomId)
     return { data: stations }
+  })
+
+  router.get('/api/rooms/:roomId/cloud-station-payments', async (ctx) => {
+    const roomId = Number(ctx.params.roomId)
+    const room = queries.getRoom(ctx.db, roomId)
+    if (!room) return { status: 404, error: 'Room not found' }
+    const cloudRoomId = getRoomCloudId(roomId)
+    await ensureCloudRoomToken({
+      roomId: cloudRoomId,
+      name: room.name,
+      goal: room.goal ?? null,
+      visibility: room.visibility,
+    })
+    const payments = await listCloudStationPayments(cloudRoomId)
+    return { data: payments }
   })
 
   router.post('/api/rooms/:roomId/cloud-stations/:id/start', async (ctx) => {
