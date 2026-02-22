@@ -203,5 +203,9 @@ export const DEFAULT_ROOM_CONFIG = {
   keeperWeight: 'dynamic' as const,
   tieBreaker: 'queen' as const,
   autoApprove: ['low_impact'],
-  minCycleGapMs: 1_000
+  minCycleGapMs: 1_000,
+  minVoters: 0,
+  sealedBallot: false,
+  voterHealth: false,
+  voterHealthThreshold: 0.5
 }

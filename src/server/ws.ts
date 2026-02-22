@@ -101,7 +101,9 @@ export function createWsServer(server: http.Server): WebSocketServer {
         continue
       }
       if (state.channels.has(event.channel)) {
-        ws.send(payload)
+        ws.send(payload, (err) => {
+          if (err) { clients.delete(ws); ws.terminate() }
+        })
       }
     }
   })

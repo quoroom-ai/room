@@ -2,7 +2,7 @@ export type Tab = 'swarm' | 'status' | 'chat' | 'memory' | 'workers' | 'tasks' |
 
 export const mainTabs: { id: Tab; label: string; advanced?: boolean }[] = [
   { id: 'status', label: 'Overview' },
-  { id: 'chat', label: 'Chat' },
+  { id: 'chat', label: 'Queen' },
   { id: 'goals', label: 'Goals' },
   { id: 'votes', label: 'Votes' },
   { id: 'messages', label: 'Messages', advanced: true },

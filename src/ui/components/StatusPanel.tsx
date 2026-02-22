@@ -259,7 +259,8 @@ export function StatusPanel({ onNavigate, advancedMode, roomId }: StatusPanelPro
   // Activity timeline
   const allActivity = activity ?? []
   const presentTypes = [...new Set(allActivity.map(a => a.eventType))]
-  const filteredActivity = activeFilters.size === 0
+  const isFiltering = activeFilters.size > 0
+  const filteredActivity = !isFiltering
     ? allActivity
     : allActivity.filter(a => activeFilters.has(a.eventType))
 
@@ -275,24 +276,51 @@ export function StatusPanel({ onNavigate, advancedMode, roomId }: StatusPanelPro
     })
   }
 
+  function clearFilters(): void {
+    setActiveFilters(new Set())
+  }
+
   const activitySection = roomId ? (
     <div className="bg-surface-secondary rounded-lg p-4 shadow-sm flex-1 flex flex-col min-h-0 overflow-x-hidden">
-      {/* Filter chips */}
+      {/* Filter bar */}
       {presentTypes.length > 1 && (
-        <div className="flex flex-wrap gap-2 mb-2 shrink-0">
+        <div className="mb-3 shrink-0 border-b border-border-primary pb-3">
+          <div className="flex items-center justify-between gap-2 mb-2">
+            <div className="text-xs font-semibold uppercase tracking-wide text-text-muted">Filters</div>
+            {isFiltering && (
+              <button
+                onClick={clearFilters}
+                className="text-xs px-2 py-1 rounded-lg border border-border-primary text-text-muted hover:text-text-secondary hover:bg-surface-hover transition-colors"
+              >
+                Clear
+              </button>
+            )}
+          </div>
+          <div className="flex flex-wrap gap-1.5">
+            <button
+              onClick={clearFilters}
+              className={`px-2.5 py-1.5 rounded-lg text-xs font-medium border transition-colors ${
+                !isFiltering
+                  ? 'bg-interactive-bg text-interactive border-interactive/30'
+                  : 'bg-surface-primary text-text-muted border-border-primary hover:bg-surface-hover hover:text-text-secondary'
+              }`}
+            >
+              All
+            </button>
           {presentTypes.map(type => (
             <button
               key={type}
               onClick={() => toggleFilter(type)}
-              className={`px-2.5 py-1.5 rounded-lg text-xs font-medium transition-colors ${
-                activeFilters.size === 0 || activeFilters.has(type)
-                  ? EVENT_TYPE_COLORS[type] ?? 'bg-surface-tertiary text-text-muted'
-                  : 'bg-surface-tertiary text-text-muted'
+              className={`px-2.5 py-1.5 rounded-lg text-xs font-medium border transition-colors ${
+                activeFilters.has(type)
+                  ? `${EVENT_TYPE_COLORS[type] ?? 'bg-surface-tertiary text-text-secondary'} border-transparent`
+                  : 'bg-surface-primary text-text-muted border-border-primary hover:bg-surface-hover hover:text-text-secondary'
               }`}
             >
               {EVENT_TYPE_LABELS[type] ?? type}
             </button>
           ))}
+          </div>
         </div>
       )}
 

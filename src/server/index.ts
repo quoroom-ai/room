@@ -183,6 +183,10 @@ function getCacheControl(filePath: string, ext: string): string {
   if (base === 'sw.js') return 'no-cache, no-store, must-revalidate'
   if (ext === '.html') return 'no-cache, no-store, must-revalidate'
   if (ext === '.webmanifest') return 'public, max-age=3600'
+  if (base === 'social.png' || base.startsWith('social-')) {
+    // Social preview images rotate; force frequent revalidation.
+    return 'no-cache, max-age=0, must-revalidate'
+  }
 
   if (normalized.includes('/assets/') && /-[A-Za-z0-9_-]{8,}\./.test(base)) {
     return 'public, max-age=31536000, immutable'
@@ -304,6 +308,9 @@ export function createApiServer(options: ServerOptions = {}): {
   }
 
   const server = http.createServer(async (req, res) => {
+    // Prevent crash when client disconnects mid-response
+    res.on('error', () => {})
+
     const url = new URL(req.url!, `http://${req.headers.host || 'localhost'}`)
     const pathname = url.pathname
     const origin = req.headers.origin as string | undefined

@@ -174,8 +174,8 @@ export function registerRoomTools(server: McpServer): void {
     'quoroom_configure_room',
     {
       title: 'Configure Room',
-      description: 'Modify a room\'s execution parameters (cycle gap, max turns, concurrent tasks). '
-        + 'Use this to self-regulate when hitting rate limits or to optimize resource usage. '
+      description: 'Modify a room\'s execution and governance parameters. '
+        + 'Use this to self-regulate resource usage or to adjust quorum rules (voting thresholds, sealed ballots, voter health). '
         + 'RESPONSE STYLE: Confirm briefly in 1 sentence. No notes, tips, or implementation details.',
       inputSchema: {
         roomId: z.number().describe('The room ID'),
@@ -184,19 +184,38 @@ export function registerRoomTools(server: McpServer): void {
         queenMaxTurns: z.number().int().min(1).max(50).optional()
           .describe('Maximum agentic turns per queen cycle (1–50)'),
         maxConcurrentTasks: z.number().int().min(1).max(10).optional()
-          .describe('Maximum parallel tasks (1–10)')
+          .describe('Maximum parallel tasks (1–10)'),
+        threshold: z.enum(['majority', 'supermajority', 'unanimous']).optional()
+          .describe('Voting threshold for quorum decisions'),
+        autoApprove: z.array(z.string()).optional()
+          .describe('Decision types to auto-approve without voting (e.g. ["low_impact"])'),
+        keeperWeight: z.enum(['dynamic', 'equal']).optional()
+          .describe('Keeper vote weighting: dynamic (51% in small rooms) or equal'),
+        tieBreaker: z.enum(['queen', 'none']).optional()
+          .describe('Tie-breaking strategy: queen vote decides, or reject on tie'),
+        minVoters: z.number().int().min(0).max(100).optional()
+          .describe('Minimum non-abstain votes required for a decision to pass (0 = no minimum)'),
+        sealedBallot: z.boolean().optional()
+          .describe('When true, individual votes are hidden until the decision resolves'),
+        voterHealth: z.boolean().optional()
+          .describe('Enable voter health tracking — monitors worker participation rates'),
+        voterHealthThreshold: z.number().min(0).max(1).optional()
+          .describe('Participation rate threshold (0.0–1.0) below which workers are flagged as unhealthy')
       }
     },
-    async ({ roomId, queenCycleGapMs, queenMaxTurns, maxConcurrentTasks }) => {
+    async ({ roomId, queenCycleGapMs, queenMaxTurns, maxConcurrentTasks,
+             threshold, autoApprove, keeperWeight, tieBreaker,
+             minVoters, sealedBallot, voterHealth, voterHealthThreshold }) => {
       const db = getMcpDatabase()
       const room = queries.getRoom(db, roomId)
       if (!room) {
         return { content: [{ type: 'text' as const, text: `Room ${roomId} not found.` }], isError: true }
       }
 
-      const updates: Record<string, number> = {}
+      const updates: Record<string, unknown> = {}
       const changes: string[] = []
 
+      // Execution params
       if (queenCycleGapMs !== undefined) {
         updates.queenCycleGapMs = queenCycleGapMs
         changes.push(`cycleGap: ${Math.round(room.queenCycleGapMs / 1000)}s → ${Math.round(queenCycleGapMs / 1000)}s`)
@@ -210,18 +229,54 @@ export function registerRoomTools(server: McpServer): void {
         changes.push(`concurrentTasks: ${room.maxConcurrentTasks} → ${maxConcurrentTasks}`)
       }
 
+      // Governance params (stored in room.config JSON)
+      const configUpdates: Record<string, unknown> = {}
+      if (threshold !== undefined) {
+        configUpdates.threshold = threshold
+        changes.push(`threshold: ${room.config.threshold} → ${threshold}`)
+      }
+      if (autoApprove !== undefined) {
+        configUpdates.autoApprove = autoApprove
+        changes.push(`autoApprove: [${room.config.autoApprove.join(',')}] → [${autoApprove.join(',')}]`)
+      }
+      if (keeperWeight !== undefined) {
+        configUpdates.keeperWeight = keeperWeight
+        changes.push(`keeperWeight: ${room.config.keeperWeight} → ${keeperWeight}`)
+      }
+      if (tieBreaker !== undefined) {
+        configUpdates.tieBreaker = tieBreaker
+        changes.push(`tieBreaker: ${room.config.tieBreaker} → ${tieBreaker}`)
+      }
+      if (minVoters !== undefined) {
+        configUpdates.minVoters = minVoters
+        changes.push(`minVoters: ${room.config.minVoters} → ${minVoters}`)
+      }
+      if (sealedBallot !== undefined) {
+        configUpdates.sealedBallot = sealedBallot
+        changes.push(`sealedBallot: ${room.config.sealedBallot} → ${sealedBallot}`)
+      }
+      if (voterHealth !== undefined) {
+        configUpdates.voterHealth = voterHealth
+        changes.push(`voterHealth: ${room.config.voterHealth} → ${voterHealth}`)
+      }
+      if (voterHealthThreshold !== undefined) {
+        configUpdates.voterHealthThreshold = voterHealthThreshold
+        changes.push(`voterHealthThreshold: ${room.config.voterHealthThreshold} → ${voterHealthThreshold}`)
+      }
+
       if (changes.length === 0) {
         return { content: [{ type: 'text' as const, text: 'No changes specified.' }] }
+      }
+
+      // Merge config updates into existing config
+      if (Object.keys(configUpdates).length > 0) {
+        updates.config = { ...room.config, ...configUpdates }
       }
 
       queries.updateRoom(db, roomId, updates)
 
       queries.logRoomActivity(db, roomId, 'system',
-        `Room config updated: ${changes.join(', ')}`,
-        JSON.stringify({
-          before: { queenCycleGapMs: room.queenCycleGapMs, queenMaxTurns: room.queenMaxTurns, maxConcurrentTasks: room.maxConcurrentTasks },
-          after: updates
-        }))
+        `Room config updated: ${changes.join(', ')}`)
 
       return {
         content: [{

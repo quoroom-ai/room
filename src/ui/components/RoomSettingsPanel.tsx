@@ -777,12 +777,12 @@ export function RoomSettingsPanel({ roomId }: RoomSettingsPanelProps): React.JSX
           ? 'API key path'
           : 'Choose a setup path'
   const recommendationHint = recommendedQueenModel
-    ? 'Subscription detected in this runtime. Subscription models are the fastest setup and usually the most stable for autonomous loops.'
+    ? 'Subscription detected. Most cost-effective and stable option for autonomous loops.'
     : activeQueenAuth?.mode === 'api'
       ? 'API model selected. Add and validate API key below to avoid queen auth failures.'
       : queenModelValue.startsWith('ollama:')
         ? 'Free setup path selected. First run can be slower while Ollama starts and model files are prepared.'
-        : 'No subscription detected yet. Use API key models or free Ollama, or connect Claude/Codex in Status.'
+        : 'No subscription detected yet. Use API key models or free Ollama. Subscriptions auto-connect when available.'
 
   function row(label: string, children: React.ReactNode, description?: string): React.JSX.Element {
     return (
@@ -1346,6 +1346,10 @@ export function RoomSettingsPanel({ roomId }: RoomSettingsPanelProps): React.JSX
           <div>
             <h3 className="text-sm font-semibold text-text-secondary mb-1">Wallet</h3>
             <div className="bg-surface-secondary shadow-sm rounded-lg p-3">
+              <div className="mb-2 rounded-lg border border-border-primary bg-surface-primary px-2.5 py-2 text-xs text-text-muted leading-relaxed">
+                Optional: funding this wallet is not required. The Queen should still find ways to make money without starting capital.
+                If you add funds, she can use them for resources (like stations) and other profit-seeking actions.
+              </div>
               {!wallet ? (
                 <p className="text-sm text-text-muted py-1">Wallet not found for this room.</p>
               ) : (
@@ -1454,6 +1458,51 @@ export function RoomSettingsPanel({ roomId }: RoomSettingsPanelProps): React.JSX
                 </div>
                 <p className="text-xs text-text-muted mt-0.5">Links this room to a referrer's network</p>
               </div>
+            </div>
+          </div>
+
+          {/* Governance */}
+          <div>
+            <h3 className="text-sm font-semibold text-text-secondary mb-1">Governance</h3>
+            <div className="bg-surface-secondary shadow-sm rounded-lg p-3 space-y-2">
+              <p className="text-xs text-text-muted mb-2">Controls how quorum votes are conducted. Agents can also change this via quoroom_configure_room.</p>
+              <div className="grid grid-cols-3 gap-2">
+                {([
+                  { key: 'open', label: 'Open', desc: 'Trust-based, votes visible', match: !room.config.sealedBallot && !room.config.voterHealth && room.config.minVoters === 0 },
+                  { key: 'sealed', label: 'Sealed', desc: 'Votes hidden until resolved', match: room.config.sealedBallot && !room.config.voterHealth && room.config.minVoters === 0 },
+                  { key: 'hardened', label: 'Hardened', desc: 'Sealed + quorum min + health', match: room.config.sealedBallot && room.config.voterHealth && room.config.minVoters >= 2 },
+                ] as const).map(preset => {
+                  const isActive = preset.match
+                  return (
+                    <button
+                      key={preset.key}
+                      onClick={async () => {
+                        const configUpdate = preset.key === 'open'
+                          ? { sealedBallot: false, voterHealth: false, minVoters: 0 }
+                          : preset.key === 'sealed'
+                            ? { sealedBallot: true, voterHealth: false, minVoters: 0 }
+                            : { sealedBallot: true, voterHealth: true, voterHealthThreshold: 0.5, minVoters: 2 }
+                        optimistic(room.id, { config: { ...room.config, ...configUpdate } })
+                        await api.rooms.update(room.id, { config: { ...room.config, ...configUpdate } })
+                        refresh()
+                      }}
+                      className={`px-3 py-2 rounded-lg text-xs font-medium border transition-colors text-left ${
+                        isActive
+                          ? 'border-interactive bg-interactive-bg text-interactive'
+                          : 'border-border-primary bg-surface-primary text-text-secondary hover:bg-surface-hover'
+                      }`}
+                    >
+                      <div className="font-semibold">{preset.label}</div>
+                      <div className="text-xs opacity-70 mt-0.5">{preset.desc}</div>
+                    </button>
+                  )
+                })}
+              </div>
+              {!(!room.config.sealedBallot && !room.config.voterHealth && room.config.minVoters === 0) &&
+               !(room.config.sealedBallot && !room.config.voterHealth && room.config.minVoters === 0) &&
+               !(room.config.sealedBallot && room.config.voterHealth && room.config.minVoters >= 2) && (
+                <div className="text-xs text-text-muted italic">Custom governance settings active</div>
+              )}
             </div>
           </div>
         </div>

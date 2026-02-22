@@ -3,7 +3,9 @@ name: Deploy UI
 on:
   push:
     branches: [main]
-    paths: [src/ui/**]
+    paths:
+      - src/ui/**
+      - '!src/ui/public/social-rotation-state.json'
     tags: [v*]
 
 permissions:

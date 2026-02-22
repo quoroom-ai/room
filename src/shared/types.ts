@@ -30,6 +30,8 @@ export interface Worker {
   taskCount: number
   roomId: number | null
   agentState: AgentState
+  votesCast: number
+  votesMissed: number
   createdAt: string
   updatedAt: string
 }
@@ -181,6 +183,10 @@ export interface RoomConfig {
   tieBreaker: 'queen' | 'none'
   autoApprove: string[]
   minCycleGapMs: number
+  minVoters: number
+  sealedBallot: boolean
+  voterHealth: boolean
+  voterHealthThreshold: number
 }
 
 export interface Room {
@@ -238,6 +244,8 @@ export interface QuorumDecision {
   threshold: string
   timeoutAt: string | null
   keeperVote: VoteValue | null
+  minVoters: number
+  sealed: boolean
   createdAt: string
   resolvedAt: string | null
 }

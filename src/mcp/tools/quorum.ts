@@ -2,7 +2,7 @@ import { z } from 'zod'
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
 import { getMcpDatabase } from '../db'
 import * as queries from '../../shared/db-queries'
-import { propose, vote } from '../../shared/quorum'
+import { propose, vote, getEligibleVoters } from '../../shared/quorum'
 import type { DecisionType, VoteValue } from '../../shared/types'
 
 export function registerQuorumTools(server: McpServer): void {
@@ -30,7 +30,11 @@ export function registerQuorumTools(server: McpServer): void {
         if (decision.status === 'approved') {
           return { content: [{ type: 'text' as const, text: `Proposal auto-approved: "${proposal}"` }] }
         }
-        return { content: [{ type: 'text' as const, text: `Proposal #${decision.id} created: "${proposal}" (voting open, ${decision.threshold} threshold)` }] }
+        const parts = [`Proposal #${decision.id} created: "${proposal}" (voting open, ${decision.threshold} threshold`]
+        if (decision.minVoters > 0) parts.push(`, min ${decision.minVoters} votes required`)
+        if (decision.sealed) parts.push(', sealed ballot')
+        parts.push(')')
+        return { content: [{ type: 'text' as const, text: parts.join('') }] }
       } catch (e) {
         return { content: [{ type: 'text' as const, text: (e as Error).message }], isError: true }
       }
@@ -58,6 +62,9 @@ export function registerQuorumTools(server: McpServer): void {
         if (decision && decision.status !== 'voting') {
           return { content: [{ type: 'text' as const, text: `Vote cast. Decision resolved: ${decision.status} (${decision.result})` }] }
         }
+        if (decision?.sealed) {
+          return { content: [{ type: 'text' as const, text: `Vote cast on decision #${decisionId}. Ballot is sealed until voting closes.` }] }
+        }
         return { content: [{ type: 'text' as const, text: `Vote "${voteValue}" cast on decision #${decisionId}.` }] }
       } catch (e) {
         return { content: [{ type: 'text' as const, text: (e as Error).message }], isError: true }
@@ -83,7 +90,8 @@ export function registerQuorumTools(server: McpServer): void {
       }
       const list = decisions.map(d => ({
         id: d.id, proposal: d.proposal, decisionType: d.decisionType,
-        status: d.status, result: d.result, threshold: d.threshold, createdAt: d.createdAt
+        status: d.status, result: d.result, threshold: d.threshold,
+        minVoters: d.minVoters, sealed: d.sealed, createdAt: d.createdAt
       }))
       return { content: [{ type: 'text' as const, text: JSON.stringify(list, null, 2) }] }
     }
@@ -93,7 +101,7 @@ export function registerQuorumTools(server: McpServer): void {
     'quoroom_decision_detail',
     {
       title: 'Decision Detail',
-      description: 'Get a decision with all its votes.',
+      description: 'Get a decision with all its votes. If the ballot is sealed, individual votes are hidden until the decision resolves.',
       inputSchema: {
         id: z.number().describe('The decision ID')
       }
@@ -105,11 +113,52 @@ export function registerQuorumTools(server: McpServer): void {
         return { content: [{ type: 'text' as const, text: `Decision ${id} not found.` }], isError: true }
       }
       const votes = queries.getVotes(db, id)
-      const detail = {
+      const isSealed = decision.sealed && decision.status === 'voting'
+
+      const detail: Record<string, unknown> = {
         ...decision,
-        votes: votes.map(v => ({ workerId: v.workerId, vote: v.vote, reasoning: v.reasoning, createdAt: v.createdAt }))
+        votes: isSealed
+          ? votes.map(v => ({ workerId: v.workerId, vote: 'sealed', reasoning: null, createdAt: v.createdAt }))
+          : votes.map(v => ({ workerId: v.workerId, vote: v.vote, reasoning: v.reasoning, createdAt: v.createdAt }))
+      }
+      if (decision.minVoters > 0) {
+        detail.quorumProgress = isSealed
+          ? `${votes.length} votes cast (sealed)`
+          : `${votes.filter(v => v.vote !== 'abstain').length} of ${decision.minVoters} minimum non-abstain votes`
       }
       return { content: [{ type: 'text' as const, text: JSON.stringify(detail, null, 2) }] }
+    }
+  )
+
+  server.registerTool(
+    'quoroom_voter_health',
+    {
+      title: 'Voter Health',
+      description: 'Get voting participation stats for all workers in a room. Workers below the health threshold are flagged.',
+      inputSchema: {
+        roomId: z.number().describe('The room ID')
+      }
+    },
+    async ({ roomId }) => {
+      const db = getMcpDatabase()
+      const room = queries.getRoom(db, roomId)
+      if (!room) {
+        return { content: [{ type: 'text' as const, text: `Room ${roomId} not found.` }], isError: true }
+      }
+      const { voterHealth, voterHealthThreshold } = room.config
+      const health = queries.getVoterHealth(db, roomId, voterHealthThreshold)
+      const eligible = getEligibleVoters(db, roomId)
+      const eligibleIds = new Set(eligible.map(w => w.id))
+
+      const output = {
+        voterHealthEnabled: voterHealth,
+        threshold: voterHealthThreshold,
+        workers: health.map(h => ({
+          ...h,
+          isEligibleForQuorum: eligibleIds.has(h.workerId)
+        }))
+      }
+      return { content: [{ type: 'text' as const, text: JSON.stringify(output, null, 2) }] }
     }
   )
 }

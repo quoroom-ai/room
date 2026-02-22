@@ -1,0 +1,64 @@
+name: Rotate Social Image
+
+on:
+  schedule:
+    # Runs daily at 09:00 UTC.
+    - cron: '0 9 * * *'
+  workflow_dispatch:
+    inputs:
+      variants_dir:
+        description: 'Variants folder'
+        required: false
+        default: 'src/ui/public/social-variants-upgraded'
+      mode:
+        description: 'Rotation mode'
+        required: false
+        default: 'next'
+        type: choice
+        options:
+          - next
+          - random
+          - current
+
+permissions:
+  contents: write
+
+jobs:
+  rotate:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Rotate social image
+        run: |
+          DIR="${{ github.event.inputs.variants_dir }}"
+          MODE="${{ github.event.inputs.mode }}"
+          if [ -z "$DIR" ]; then DIR="src/ui/public/social-variants-upgraded"; fi
+          if [ -z "$MODE" ]; then MODE="next"; fi
+          npm run social:rotate -- --dir "$DIR" --mode "$MODE"
+
+      - name: Commit and push
+        run: |
+          if git diff --quiet -- src/ui/public/social.png src/ui/public/social-rotation-state.json; then
+            echo "No changes to commit."
+            exit 0
+          fi
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add src/ui/public/social.png src/ui/public/social-rotation-state.json
+          git commit -m "chore: rotate social image [skip docker]"
+          git push

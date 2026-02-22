@@ -25,6 +25,7 @@ const VOTE_COLORS: Record<string, string> = {
   yes: 'bg-status-success-bg text-status-success border-green-200',
   no: 'bg-status-error-bg text-status-error border-red-200',
   abstain: 'bg-surface-tertiary text-text-muted border-border-primary',
+  sealed: 'bg-brand-100 text-brand-700 border-brand-200',
 }
 
 function formatTimeout(timeoutAt: string | null): string {
@@ -129,6 +130,7 @@ export function VotesPanel({ roomId, autonomyMode }: VotesPanelProps): React.JSX
     if (typeFilter && d.decisionType !== typeFilter) return false
     return true
   })
+  const isFiltering = statusFilter !== null || typeFilter !== null
   const active = filtered.filter(d => d.status === 'voting')
   const resolved = filtered.filter(d => d.status !== 'voting')
   const presentStatuses = [...new Set(allDecisions.map(d => d.status))]
@@ -155,40 +157,76 @@ export function VotesPanel({ roomId, autonomyMode }: VotesPanelProps): React.JSX
       </div>
 
       {allDecisions.length > 0 && (presentStatuses.length > 1 || presentTypes.length > 1) && (
-        <div className="px-4 py-2 flex flex-wrap gap-2 border-b border-border-primary">
-          {presentStatuses.length > 1 && presentStatuses.map(s => (
-            <button
-              key={s}
-              onClick={() => setStatusFilter(statusFilter === s ? null : s)}
-              className={`px-2.5 py-1 rounded-lg text-xs font-medium transition-colors ${
-                statusFilter === s
-                  ? STATUS_COLORS[s] ?? 'bg-surface-tertiary text-text-muted'
-                  : statusFilter === null
-                    ? STATUS_COLORS[s] ?? 'bg-surface-tertiary text-text-muted'
-                    : 'bg-surface-tertiary text-text-muted'
-              }`}
-            >
-              {s}
-            </button>
-          ))}
-          {presentStatuses.length > 1 && presentTypes.length > 1 && (
-            <span className="text-text-muted text-xs leading-6">|</span>
+        <div className="px-4 py-2 border-b border-border-primary">
+          <div className="flex items-center justify-between gap-2 mb-2">
+            <div className="text-xs font-semibold uppercase tracking-wide text-text-muted">Filters</div>
+            {isFiltering && (
+              <button
+                onClick={() => { setStatusFilter(null); setTypeFilter(null) }}
+                className="text-xs px-2 py-1 rounded-lg border border-border-primary text-text-muted hover:text-text-secondary hover:bg-surface-hover transition-colors"
+              >
+                Clear
+              </button>
+            )}
+          </div>
+
+          {presentStatuses.length > 1 && (
+            <div className="flex flex-wrap items-center gap-1.5 mb-1.5">
+              <span className="text-[11px] font-semibold uppercase tracking-wide text-text-muted mr-0.5">Status</span>
+              <button
+                onClick={() => setStatusFilter(null)}
+                className={`px-2.5 py-1 rounded-lg text-xs font-medium border transition-colors ${
+                  statusFilter === null
+                    ? 'bg-interactive-bg text-interactive border-interactive/30'
+                    : 'bg-surface-primary text-text-muted border-border-primary hover:bg-surface-hover hover:text-text-secondary'
+                }`}
+              >
+                All
+              </button>
+              {presentStatuses.map(s => (
+                <button
+                  key={s}
+                  onClick={() => setStatusFilter(statusFilter === s ? null : s)}
+                  className={`px-2.5 py-1 rounded-lg text-xs font-medium border transition-colors ${
+                    statusFilter === s
+                      ? `${STATUS_COLORS[s] ?? 'bg-surface-tertiary text-text-muted'} border-transparent`
+                      : 'bg-surface-primary text-text-muted border-border-primary hover:bg-surface-hover hover:text-text-secondary'
+                  }`}
+                >
+                  {s}
+                </button>
+              ))}
+            </div>
           )}
-          {presentTypes.length > 1 && presentTypes.map(t => (
-            <button
-              key={t}
-              onClick={() => setTypeFilter(typeFilter === t ? null : t)}
-              className={`px-2.5 py-1 rounded-lg text-xs font-medium transition-colors ${
-                typeFilter === t
-                  ? 'bg-interactive-bg text-interactive'
-                  : typeFilter === null
-                    ? 'bg-surface-tertiary text-text-secondary'
-                    : 'bg-surface-tertiary text-text-muted'
-              }`}
-            >
-              {TYPE_LABELS[t] ?? t}
-            </button>
-          ))}
+
+          {presentTypes.length > 1 && (
+            <div className="flex flex-wrap items-center gap-1.5">
+              <span className="text-[11px] font-semibold uppercase tracking-wide text-text-muted mr-0.5">Type</span>
+              <button
+                onClick={() => setTypeFilter(null)}
+                className={`px-2.5 py-1 rounded-lg text-xs font-medium border transition-colors ${
+                  typeFilter === null
+                    ? 'bg-interactive-bg text-interactive border-interactive/30'
+                    : 'bg-surface-primary text-text-muted border-border-primary hover:bg-surface-hover hover:text-text-secondary'
+                }`}
+              >
+                All
+              </button>
+              {presentTypes.map(t => (
+                <button
+                  key={t}
+                  onClick={() => setTypeFilter(typeFilter === t ? null : t)}
+                  className={`px-2.5 py-1 rounded-lg text-xs font-medium border transition-colors ${
+                    typeFilter === t
+                      ? 'bg-interactive-bg text-interactive border-transparent'
+                      : 'bg-surface-primary text-text-muted border-border-primary hover:bg-surface-hover hover:text-text-secondary'
+                  }`}
+                >
+                  {TYPE_LABELS[t] ?? t}
+                </button>
+              ))}
+            </div>
+          )}
         </div>
       )}
 
@@ -336,11 +374,21 @@ function DecisionRow({
             <span className="px-1.5 py-0.5 rounded-lg text-xs bg-surface-tertiary text-text-muted shrink-0">
               {TYPE_LABELS[d.decisionType] ?? d.decisionType}
             </span>
+            {d.sealed && (
+              <span className="px-1.5 py-0.5 rounded-lg text-xs bg-brand-100 text-brand-700 shrink-0">
+                sealed
+              </span>
+            )}
           </div>
           <div className="flex items-center gap-2 mt-0.5">
             <span className="text-xs text-text-muted">{formatRelativeTime(d.createdAt)}</span>
             {isVoting && d.timeoutAt && (
               <span className="text-xs text-orange-500">{formatTimeout(d.timeoutAt)}</span>
+            )}
+            {isVoting && d.minVoters > 0 && (
+              <span className="text-xs text-brand-700">
+                quorum: {votes ? votes.filter(v => v.vote !== 'abstain').length : '?'}/{d.minVoters}
+              </span>
             )}
             <span className="text-xs text-text-muted">
               by {d.proposerId && workerMap.has(d.proposerId) ? workerMap.get(d.proposerId)!.name : 'Keeper'}
@@ -462,33 +510,43 @@ function DecisionRow({
           {(votes && votes.length > 0 || d.keeperVote) && (
             <div className="space-y-2 pt-1 border-t border-border-primary">
               <div className="text-xs font-medium text-text-muted">Votes</div>
-              {d.keeperVote && (
-                <div className="flex items-center gap-2 text-sm">
-                  <span className="text-text-secondary shrink-0 font-medium">Keeper</span>
-                  <span className={`px-1.5 py-0.5 rounded-lg text-xs font-medium border ${VOTE_COLORS[d.keeperVote] ?? 'bg-surface-tertiary text-text-muted'}`}>
-                    {d.keeperVote}
-                  </span>
+              {d.sealed && isVoting ? (
+                <div className="text-xs text-text-muted italic">
+                  {votes?.length ?? 0} vote{votes?.length !== 1 ? 's' : ''} cast — sealed until voting closes
                 </div>
-              )}
-              {(votes ?? []).map(v => (
-                <div key={v.id} className="flex items-center gap-2 text-sm">
-                  <span className="text-text-secondary shrink-0">
-                    {workerMap.get(v.workerId)?.name ?? `Worker #${v.workerId}`}
-                  </span>
-                  <span className={`px-1.5 py-0.5 rounded-lg text-xs font-medium border ${VOTE_COLORS[v.vote] ?? 'bg-surface-tertiary text-text-muted'}`}>
-                    {v.vote}
-                  </span>
-                  {v.reasoning && (
-                    <span className="text-text-muted truncate">{v.reasoning}</span>
+              ) : (
+                <>
+                  {d.keeperVote && (
+                    <div className="flex items-center gap-2 text-sm">
+                      <span className="text-text-secondary shrink-0 font-medium">Keeper</span>
+                      <span className={`px-1.5 py-0.5 rounded-lg text-xs font-medium border ${VOTE_COLORS[d.keeperVote] ?? 'bg-surface-tertiary text-text-muted'}`}>
+                        {d.keeperVote}
+                      </span>
+                    </div>
                   )}
-                </div>
-              ))}
+                  {(votes ?? []).map(v => (
+                    <div key={v.id} className="flex items-center gap-2 text-sm">
+                      <span className="text-text-secondary shrink-0">
+                        {workerMap.get(v.workerId)?.name ?? `Worker #${v.workerId}`}
+                      </span>
+                      <span className={`px-1.5 py-0.5 rounded-lg text-xs font-medium border ${VOTE_COLORS[v.vote] ?? 'bg-surface-tertiary text-text-muted'}`}>
+                        {v.vote}
+                      </span>
+                      {v.reasoning && (
+                        <span className="text-text-muted truncate">{v.reasoning}</span>
+                      )}
+                    </div>
+                  ))}
+                </>
+              )}
             </div>
           )}
 
           {/* Info */}
-          <div className="flex gap-3 text-xs text-text-muted pt-1 border-t border-border-primary">
+          <div className="flex gap-3 text-xs text-text-muted pt-1 border-t border-border-primary flex-wrap">
             <span>Threshold: {d.threshold}</span>
+            {d.minVoters > 0 && <span>Min voters: {d.minVoters}</span>}
+            {d.sealed && <span>Sealed ballot</span>}
             {d.resolvedAt && <span>Resolved: {formatRelativeTime(d.resolvedAt)}</span>}
           </div>
         </div>

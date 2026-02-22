@@ -23,7 +23,7 @@ interface SetupPath {
   summary: string
   bestFor: string
   tradeoff: string
-  needs: string
+  setup: string
   outcome: string
 }
 
@@ -46,8 +46,8 @@ const PATHS: SetupPath[] = [
     model: 'claude',
     summary: 'Best default if Claude subscription is available.',
     bestFor: 'High quality strategy + execution with minimal setup work.',
-    tradeoff: 'Paid subscription and rate limits depend on your plan tier.',
-    needs: 'Claude CLI installed and connected in this runtime.',
+    tradeoff: 'Most cost-effective option. Rate limits depend on your plan tier.',
+    setup: 'Claude CLI is auto-detected and connected by Quoroom.',
     outcome: 'Fastest stable setup for most keepers.',
   },
   {
@@ -56,8 +56,8 @@ const PATHS: SetupPath[] = [
     model: 'codex',
     summary: 'Best if you already run ChatGPT/Codex subscription.',
     bestFor: 'Code-heavy loops and tool-driven execution.',
-    tradeoff: 'Paid subscription and quota behavior depends on plan tier.',
-    needs: 'Codex CLI installed and connected in this runtime.',
+    tradeoff: 'Cost-effective with a subscription. Quota depends on your plan tier.',
+    setup: 'Codex CLI is auto-detected and connected by Quoroom.',
     outcome: 'Strong coding performance without API key management.',
   },
   {
@@ -66,8 +66,8 @@ const PATHS: SetupPath[] = [
     model: 'openai:gpt-4o-mini',
     summary: 'Use direct API key billing and explicit cost control.',
     bestFor: 'Teams who need deterministic API-key based billing.',
-    tradeoff: 'You manage API keys and usage limits manually.',
-    needs: 'Valid OpenAI API key in room credentials or environment.',
+    tradeoff: 'Pay-per-token \u2014 more expensive than subscription. You manage API keys and limits.',
+    setup: 'Add your OpenAI API key — Quoroom validates it automatically.',
     outcome: 'Predictable API flow with full key ownership.',
   },
   {
@@ -76,8 +76,8 @@ const PATHS: SetupPath[] = [
     model: 'anthropic:claude-3-5-sonnet-latest',
     summary: 'Direct Anthropic API path using key-based auth.',
     bestFor: 'Users standardizing on Anthropic API accounts.',
-    tradeoff: 'You manage keys, limits, and failures directly.',
-    needs: 'Valid Anthropic API key in room credentials or environment.',
+    tradeoff: 'Pay-per-token \u2014 more expensive than subscription. You manage keys and limits.',
+    setup: 'Add your Anthropic API key — Quoroom validates it automatically.',
     outcome: 'Strong Claude-family behavior without subscription login.',
   },
   {
@@ -87,7 +87,7 @@ const PATHS: SetupPath[] = [
     summary: 'No subscription and no API keys required.',
     bestFor: 'Zero-cost local model path and experimentation.',
     tradeoff: 'Lower quality than top hosted models; uses local/server CPU/GPU.',
-    needs: 'Ollama runtime + model install (auto-started by Quoroom).',
+    setup: 'Fully automatic — Quoroom installs Ollama and downloads the model.',
     outcome: 'Fully self-hosted setup path with no provider account.',
   },
 ]
@@ -161,14 +161,14 @@ export function RoomSetupGuideModal({
     () => pickRecommendedPath(currentModel, claude, codex, queenAuth),
     [currentModel, claude, codex, queenAuth]
   )
-  const [selectedPathId, setSelectedPathId] = useState<SetupPathId>(recommendedId)
+  const [selectedPathId, setSelectedPathId] = useState<SetupPathId | null>(null)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  const selectedPath = PATHS.find((path) => path.id === selectedPathId) ?? PATHS[0]
+  const selectedPath = selectedPathId ? PATHS.find((path) => path.id === selectedPathId) ?? PATHS[0] : null
   const isLast = step === 2
 
   async function handleApplyAndClose(): Promise<void> {
-    if (busy) return
+    if (busy || !selectedPath) return
     setBusy(true)
     setError(null)
     try {
@@ -221,7 +221,7 @@ export function RoomSetupGuideModal({
         {step === 0 && (
           <div className="space-y-3">
             <p className="text-sm text-text-secondary">
-              Pick setup path. Subscription paths are recommended when already connected.
+              Pick a setup path. Subscriptions are the most cost-effective and connect automatically.
             </p>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
               {PATHS.map((path) => {
@@ -238,20 +238,25 @@ export function RoomSetupGuideModal({
                         : 'border-border-primary bg-surface-secondary hover:bg-surface-hover'
                     }`}
                   >
-                    <div className="flex items-center gap-2 mb-1">
+                    <div className="flex items-center gap-2 flex-wrap mb-1">
                       <span className="text-sm font-medium text-text-primary">{path.title}</span>
                       {isRecommended && (
                         <span className="text-[11px] px-1.5 py-0.5 rounded bg-status-success-bg text-status-success">
                           Recommended
                         </span>
                       )}
+                      {status?.ready && (
+                        <span className="text-[11px] px-1.5 py-0.5 rounded bg-status-success-bg text-status-success">
+                          {status.label === 'connected' ? 'Connected' : status.label === 'available' ? 'Available' : 'Ready'}
+                        </span>
+                      )}
+                      {!status?.ready && status?.label === 'installed, not connected' && (
+                        <span className="text-[11px] px-1.5 py-0.5 rounded bg-surface-tertiary text-text-muted">
+                          Installed
+                        </span>
+                      )}
                     </div>
                     <p className="text-xs text-text-muted">{path.summary}</p>
-                    {status && (
-                      <p className={`text-[11px] mt-1 ${status.ready ? 'text-status-success' : 'text-text-muted'}`}>
-                        {status.label}
-                      </p>
-                    )}
                   </button>
                 )
               })}
@@ -259,48 +264,59 @@ export function RoomSetupGuideModal({
           </div>
         )}
 
-        {step === 1 && (
+        {step === 1 && selectedPath && (
           <div className="space-y-2 text-sm">
-            <h3 className="text-base font-semibold text-text-primary">{selectedPath.title}</h3>
+            <div className="flex items-center gap-2">
+              <h3 className="text-base font-semibold text-text-primary">{selectedPath.title}</h3>
+              {(() => {
+                const status = getPathStatus(selectedPath.id, claude, codex, queenAuth)
+                if (!status?.ready) return null
+                return (
+                  <span className="text-[11px] px-1.5 py-0.5 rounded bg-status-success-bg text-status-success">
+                    {status.label === 'connected' ? 'Connected' : status.label === 'available' ? 'Available' : 'Ready'}
+                  </span>
+                )
+              })()}
+            </div>
             <div className="rounded-lg bg-surface-secondary border border-border-primary p-3 space-y-1.5">
               <p><span className="text-text-secondary font-medium">Best for:</span> <span className="text-text-muted">{selectedPath.bestFor}</span></p>
-              <p><span className="text-text-secondary font-medium">Needs:</span> <span className="text-text-muted">{selectedPath.needs}</span></p>
+              <p><span className="text-text-secondary font-medium">Setup:</span> <span className="text-text-muted">{selectedPath.setup}</span></p>
               <p><span className="text-text-secondary font-medium">Tradeoff:</span> <span className="text-text-muted">{selectedPath.tradeoff}</span></p>
               <p><span className="text-text-secondary font-medium">Outcome:</span> <span className="text-text-muted">{selectedPath.outcome}</span></p>
             </div>
             {(() => {
               const status = getPathStatus(selectedPath.id, claude, codex, queenAuth)
-              if (!status) return null
+              if (!status || status.ready) return null
               return (
-                <p className={`text-xs ${status.ready ? 'text-status-success' : 'text-text-muted'}`}>
+                <p className="text-xs text-text-muted">
                   Status: {status.label}.
-                  {!status.ready && selectedPath.id === 'claude_sub' && ' Connect via Room Settings \u2192 Queen \u2192 Status \u2192 Connect.'}
-                  {!status.ready && selectedPath.id === 'codex_sub' && ' Connect via Room Settings \u2192 Queen \u2192 Status \u2192 Connect.'}
-                  {!status.ready && (selectedPath.id === 'openai_api' || selectedPath.id === 'anthropic_api') && ' Add API key in Room Settings \u2192 Queen \u2192 API key.'}
-                  {!status.ready && selectedPath.id === 'ollama_free' && ' Ollama will be auto-installed on first run.'}
+                  {selectedPath.id === 'claude_sub' && ' Connect via Room Settings \u2192 Queen \u2192 Status \u2192 Connect.'}
+                  {selectedPath.id === 'codex_sub' && ' Connect via Room Settings \u2192 Queen \u2192 Status \u2192 Connect.'}
+                  {(selectedPath.id === 'openai_api' || selectedPath.id === 'anthropic_api') && ' Add API key in Room Settings \u2192 Queen \u2192 API key.'}
+                  {selectedPath.id === 'ollama_free' && ' Ollama will be auto-installed on first run.'}
                 </p>
               )
             })()}
           </div>
         )}
 
-        {step === 2 && (
+        {step === 2 && selectedPath && (
           <div className="space-y-2 text-sm">
             <h3 className="text-base font-semibold text-text-primary">Apply Setup</h3>
             <p className="text-text-muted">
               Quoroom will switch queen model to <span className="font-mono text-text-secondary">{selectedPath.model}</span>.
             </p>
-            {(selectedPath.id === 'openai_api' || selectedPath.id === 'anthropic_api') && (
+            {(selectedPath.id === 'openai_api' || selectedPath.id === 'anthropic_api') && !getPathStatus(selectedPath.id, claude, codex, queenAuth)?.ready && (
               <p className="text-xs text-status-warning">
                 Next step: add API key in Room Settings {'\u2192'} Queen {'\u2192'} API key.
               </p>
             )}
-            {(selectedPath.id === 'claude_sub' || selectedPath.id === 'codex_sub') && (
+            {(selectedPath.id === 'claude_sub' || selectedPath.id === 'codex_sub') && !getPathStatus(selectedPath.id, claude, codex, queenAuth)?.ready && (
               <p className="text-xs text-status-warning">
-                Next step: if not connected yet, use Room Settings {'\u2192'} Queen {'\u2192'} Status {'\u2192'} Connect.
+                Next step: connect via Room Settings {'\u2192'} Queen {'\u2192'} Status {'\u2192'} Connect.
               </p>
             )}
-            {selectedPath.id === 'ollama_free' && (
+            {selectedPath.id === 'ollama_free' && !getPathStatus(selectedPath.id, claude, codex, queenAuth)?.ready && (
               <p className="text-xs text-status-warning">
                 First run may take time while Ollama starts and model is installed.
               </p>
@@ -322,7 +338,7 @@ export function RoomSetupGuideModal({
           {!isLast && (
             <button
               onClick={() => setStep(step + 1)}
-              disabled={busy}
+              disabled={busy || !selectedPathId}
               className="px-4 py-2 text-sm rounded-lg bg-interactive text-text-invert hover:bg-interactive-hover disabled:opacity-50"
             >
               Next

@@ -11,30 +11,6 @@ type StatusFilter = 'all' | 'active' | 'paused' | 'completed'
 // Module-level persistence: survives component unmounts during tab switches
 let persistedFilter: StatusFilter = 'all'
 
-function FilterPill({
-  label,
-  active,
-  onClick,
-  colorClass
-}: {
-  label: string
-  active: boolean
-  onClick: () => void
-  colorClass?: string
-}): React.JSX.Element {
-  const base = 'px-2.5 py-1.5 rounded-lg text-sm cursor-pointer transition-colors'
-  const activeStyle = colorClass ?? 'bg-surface-invert text-text-invert'
-  const inactiveStyle = 'bg-surface-tertiary text-text-muted hover:bg-surface-hover'
-  return (
-    <button
-      onClick={onClick}
-      className={`${base} ${active ? activeStyle : inactiveStyle}`}
-    >
-      {label}
-    </button>
-  )
-}
-
 function statusBadge(task: Task): React.JSX.Element {
   const colors: Record<string, string> = {
     active: 'bg-status-success-bg text-status-success',
@@ -509,6 +485,7 @@ export function TasksPanel({ roomId, autonomyMode }: { roomId?: number | null; a
     paused: tasks.filter((t) => t.status === 'paused').length,
     completed: tasks.filter((t) => t.status === 'completed').length
   }
+  const isFiltering = filter !== 'all'
   const filteredTasks = filter === 'all' ? tasks : tasks.filter(t => t.status === filter)
 
   return (
@@ -535,30 +512,58 @@ export function TasksPanel({ roomId, autonomyMode }: { roomId?: number | null; a
       )}
 
       <div className="px-3 py-2 border-b border-border-primary">
-        <div className="flex items-center gap-2 flex-wrap">
-          <FilterPill
-            label={`All (${taskCounts.all})`}
-            active={filter === 'all'}
+        <div className="flex items-center justify-between gap-2 mb-2">
+          <div className="text-xs font-semibold uppercase tracking-wide text-text-muted">Filters</div>
+          {isFiltering && (
+            <button
+              onClick={() => updateFilter('all')}
+              className="text-xs px-2 py-1 rounded-lg border border-border-primary text-text-muted hover:text-text-secondary hover:bg-surface-hover transition-colors"
+            >
+              Clear
+            </button>
+          )}
+        </div>
+        <div className="flex items-center gap-1.5 flex-wrap">
+          <button
             onClick={() => updateFilter('all')}
-          />
-          <FilterPill
-            label={`Active (${taskCounts.active})`}
-            active={filter === 'active'}
+            className={`px-2.5 py-1.5 rounded-lg text-xs font-medium border transition-colors ${
+              filter === 'all'
+                ? 'bg-interactive-bg text-interactive border-interactive/30'
+                : 'bg-surface-primary text-text-muted border-border-primary hover:bg-surface-hover hover:text-text-secondary'
+            }`}
+          >
+            All ({taskCounts.all})
+          </button>
+          <button
             onClick={() => updateFilter('active')}
-            colorClass="bg-status-success-bg text-status-success"
-          />
-          <FilterPill
-            label={`Paused (${taskCounts.paused})`}
-            active={filter === 'paused'}
+            className={`px-2.5 py-1.5 rounded-lg text-xs font-medium border transition-colors ${
+              filter === 'active'
+                ? 'bg-status-success-bg text-status-success border-transparent'
+                : 'bg-surface-primary text-text-muted border-border-primary hover:bg-surface-hover hover:text-text-secondary'
+            }`}
+          >
+            Active ({taskCounts.active})
+          </button>
+          <button
             onClick={() => updateFilter('paused')}
-            colorClass="bg-status-warning-bg text-status-warning"
-          />
-          <FilterPill
-            label={`Done (${taskCounts.completed})`}
-            active={filter === 'completed'}
+            className={`px-2.5 py-1.5 rounded-lg text-xs font-medium border transition-colors ${
+              filter === 'paused'
+                ? 'bg-status-warning-bg text-status-warning border-transparent'
+                : 'bg-surface-primary text-text-muted border-border-primary hover:bg-surface-hover hover:text-text-secondary'
+            }`}
+          >
+            Paused ({taskCounts.paused})
+          </button>
+          <button
             onClick={() => updateFilter('completed')}
-            colorClass="bg-interactive-bg text-interactive"
-          />
+            className={`px-2.5 py-1.5 rounded-lg text-xs font-medium border transition-colors ${
+              filter === 'completed'
+                ? 'bg-interactive-bg text-interactive border-transparent'
+                : 'bg-surface-primary text-text-muted border-border-primary hover:bg-surface-hover hover:text-text-secondary'
+            }`}
+          >
+            Done ({taskCounts.completed})
+          </button>
         </div>
       </div>
 

@@ -30,7 +30,7 @@ export function probeProviderInstalled(provider: ProviderName): { installed: boo
 
 export function probeProviderConnected(provider: ProviderName): boolean | null {
   const attempts = provider === 'codex'
-    ? [['auth', 'status'], ['login', '--status']]
+    ? [['login', 'status'], ['auth', 'status']]
     : [['auth', 'status'], ['login', 'status']]
   for (const args of attempts) {
     const out = safeExec(provider, args)

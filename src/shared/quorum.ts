@@ -13,7 +13,7 @@ export function propose(db: Database.Database, options: ProposeOptions): QuorumD
   const room = queries.getRoom(db, options.roomId)
   if (!room) throw new Error(`Room ${options.roomId} not found`)
 
-  const { threshold, timeoutMinutes, autoApprove } = room.config
+  const { threshold, timeoutMinutes, autoApprove, minVoters, sealedBallot } = room.config
 
   // Auto-approve if decision type is in the autoApprove list
   if (autoApprove.includes(options.decisionType)) {
@@ -32,7 +32,7 @@ export function propose(db: Database.Database, options: ProposeOptions): QuorumD
 
   const decision = queries.createDecision(
     db, options.roomId, options.proposerId, options.proposal,
-    options.decisionType, threshold, timeoutAt
+    options.decisionType, threshold, timeoutAt, minVoters, sealedBallot
   )
 
   queries.logRoomActivity(db, options.roomId, 'decision',
@@ -52,6 +52,9 @@ export function vote(
   }
 
   const qv = queries.castVote(db, decisionId, workerId, voteValue, reasoning)
+
+  // Track participation for voter health
+  queries.incrementVotesCast(db, workerId)
 
   // Auto-tally when all workers have voted (keeper vote is optional)
   const voters = getRoomVoters(db, decision.roomId)
@@ -93,6 +96,21 @@ export function tally(db: Database.Database, decisionId: number): DecisionStatus
   const room = queries.getRoom(db, decision.roomId)
   const votes = queries.getVotes(db, decisionId)
   const voters = getRoomVoters(db, decision.roomId)
+
+  // Quorum minimum check: reject if not enough non-abstain votes
+  // Count both worker votes and keeper vote toward the minimum
+  if (decision.minVoters > 0) {
+    let nonAbstainVotes = votes.filter(v => v.vote !== 'abstain').length
+    if (decision.keeperVote && decision.keeperVote !== 'abstain') nonAbstainVotes++
+    if (nonAbstainVotes < decision.minVoters) {
+      const result = `Quorum not met: ${nonAbstainVotes} of ${decision.minVoters} minimum non-abstain votes`
+      queries.resolveDecision(db, decisionId, 'rejected', result)
+      queries.logRoomActivity(db, decision.roomId, 'decision',
+        `Decision rejected (quorum): ${decision.proposal} (${result})`)
+      creditMissedVotes(db, votes, voters, room)
+      return 'rejected'
+    }
+  }
 
   // Graduated autonomy: keeper gets extra weight in small rooms
   // Members = workers + keeper. Stage 1: keeper + queen (workers <= 1) → keeper 51%
@@ -160,7 +178,26 @@ export function tally(db: Database.Database, decisionId: number): DecisionStatus
   queries.logRoomActivity(db, decision.roomId, 'decision',
     `Decision ${status}: ${decision.proposal} (${result})`)
 
+  creditMissedVotes(db, votes, voters, room)
+
   return status
+}
+
+/** Track missed votes for workers who didn't participate (only when voterHealth is enabled) */
+function creditMissedVotes(
+  db: Database.Database,
+  votes: QuorumVote[],
+  voters: Worker[],
+  room: { config: { voterHealth: boolean } } | null
+): void {
+  if (!room?.config.voterHealth) return
+
+  const votedWorkerIds = new Set(votes.map(v => v.workerId))
+  for (const voter of voters) {
+    if (!votedWorkerIds.has(voter.id)) {
+      queries.incrementVotesMissed(db, voter.id)
+    }
+  }
 }
 
 export function checkExpiredDecisions(db: Database.Database): number {
@@ -173,4 +210,16 @@ export function checkExpiredDecisions(db: Database.Database): number {
 
 export function getRoomVoters(db: Database.Database, roomId: number): Worker[] {
   return queries.listRoomWorkers(db, roomId)
+}
+
+/** Get voters above the health threshold (for display/MCP tool only, not for auto-tally) */
+export function getEligibleVoters(db: Database.Database, roomId: number): Worker[] {
+  const room = queries.getRoom(db, roomId)
+  if (!room?.config.voterHealth) {
+    return getRoomVoters(db, roomId)
+  }
+  const threshold = room.config.voterHealthThreshold
+  const health = queries.getVoterHealth(db, roomId, threshold)
+  const healthyIds = new Set(health.filter(h => h.isHealthy).map(h => h.workerId))
+  return getRoomVoters(db, roomId).filter(w => healthyIds.has(w.id))
 }

@@ -2,97 +2,7 @@ import { useState } from 'react'
 import { usePolling } from '../hooks/usePolling'
 import { api } from '../lib/client'
 import type { Worker } from '@shared/types'
-
-const WORKER_TEMPLATES = [
-  {
-    name: 'Scout',
-    role: 'Researcher',
-    description: 'Market intelligence and opportunity scouting for the collective',
-    systemPrompt:
-      'You are a researcher in an autonomous agent collective. Your job is to find opportunities the room can monetize.\n\n'
-      + '## Values\n'
-      + '- REVENUE potential over intellectual interest. Every finding must connect to money.\n'
-      + '- PRIMARY sources over secondhand. Official docs, APIs, pricing pages, SEC filings — not blog summaries.\n'
-      + '- SPEED over perfection. A fast 80% answer lets the room move. A slow 100% answer wastes cycles.\n'
-      + '- CONTRARIAN signals are gold. If everyone is doing X, find the gap next to X.\n\n'
-      + '## How you operate\n'
-      + '- Every research output answers: "What can the room build/sell/exploit from this?"\n'
-      + '- Quantify the opportunity. "Large market" is useless — "$2B TAM, 12% CAGR" is useful.\n'
-      + '- Cross-reference claims. If only one source says it, flag the uncertainty.\n'
-      + '- When proposing to the quorum, lead with the revenue case, not the technology.\n'
-      + '- Include source links for every claim. No links = no credibility.\n\n'
-      + '## Anti-patterns\n'
-      + '- Don\'t produce book reports. Raw summaries without a "so what?" are waste.\n'
-      + '- Don\'t hedge everything. Commit to a recommendation. The quorum can overrule you.\n'
-      + '- Don\'t research in isolation. Share partial findings early so other agents can build on them.'
-  },
-  {
-    name: 'Forge',
-    role: 'Coder',
-    description: 'Builds products, deploys services, ships code to stations',
-    systemPrompt:
-      'You are a coder in an autonomous agent collective. You build what the room decides to ship.\n\n'
-      + '## Values\n'
-      + '- SHIPPING over polishing. A deployed MVP that earns $1 beats a perfect prototype that earns $0.\n'
-      + '- SIMPLICITY over architecture. Use the least code that solves the problem. Refactor when revenue justifies it.\n'
-      + '- SECURITY is non-negotiable. You handle wallets and user data. No shortcuts on auth, encryption, or input validation.\n'
-      + '- COST-AWARENESS always. Every station-hour, every API call, every dependency has a price.\n\n'
-      + '## How you operate\n'
-      + '- Build for deployment from the start. If it can\'t run on a station, it\'s not done.\n'
-      + '- Propose technical plans to the quorum before spending cycles on big builds.\n'
-      + '- Log what you deploy, where it runs, and what it costs. The analyst needs this data.\n'
-      + '- When blocked, escalate to the queen with a specific question — not a status update.\n'
-      + '- Write tests for revenue-critical paths. Skip tests for throwaway experiments.\n\n'
-      + '## Anti-patterns\n'
-      + '- Don\'t gold-plate. If the room voted to ship a landing page, don\'t build a design system.\n'
-      + '- Don\'t work in silence. Push code and report progress so the room can course-correct.\n'
-      + '- Don\'t pick technologies for fun. Pick what ships fastest and costs least.'
-  },
-  {
-    name: 'Blaze',
-    role: 'Marketer',
-    description: 'Growth, outreach, and getting products in front of paying customers',
-    systemPrompt:
-      'You are a marketer in an autonomous agent collective. Your job is to turn what the room builds into revenue.\n\n'
-      + '## Values\n'
-      + '- CONVERSION over vanity metrics. 10 paying customers beat 10,000 followers.\n'
-      + '- SPEED over brand. Ship the campaign, measure results, iterate. Brand comes later.\n'
-      + '- CHANNELS that compound. SEO, content, communities — assets that keep working after you stop.\n'
-      + '- HONESTY always. Never misrepresent what the product does. Trust is the room\'s most valuable asset.\n\n'
-      + '## How you operate\n'
-      + '- Every campaign has a measurable goal: signups, purchases, or revenue. Define it upfront.\n'
-      + '- Test small before scaling. $5 on three channels beats $50 on one guess.\n'
-      + '- Report results with numbers: spend, impressions, clicks, conversions, revenue. The analyst tracks ROI.\n'
-      + '- Coordinate with the coder on landing pages, payment flows, and tracking.\n'
-      + '- Propose major spend to the quorum. Don\'t blow the wallet on untested channels.\n\n'
-      + '## Anti-patterns\n'
-      + '- Don\'t create content for content\'s sake. Every piece must drive toward a conversion.\n'
-      + '- Don\'t spam. One thoughtful community post beats 50 copy-paste blasts.\n'
-      + '- Don\'t hide bad results. Failed experiments teach the room what to avoid.'
-  },
-  {
-    name: 'Ledger',
-    role: 'Analyst',
-    description: 'Tracks revenue, costs, ROI, and financial health of the room',
-    systemPrompt:
-      'You are a financial analyst in an autonomous agent collective. You track every dollar in and out.\n\n'
-      + '## Values\n'
-      + '- ACCURACY over speed. Wrong numbers cause wrong decisions. Double-check the math.\n'
-      + '- TRANSPARENCY over narrative. Show the real numbers, even when they\'re bad.\n'
-      + '- ROI over revenue. $100 earned at $90 cost is worse than $50 earned at $5 cost.\n'
-      + '- TRENDS over snapshots. One data point is noise. Three is a pattern.\n\n'
-      + '## How you operate\n'
-      + '- Monitor the wallet. Track income, expenses, and runway. Alert the room when funds are low.\n'
-      + '- Score every initiative by ROI. Propose killing projects that burn money without returns.\n'
-      + '- Produce regular financial summaries: revenue, costs, margin, runway, top performers.\n'
-      + '- When the quorum votes on spending, provide the financial context — cost, expected return, risk.\n'
-      + '- Flag anomalies: unexpected charges, revenue drops, cost spikes.\n\n'
-      + '## Anti-patterns\n'
-      + '- Don\'t sugarcoat losses. The room needs truth to make good decisions.\n'
-      + '- Don\'t drown agents in spreadsheets. Lead with the 3 numbers that matter most.\n'
-      + '- Don\'t wait to be asked. Proactively report when something looks off financially.'
-  }
-]
+import { WORKER_TEMPLATES, type WorkerTemplatePreset } from '@shared/worker-templates'
 
 interface WorkersPanelProps {
   roomId?: number | null
@@ -173,7 +83,7 @@ export function WorkersPanel({ roomId, autonomyMode }: WorkersPanelProps): React
     refresh()
   }
 
-  function useTemplate(t: (typeof WORKER_TEMPLATES)[number]): void {
+  function useTemplate(t: WorkerTemplatePreset): void {
     setCreateName(t.name)
     setCreateRole(t.role)
     setCreateDesc(t.description)
@@ -203,7 +113,7 @@ export function WorkersPanel({ roomId, autonomyMode }: WorkersPanelProps): React
           <input type="text" placeholder="Name (e.g. John, Ada)" value={createName} onChange={(e) => setCreateName(e.target.value)} className="w-full px-2.5 py-1.5 text-sm border border-border-primary rounded-lg focus:outline-none focus:border-text-muted bg-surface-primary text-text-primary placeholder:text-text-muted" />
           <input type="text" placeholder="Role (optional, e.g. Chief of Staff)" value={createRole} onChange={(e) => setCreateRole(e.target.value)} className="w-full px-2.5 py-1.5 text-sm border border-border-primary rounded-lg focus:outline-none focus:border-text-muted bg-surface-primary text-text-primary placeholder:text-text-muted" />
           <input type="text" placeholder="Description (optional)" value={createDesc} onChange={(e) => setCreateDesc(e.target.value)} className="w-full px-2.5 py-1.5 text-sm border border-border-primary rounded-lg focus:outline-none focus:border-text-muted bg-surface-primary text-text-primary placeholder:text-text-muted" />
-          <textarea placeholder="System prompt — defines personality, capabilities, constraints..." value={createPrompt} onChange={(e) => setCreatePrompt(e.target.value)} rows={6} className="w-full px-2.5 py-1.5 text-sm border border-border-primary rounded-lg focus:outline-none focus:border-text-muted bg-surface-primary text-text-primary placeholder:text-text-muted font-mono resize-y" />
+          <textarea placeholder="System prompt — defines personality, capabilities, constraints..." value={createPrompt} onChange={(e) => setCreatePrompt(e.target.value)} rows={12} className="w-full px-2.5 py-1.5 text-sm border border-border-primary rounded-lg focus:outline-none focus:border-text-muted bg-surface-primary text-text-primary placeholder:text-text-muted font-mono resize-y" />
           <button onClick={handleCreate} disabled={!createName.trim() || !createPrompt.trim()} className="text-sm bg-interactive text-text-invert px-4 py-2 rounded-lg hover:bg-interactive-hover disabled:opacity-50 disabled:cursor-not-allowed">
             Create
           </button>
@@ -217,7 +127,7 @@ export function WorkersPanel({ roomId, autonomyMode }: WorkersPanelProps): React
           </div>
         )}
         {workers && workers.length > 0 && (
-          <div className="grid gap-2 p-3 md:grid-cols-2">
+          <div className="grid gap-2 p-3 md:grid-cols-4">
             {workers.map((worker: Worker) => (
               <div key={worker.id} className="bg-surface-secondary rounded-lg border border-border-primary overflow-hidden">
                 <div
@@ -245,7 +155,7 @@ export function WorkersPanel({ roomId, autonomyMode }: WorkersPanelProps): React
                         <input type="text" value={editName} onChange={(e) => setEditName(e.target.value)} className="w-full px-2.5 py-1.5 text-sm border border-border-primary rounded-lg focus:outline-none focus:border-text-muted bg-surface-primary text-text-primary placeholder:text-text-muted" placeholder="Name" />
                         <input type="text" value={editRole} onChange={(e) => setEditRole(e.target.value)} className="w-full px-2.5 py-1.5 text-sm border border-border-primary rounded-lg focus:outline-none focus:border-text-muted bg-surface-primary text-text-primary placeholder:text-text-muted" placeholder="Role (optional)" />
                         <input type="text" value={editDesc} onChange={(e) => setEditDesc(e.target.value)} className="w-full px-2.5 py-1.5 text-sm border border-border-primary rounded-lg focus:outline-none focus:border-text-muted bg-surface-primary text-text-primary placeholder:text-text-muted" placeholder="Description" />
-                        <textarea value={editPrompt} onChange={(e) => setEditPrompt(e.target.value)} rows={6} className="w-full px-2.5 py-1.5 text-sm border border-border-primary rounded-lg focus:outline-none focus:border-text-muted bg-surface-primary text-text-primary placeholder:text-text-muted font-mono resize-y" placeholder="System prompt" />
+                        <textarea value={editPrompt} onChange={(e) => setEditPrompt(e.target.value)} rows={12} className="w-full px-2.5 py-1.5 text-sm border border-border-primary rounded-lg focus:outline-none focus:border-text-muted bg-surface-primary text-text-primary placeholder:text-text-muted font-mono resize-y" placeholder="System prompt" />
                         <div className="flex gap-2">
                           <button onClick={() => handleSave(worker.id)} className="text-sm bg-interactive text-text-invert px-4 py-2 rounded-lg hover:bg-interactive-hover">Save</button>
                           {!worker.isDefault && (
@@ -295,7 +205,7 @@ export function WorkersPanel({ roomId, autonomyMode }: WorkersPanelProps): React
         {semi && (
           <div className="p-4 space-y-2">
             <div className="text-sm text-text-muted font-medium">Templates</div>
-            <div className="grid gap-2 md:grid-cols-2">
+            <div className="grid gap-2 md:grid-cols-4">
               {WORKER_TEMPLATES.map((t) => (
                 <button
                   key={t.name}

@@ -95,6 +95,7 @@ test('setup popup recommends subscription when provider is connected', async ({ 
   const claudeCard = page.locator('button').filter({ hasText: 'Claude Subscription' }).first()
   await expect(claudeCard).toContainText('Recommended')
 
+  await claudeCard.click()
   await page.getByRole('button', { name: 'Next' }).click()
   await page.getByRole('button', { name: 'Next' }).click()
   await expect(page.getByText(/switch queen model to/i)).toContainText('claude')

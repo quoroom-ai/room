@@ -230,6 +230,8 @@ function mapWorkerRow(row: Record<string, unknown>): Worker {
     taskCount: (row.task_count as number) ?? 0,
     roomId: (row.room_id as number | null) ?? null,
     agentState: ((row.agent_state as string) ?? 'idle') as Worker['agentState'],
+    votesCast: (row.votes_cast as number) ?? 0,
+    votesMissed: (row.votes_missed as number) ?? 0,
     createdAt: row.created_at as string,
     updatedAt: row.updated_at as string
   }
@@ -1149,6 +1151,8 @@ function mapDecisionRow(row: Record<string, unknown>): QuorumDecision {
     threshold: row.threshold as string,
     timeoutAt: (row.timeout_at as string | null) ?? null,
     keeperVote: (row.keeper_vote as VoteValue | null) ?? null,
+    minVoters: (row.min_voters as number) ?? 0,
+    sealed: ((row.sealed as number) ?? 0) === 1,
     createdAt: row.created_at as string,
     resolvedAt: (row.resolved_at as string | null) ?? null
   }
@@ -1156,11 +1160,12 @@ function mapDecisionRow(row: Record<string, unknown>): QuorumDecision {
 
 export function createDecision(
   db: Database.Database, roomId: number, proposerId: number | null,
-  proposal: string, decisionType: DecisionType, threshold: string = 'majority', timeoutAt?: string
+  proposal: string, decisionType: DecisionType, threshold: string = 'majority',
+  timeoutAt?: string, minVoters: number = 0, sealed: boolean = false
 ): QuorumDecision {
   const result = db
-    .prepare('INSERT INTO quorum_decisions (room_id, proposer_id, proposal, decision_type, threshold, timeout_at) VALUES (?, ?, ?, ?, ?, ?)')
-    .run(roomId, proposerId, proposal, decisionType, threshold, timeoutAt ?? null)
+    .prepare('INSERT INTO quorum_decisions (room_id, proposer_id, proposal, decision_type, threshold, timeout_at, min_voters, sealed) VALUES (?, ?, ?, ?, ?, ?, ?, ?)')
+    .run(roomId, proposerId, proposal, decisionType, threshold, timeoutAt ?? null, minVoters, sealed ? 1 : 0)
   return getDecision(db, result.lastInsertRowid as number)!
 }
 
@@ -1218,6 +1223,43 @@ export function castVote(
 export function getVotes(db: Database.Database, decisionId: number): QuorumVote[] {
   const rows = db.prepare('SELECT * FROM quorum_votes WHERE decision_id = ? ORDER BY created_at ASC').all(decisionId)
   return (rows as Record<string, unknown>[]).map(mapVoteRow)
+}
+
+// ─── Voter Health ───────────────────────────────────────────
+
+export function incrementVotesCast(db: Database.Database, workerId: number): void {
+  db.prepare('UPDATE workers SET votes_cast = votes_cast + 1 WHERE id = ?').run(workerId)
+}
+
+export function incrementVotesMissed(db: Database.Database, workerId: number): void {
+  db.prepare('UPDATE workers SET votes_missed = votes_missed + 1 WHERE id = ?').run(workerId)
+}
+
+export interface VoterHealthRecord {
+  workerId: number
+  workerName: string
+  votesCast: number
+  votesMissed: number
+  totalDecisions: number
+  participationRate: number
+  isHealthy: boolean
+}
+
+export function getVoterHealth(db: Database.Database, roomId: number, threshold: number = 0.5): VoterHealthRecord[] {
+  const workers = listRoomWorkers(db, roomId)
+  return workers.map(w => {
+    const total = w.votesCast + w.votesMissed
+    const rate = total === 0 ? 1.0 : w.votesCast / total
+    return {
+      workerId: w.id,
+      workerName: w.name,
+      votesCast: w.votesCast,
+      votesMissed: w.votesMissed,
+      totalDecisions: total,
+      participationRate: rate,
+      isHealthy: rate >= threshold
+    }
+  })
 }
 
 // ─── Goals ──────────────────────────────────────────────────

@@ -45,7 +45,12 @@
     "test:e2e:setup:headed": "npm run build && npx playwright test e2e/setup-flow.test.ts --headed --project=chromium",
     "test:e2e:providers": "npm run build && npx playwright test e2e/provider-flows.test.ts",
     "rebuild:native:node": "node -e \"try{require('better-sqlite3')(':memory:').close()}catch{process.exit(1)}\" || npx --yes node-gyp rebuild --directory=node_modules/better-sqlite3",
-    "prepublishOnly": "npm run build:mcp"
+    "prepublishOnly": "npm run build:mcp",
+    "social:rotate": "node scripts/rotate-social-image.js",
+    "social:rotate:dry": "node scripts/rotate-social-image.js --dry-run",
+    "social:test": "node scripts/test-social-rotation.js",
+    "social:cron:install": "bash scripts/install-social-rotation-cron.sh",
+    "social:cron:show": "crontab -l | grep 'quoroom-social-rotate' || true"
   },
   "dependencies": {
     "@huggingface/transformers": "^3.4.1",

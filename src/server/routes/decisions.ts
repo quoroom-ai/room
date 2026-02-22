@@ -23,7 +23,9 @@ export function registerDecisionRoutes(router: Router): void {
       body.proposal,
       body.decisionType as DecisionType,
       body.threshold as string | undefined,
-      body.timeoutAt as string | undefined)
+      body.timeoutAt as string | undefined,
+      typeof body.minVoters === 'number' ? body.minVoters : 0,
+      body.sealed === true)
     eventBus.emit(`room:${roomId}`, 'decision:created', decision)
     return { status: 201, data: decision }
   })
@@ -93,7 +95,24 @@ export function registerDecisionRoutes(router: Router): void {
   })
 
   router.get('/api/decisions/:id/votes', (ctx) => {
-    const votes = queries.getVotes(ctx.db, Number(ctx.params.id))
+    const id = Number(ctx.params.id)
+    const decision = queries.getDecision(ctx.db, id)
+    const votes = queries.getVotes(ctx.db, id)
+
+    // Sealed ballot: redact vote values while decision is still open
+    if (decision?.sealed && decision.status === 'voting') {
+      const redacted = votes.map(v => ({ ...v, vote: 'sealed' as const, reasoning: null }))
+      return { data: redacted }
+    }
     return { data: votes }
+  })
+
+  router.get('/api/rooms/:roomId/voter-health', (ctx) => {
+    const roomId = Number(ctx.params.roomId)
+    const room = queries.getRoom(ctx.db, roomId)
+    if (!room) return { status: 404, error: 'Room not found' }
+
+    const health = queries.getVoterHealth(ctx.db, roomId, room.config.voterHealthThreshold)
+    return { data: health }
   })
 }

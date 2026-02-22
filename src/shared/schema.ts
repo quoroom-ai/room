@@ -29,6 +29,8 @@ CREATE TABLE IF NOT EXISTS workers (
     task_count INTEGER NOT NULL DEFAULT 0,
     room_id INTEGER,
     agent_state TEXT NOT NULL DEFAULT 'idle',
+    votes_cast INTEGER NOT NULL DEFAULT 0,
+    votes_missed INTEGER NOT NULL DEFAULT 0,
     created_at DATETIME DEFAULT (datetime('now','localtime')),
     updated_at DATETIME DEFAULT (datetime('now','localtime'))
 );
@@ -236,6 +238,8 @@ CREATE TABLE IF NOT EXISTS quorum_decisions (
     threshold TEXT NOT NULL DEFAULT 'majority',
     timeout_at DATETIME,
     keeper_vote TEXT,
+    min_voters INTEGER NOT NULL DEFAULT 0,
+    sealed INTEGER NOT NULL DEFAULT 0,
     created_at DATETIME DEFAULT (datetime('now','localtime')),
     resolved_at DATETIME
 );
