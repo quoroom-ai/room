@@ -1,6 +1,6 @@
 {
   "name": "quoroom",
-  "version": "0.1.10",
+  "version": "0.1.11",
   "description": "Autonomous AI agent collective engine — Queen, Workers, Quorum",
   "main": "./out/mcp/server.js",
   "bin": {
@@ -43,6 +43,7 @@
     "test:e2e:ui": "npm run build && npx playwright test e2e/ui.test.ts",
     "test:e2e:setup": "npm run build && npx playwright test e2e/setup-flow.test.ts",
     "test:e2e:setup:headed": "npm run build && npx playwright test e2e/setup-flow.test.ts --headed --project=chromium",
+    "test:e2e:providers": "npm run build && npx playwright test e2e/provider-flows.test.ts",
     "rebuild:native:node": "node -e \"try{require('better-sqlite3')(':memory:').close()}catch{process.exit(1)}\" || npx --yes node-gyp rebuild --directory=node_modules/better-sqlite3",
     "prepublishOnly": "npm run build:mcp"
   },
