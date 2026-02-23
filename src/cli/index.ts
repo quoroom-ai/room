@@ -35,6 +35,12 @@ switch (command) {
     break
   }
 
+  case 'update': {
+    const { runUpdate } = require('./update')
+    runUpdate()
+    break
+  }
+
   case 'uninstall': {
     const { runUninstall } = require('./uninstall')
     runUninstall()
@@ -50,6 +56,7 @@ Usage:
   quoroom mcp           Start MCP server (stdio transport)
   quoroom serve [port]  Start HTTP/WebSocket API server (default: 3700)
   quoroom chat          Chat with the queen (interactive REPL)
+  quoroom update        Check for and apply updates
   quoroom uninstall     Remove Quoroom and all data
   quoroom help          Show this help message
 

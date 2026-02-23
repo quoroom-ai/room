@@ -144,6 +144,7 @@ function App(): React.JSX.Element {
   useNotifications()
   const installPrompt = useInstallPrompt()
   const [installDismissed, setInstallDismissed] = useState(() => storageGet('quoroom_install_dismissed') === 'true')
+
   const [showKeepInDockTip, setShowKeepInDockTip] = useState(false)
   const [showWalkthrough, setShowWalkthrough] = useState(() => !storageGet('quoroom_walkthrough_seen'))
   const [showContactPrompt, setShowContactPrompt] = useState(false)
@@ -156,6 +157,7 @@ function App(): React.JSX.Element {
     latestVersion: string
     releaseUrl: string
     assets: { mac: string | null; windows: string | null; linux: string | null }
+    readyUpdateVersion: string | null
   } | null>(null)
   const [devDbBanner, setDevDbBanner] = useState<{ dbPath: string; dataDir?: string } | null>(null)
   const [updateDismissed, setUpdateDismissed] = useState(false)
@@ -371,6 +373,7 @@ function App(): React.JSX.Element {
           latestVersion: ui.latestVersion,
           releaseUrl: ui.releaseUrl,
           assets: ui.assets,
+          readyUpdateVersion: (status as Record<string, unknown>).readyUpdateVersion as string | null ?? null,
         })
       }).catch(() => {})
     }
@@ -799,6 +802,18 @@ function App(): React.JSX.Element {
 
       {/* Main content */}
       <div className="flex-1 flex flex-col min-w-0">
+        <div className="flex items-center gap-3 px-4 py-2 bg-brand-50 border-b border-brand-200 shrink-0">
+          <span className="text-sm text-brand-700 flex-1">
+            You're early! We're building Quoroom every day and releasing often. If something isn't working, let us know.
+          </span>
+          <button
+            onClick={() => window.open('mailto:hello@email.quoroom.ai?subject=Bug report&body=Hi, I found an issue in Quoroom:')}
+            className="text-sm px-4 py-1.5 bg-interactive text-text-invert rounded-lg hover:bg-interactive-hover shrink-0 font-medium transition-colors"
+          >
+            Email Developer
+          </button>
+        </div>
+
         {devDbBanner && (
           <div className="px-4 py-2 bg-status-warning-bg border-b border-amber-200 shrink-0">
             <div className="text-[11px] font-semibold uppercase tracking-wide text-status-warning">Dev Mode · Isolated DB</div>
@@ -929,6 +944,7 @@ function App(): React.JSX.Element {
           version={serverUpdateInfo.latestVersion}
           currentVersion={serverUpdateInfo.currentVersion}
           releaseUrl={serverUpdateInfo.releaseUrl}
+          updateReady={!!serverUpdateInfo.readyUpdateVersion}
           onDownload={async () => {
             const token = await getToken()
             const a = document.createElement('a')
@@ -938,6 +954,28 @@ function App(): React.JSX.Element {
             document.body.removeChild(a)
             storageSet('quoroom_update_dismissed', serverUpdateInfo.latestVersion)
             setUpdateDismissed(true)
+          }}
+          onRestart={async () => {
+            try {
+              await fetch(`${API_BASE}/api/server/update-restart`, { method: 'POST' })
+              // Wait for server to restart, then reload the page
+              setTimeout(() => {
+                const poll = setInterval(async () => {
+                  try {
+                    const res = await fetch(`${API_BASE}/api/status`)
+                    if (res.ok) {
+                      clearInterval(poll)
+                      window.location.reload()
+                    }
+                  } catch { /* server still restarting */ }
+                }, 1000)
+                // Give up after 30 seconds
+                setTimeout(() => clearInterval(poll), 30_000)
+              }, 2000)
+            } catch {
+              // Fallback: just reload after a delay
+              setTimeout(() => window.location.reload(), 3000)
+            }
           }}
           onSkip={() => {
             storageSet('quoroom_update_dismissed', serverUpdateInfo.latestVersion)

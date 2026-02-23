@@ -107,7 +107,7 @@ jobs:
           cp node-universal staging/quoroom/runtime/node
           chmod +x staging/quoroom/runtime/node
 
-          # Shell wrapper — prefer bundled runtime, fallback to system node on runtime crash
+          # Shell wrapper — checks for auto-updates, prefer bundled runtime, fallback to system node
           cat > staging/quoroom/bin/quoroom << 'WRAPPER'
           #!/bin/sh
           SOURCE="$0"
@@ -121,7 +121,35 @@ jobs:
           done
           DIR="$(cd -P "$(dirname "$SOURCE")" && pwd)"
           RUNTIME="$DIR/../runtime/node"
-          CLI="$DIR/../lib/cli.js"
+          BUNDLED_CLI="$DIR/../lib/cli.js"
+          BUNDLED_MODULES="$DIR/../lib/node_modules"
+          CLI="$BUNDLED_CLI"
+
+          # Check for user-space auto-update (~/.quoroom/app/)
+          USER_APP="$HOME/.quoroom/app"
+          USER_CLI="$USER_APP/lib/cli.js"
+          BOOT_MARKER="$USER_APP/.booting"
+          CRASH_COUNT_FILE="$USER_APP/.crash_count"
+
+          if [ -f "$USER_CLI" ] && [ -f "$USER_APP/version.json" ]; then
+            # Check for crash rollback: if boot marker exists, previous boot crashed
+            if [ -f "$BOOT_MARKER" ]; then
+              COUNT=$(cat "$CRASH_COUNT_FILE" 2>/dev/null || echo "0")
+              COUNT=$((COUNT + 1))
+              echo "$COUNT" > "$CRASH_COUNT_FILE"
+              if [ "$COUNT" -ge 3 ]; then
+                echo "Auto-update crashed 3 times, rolling back to bundled version" >&2
+                rm -rf "$USER_APP"
+              fi
+            fi
+
+            # Re-check after potential rollback
+            if [ -f "$USER_CLI" ]; then
+              CLI="$USER_CLI"
+              export NODE_PATH="$BUNDLED_MODULES"
+            fi
+          fi
+
           STATUS=1
 
           if [ -x "$RUNTIME" ]; then
@@ -154,6 +182,42 @@ jobs:
           cp -r out/ui/* staging/quoroom/ui/
 
           tar czf "quoroom-v${VERSION}-darwin-universal.tar.gz" -C staging quoroom
+
+      - name: Create lightweight update bundle
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          mkdir -p update-staging/lib update-staging/ui
+
+          # Copy JS bundles (platform-independent)
+          cp out/mcp/cli.js update-staging/lib/
+          cp out/mcp/api-server.js update-staging/lib/
+          cp out/mcp/server.js update-staging/lib/
+
+          # Copy UI assets
+          cp -r out/ui/* update-staging/ui/
+
+          # Generate SHA-256 checksums for verification
+          CHECKSUMS="{}"
+          for f in lib/cli.js lib/api-server.js lib/server.js; do
+            HASH=$(shasum -a 256 "update-staging/$f" | cut -d' ' -f1)
+            CHECKSUMS=$(echo "$CHECKSUMS" | python3 -c "
+          import sys, json
+          d = json.load(sys.stdin)
+          d['$f'] = '$HASH'
+          json.dump(d, sys.stdout)")
+          done
+
+          # Create version.json with checksums
+          cat > update-staging/version.json << EOF
+          {
+            "version": "${VERSION}",
+            "minEngineVersion": "0.1.0",
+            "createdAt": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
+            "checksums": ${CHECKSUMS}
+          }
+          EOF
+
+          tar czf "quoroom-update-v${VERSION}.tar.gz" -C update-staging .
 
       - name: Import signing certificates
         id: certs
@@ -325,6 +389,7 @@ jobs:
           path: |
             quoroom-v*-darwin-universal.tar.gz
             quoroom-v*-darwin-universal.pkg
+            quoroom-update-v*.tar.gz
 
   build-linux:
     needs: validate-secrets
@@ -383,7 +448,32 @@ jobs:
           done
           DIR="$(cd -P "$(dirname "$SOURCE")" && pwd)"
           RUNTIME="$DIR/../runtime/node"
-          CLI="$DIR/../lib/cli.js"
+          BUNDLED_CLI="$DIR/../lib/cli.js"
+          BUNDLED_MODULES="$DIR/../lib/node_modules"
+          CLI="$BUNDLED_CLI"
+
+          # Check for user-space auto-update (~/.quoroom/app/)
+          USER_APP="$HOME/.quoroom/app"
+          USER_CLI="$USER_APP/lib/cli.js"
+          BOOT_MARKER="$USER_APP/.booting"
+          CRASH_COUNT_FILE="$USER_APP/.crash_count"
+
+          if [ -f "$USER_CLI" ] && [ -f "$USER_APP/version.json" ]; then
+            if [ -f "$BOOT_MARKER" ]; then
+              COUNT=$(cat "$CRASH_COUNT_FILE" 2>/dev/null || echo "0")
+              COUNT=$((COUNT + 1))
+              echo "$COUNT" > "$CRASH_COUNT_FILE"
+              if [ "$COUNT" -ge 3 ]; then
+                echo "Auto-update crashed 3 times, rolling back to bundled version" >&2
+                rm -rf "$USER_APP"
+              fi
+            fi
+            if [ -f "$USER_CLI" ]; then
+              CLI="$USER_CLI"
+              export NODE_PATH="$BUNDLED_MODULES"
+            fi
+          fi
+
           STATUS=1
 
           if [ -x "$RUNTIME" ]; then
@@ -495,13 +585,43 @@ jobs:
           # Bundled Node.js runtime
           Copy-Item node-win/node.exe staging/quoroom/runtime/node.exe
 
-          # CMD wrapper — prefer bundled runtime, fallback to system node on runtime crash
+          # CMD wrapper — checks for auto-updates, prefer bundled runtime, fallback to system node
           @'
           @echo off
           setlocal
           set "RUNTIME=%~dp0\..\runtime\node.exe"
-          set "CLI=%~dp0\..\lib\cli.js"
+          set "BUNDLED_CLI=%~dp0\..\lib\cli.js"
+          set "BUNDLED_MODULES=%~dp0\..\lib\node_modules"
+          set "CLI=%BUNDLED_CLI%"
           set "STATUS=1"
+
+          rem Check for user-space auto-update
+          set "USER_APP=%USERPROFILE%\.quoroom\app"
+          set "USER_CLI=%USER_APP%\lib\cli.js"
+          set "BOOT_MARKER=%USER_APP%\.booting"
+          set "CRASH_COUNT_FILE=%USER_APP%\.crash_count"
+
+          if not exist "%USER_CLI%" goto no_update
+          if not exist "%USER_APP%\version.json" goto no_update
+
+          if not exist "%BOOT_MARKER%" goto use_update
+          rem Previous boot crashed — increment crash counter
+          set /a COUNT=0
+          if exist "%CRASH_COUNT_FILE%" set /p COUNT=<"%CRASH_COUNT_FILE%"
+          set /a COUNT=%COUNT%+1
+          echo %COUNT%>"%CRASH_COUNT_FILE%"
+          if %COUNT% GEQ 3 (
+            echo Auto-update crashed 3 times, rolling back to bundled version 1>&2
+            rmdir /s /q "%USER_APP%" 2>NUL
+            goto no_update
+          )
+
+          :use_update
+          if not exist "%USER_CLI%" goto no_update
+          set "CLI=%USER_CLI%"
+          set "NODE_PATH=%BUNDLED_MODULES%"
+
+          :no_update
 
           if not exist "%RUNTIME%" goto fallback
           "%RUNTIME%" -e "" >NUL 2>NUL

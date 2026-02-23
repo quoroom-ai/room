@@ -22,6 +22,14 @@ LOG_FILE="${LOG_DIR}/server.log"
 mkdir -p "${LOG_DIR}"
 chown "${CONSOLE_USER}" "${LOG_DIR}" 2>/dev/null || true
 
+# Clean stale auto-update directory — full installer supersedes user-space updates.
+# The server also does this check on startup, but cleaning here ensures the
+# wrapper script uses the fresh bundled code immediately.
+USER_APP_DIR="/Users/${CONSOLE_USER}/.quoroom/app"
+if [ -d "${USER_APP_DIR}" ]; then
+  rm -rf "${USER_APP_DIR}"
+fi
+
 # Kill any old quoroom server — the binaries were just overwritten so the old
 # process is running stale code and would die soon anyway.
 OLD_PIDS="$(lsof -nP -iTCP:"${PORT}" -sTCP:LISTEN -t 2>/dev/null || true)"

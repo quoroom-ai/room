@@ -1,9 +1,11 @@
 /**
  * Background update checker — polls GitHub releases every 4 hours.
  * Caches the result in memory; the status route reads it via getUpdateInfo().
+ * When a lightweight update bundle is available, triggers auto-download.
  */
 
 import https from 'node:https'
+import { checkAndApplyUpdate, getAutoUpdateStatus, getReadyUpdateVersion } from './autoUpdate'
 
 const CHECK_INTERVAL = 4 * 60 * 60 * 1000  // 4 hours
 const INITIAL_DELAY  = 15_000               // 15s after startup
@@ -29,7 +31,11 @@ export interface UpdateInfo {
     windows: string | null // setup.exe installer
     linux: string | null   // .deb installer
   }
+  /** Lightweight update bundle URL (JS + UI only, ~13MB) */
+  updateBundle: string | null
 }
+
+export { getAutoUpdateStatus, getReadyUpdateVersion }
 
 let cached: UpdateInfo | null = null
 let initTimer: ReturnType<typeof setTimeout> | null = null
@@ -79,14 +85,24 @@ export async function forceCheck(): Promise<void> {
     const latestVersion = latest.tag_name.replace(/^v/, '')
     const assets: UpdateInfo['assets'] = { mac: null, windows: null, linux: null }
 
+    let updateBundle: string | null = null
+
     for (const a of latest.assets) {
       const { name, browser_download_url: url } = a
       if (name.endsWith('.pkg')) assets.mac = url
       else if (name.toLowerCase().includes('setup') && name.endsWith('.exe')) assets.windows = url
       else if (name.endsWith('.deb')) assets.linux = url
+      else if (name.startsWith('quoroom-update-') && name.endsWith('.tar.gz')) updateBundle = url
     }
 
-    cached = { latestVersion, releaseUrl: latest.html_url, assets }
+    cached = { latestVersion, releaseUrl: latest.html_url, assets, updateBundle }
+
+    // If a lightweight update bundle is available, trigger background auto-download
+    if (updateBundle && latestVersion) {
+      void checkAndApplyUpdate(updateBundle, latestVersion).catch(() => {
+        // Non-critical — auto-update failure doesn't affect normal operation
+      })
+    }
   } catch {
     // Non-critical — silently ignore network/parse errors
   }
@@ -120,5 +136,6 @@ export async function simulateUpdate(): Promise<void> {
       windows: cached?.assets.windows ?? null,
       linux: cached?.assets.linux ?? null,
     },
+    updateBundle: cached?.updateBundle ?? null,
   }
 }

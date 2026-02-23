@@ -32,7 +32,8 @@ import { createWsServer } from './ws'
 import { stopCloudSync } from '../shared/cloud-sync'
 import { initCloudSync } from './cloud'
 import { _stopAllLoops } from '../shared/agent-loop'
-import { initUpdateChecker, stopUpdateChecker, getUpdateInfo } from './updateChecker'
+import { initUpdateChecker, stopUpdateChecker, getUpdateInfo, getReadyUpdateVersion } from './updateChecker'
+import { initBootHealthCheck, USER_APP_DIR } from './autoUpdate'
 import { startServerRuntime, stopServerRuntime } from './runtime'
 import { closeBrowser } from '../shared/web-tools'
 import { handleWebhookRequest } from './webhooks'
@@ -488,6 +489,33 @@ export function createApiServer(options: ServerOptions = {}): {
       return
     }
 
+    // Update & restart endpoint (applies staged auto-update, then restarts).
+    // No token required, but only available from localhost.
+    if (pathname === '/api/server/update-restart' && req.method === 'POST') {
+      const isLocalClient = isLoopbackAddress(req.socket.remoteAddress)
+      if (!isLocalClient || (origin && !isLocalOrigin(origin))) {
+        res.writeHead(403, responseHeaders)
+        res.end(JSON.stringify({ error: 'Update-restart allowed only from localhost clients' }))
+        return
+      }
+      const readyVersion = getReadyUpdateVersion()
+      if (!readyVersion) {
+        res.writeHead(404, responseHeaders)
+        res.end(JSON.stringify({ error: 'No update ready to apply' }))
+        return
+      }
+      const scheduled = scheduleSelfRestart()
+      if (!scheduled) {
+        res.writeHead(500, responseHeaders)
+        res.end(JSON.stringify({ error: 'Failed to schedule restart' }))
+        return
+      }
+      res.writeHead(202, responseHeaders)
+      res.end(JSON.stringify({ ok: true, restarting: true, version: readyVersion }))
+      setTimeout(() => process.exit(0), 120)
+      return
+    }
+
     // Auth verify
     if (pathname === '/api/auth/verify' && req.method === 'GET') {
       const principal = getTokenPrincipal(req.headers.authorization)
@@ -698,11 +726,14 @@ export function startServer(options: ServerOptions = {}): void {
   const deploymentMode = getDeploymentMode()
   const bindHost = process.env.QUOROOM_BIND_HOST
     || (deploymentMode === 'cloud' ? DEFAULT_BIND_HOST_CLOUD : DEFAULT_BIND_HOST_LOCAL)
-  // Default to built UI directory next to the compiled server output
+  // Prefer user-space UI (auto-updated) over bundled UI (from installer)
   if (!options.staticDir) {
-    const defaultUiDir = path.join(__dirname, '../ui')
-    if (fs.existsSync(defaultUiDir)) {
-      options.staticDir = defaultUiDir
+    const userUiDir = path.join(USER_APP_DIR, 'ui')
+    const bundledUiDir = path.join(__dirname, '../ui')
+    if (fs.existsSync(path.join(userUiDir, 'index.html'))) {
+      options.staticDir = userUiDir
+    } else if (fs.existsSync(bundledUiDir)) {
+      options.staticDir = bundledUiDir
     }
   }
   const dbPath = process.env.QUOROOM_DB_PATH || path.join(options.dataDir ?? getDataDir(), 'data.db')
@@ -719,6 +750,9 @@ export function startServer(options: ServerOptions = {}): void {
 
   // Start background update checker (polls GitHub every 4 hours)
   initUpdateChecker()
+
+  // Boot health check for auto-update rollback safety
+  initBootHealthCheck()
 
   // Start local runtime loops (task scheduler, watch runner, room message sync).
   startServerRuntime(serverDb)

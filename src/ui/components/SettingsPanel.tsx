@@ -30,6 +30,7 @@ interface ServerStatus {
   codex?: { available: boolean; version?: string }
   resources?: { cpuCount: number; loadAvg1m: number; loadAvg5m: number; memTotalGb: number; memFreeGb: number; memUsedPct: number }
   updateInfo?: UpdateInfo | null
+  readyUpdateVersion?: string | null
 }
 
 interface ContactStatusState {
@@ -838,22 +839,45 @@ export function SettingsPanel({ advancedMode, onAdvancedModeChange, installPromp
           const ui = serverStatus?.updateInfo
           if (!ui || !serverStatus) return null
           if (!semverGt(ui.latestVersion, serverStatus.version)) return null
+          const isReady = !!serverStatus.readyUpdateVersion
           return (
             <div className="flex items-center justify-between text-sm py-2">
-              <span className="font-medium text-status-success">v{ui.latestVersion} available</span>
-              <button
-                onClick={async () => {
-                  const token = await getToken()
-                  const a = document.createElement('a')
-                  a.href = `${API_BASE}/api/status/update/download?token=${encodeURIComponent(token)}`
-                  document.body.appendChild(a)
-                  a.click()
-                  document.body.removeChild(a)
-                }}
-                className="px-3 py-1 bg-interactive text-text-invert rounded-lg hover:bg-interactive-hover transition-colors"
-              >
-                Download
-              </button>
+              <span className="font-medium text-status-success">
+                v{ui.latestVersion} {isReady ? 'ready' : 'available'}
+              </span>
+              {isReady ? (
+                <button
+                  onClick={async () => {
+                    await fetch(`${API_BASE}/api/server/update-restart`, { method: 'POST' })
+                    setTimeout(() => {
+                      const poll = setInterval(async () => {
+                        try {
+                          const res = await fetch(`${API_BASE}/api/status`)
+                          if (res.ok) { clearInterval(poll); window.location.reload() }
+                        } catch { /* server still restarting */ }
+                      }, 1000)
+                      setTimeout(() => clearInterval(poll), 30_000)
+                    }, 2000)
+                  }}
+                  className="px-3 py-1 bg-interactive text-text-invert rounded-lg hover:bg-interactive-hover transition-colors"
+                >
+                  Restart to Update
+                </button>
+              ) : (
+                <button
+                  onClick={async () => {
+                    const token = await getToken()
+                    const a = document.createElement('a')
+                    a.href = `${API_BASE}/api/status/update/download?token=${encodeURIComponent(token)}`
+                    document.body.appendChild(a)
+                    a.click()
+                    document.body.removeChild(a)
+                  }}
+                  className="px-3 py-1 bg-interactive text-text-invert rounded-lg hover:bg-interactive-hover transition-colors"
+                >
+                  Download
+                </button>
+              )}
             </div>
           )
         })()}

@@ -3,7 +3,8 @@ import os from 'node:os'
 import { execFile } from 'node:child_process'
 import { promisify } from 'node:util'
 import { getDataDir } from '../db'
-import { getUpdateInfo, simulateUpdate, forceCheck } from '../updateChecker'
+import { getUpdateInfo, simulateUpdate, forceCheck, getAutoUpdateStatus, getReadyUpdateVersion } from '../updateChecker'
+import { checkAndApplyUpdate } from '../autoUpdate'
 import { getDeploymentMode } from '../auth'
 
 const startedAt = Date.now()
@@ -118,6 +119,15 @@ export function registerStatusRoutes(router: Router): void {
     return { data: { ok: true } }
   })
 
+  // Test endpoint: download an update bundle from a custom URL.
+  // Usage: POST /api/status/test-auto-update { "url": "http://localhost:8199/quoroom-update-v99.tar.gz", "version": "99.0.0" }
+  router.post('/api/status/test-auto-update', async (ctx) => {
+    const { url, version } = (ctx.body ?? {}) as { url?: string; version?: string }
+    if (!url || !version) return { error: 'Missing url or version', status: 400 }
+    await checkAndApplyUpdate(url, version)
+    return { data: { status: getAutoUpdateStatus(), readyVersion: getReadyUpdateVersion() } }
+  })
+
   router.post('/api/status/check-update', async () => {
     await forceCheck()
     return { data: { updateInfo: getUpdateInfo() } }
@@ -155,6 +165,8 @@ export function registerStatusRoutes(router: Router): void {
     }
     if (include('update')) {
       data.updateInfo = getUpdateInfo()
+      data.autoUpdate = getAutoUpdateStatus()
+      data.readyUpdateVersion = getReadyUpdateVersion()
     }
     if (Object.keys(pending).length > 0) {
       data.pending = pending
