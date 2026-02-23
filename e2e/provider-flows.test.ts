@@ -28,7 +28,10 @@ function providerEntry(installed: boolean, connected: boolean | null, version?: 
 }
 
 async function suppressBlockingModals(page: Page): Promise<void> {
-  await page.addInitScript(() => localStorage.setItem('quoroom_walkthrough_seen', 'true'))
+  await page.addInitScript(() => {
+    localStorage.setItem('quoroom_walkthrough_seen', 'true')
+    localStorage.setItem('quoroom_contact_prompt_seen', '1')
+  })
   await page.route('**/api/status', async (route) => {
     const response = await route.fetch()
     const json = await response.json()
@@ -75,6 +78,7 @@ async function openRoomSettings(page: Page, roomId: number, roomName: string): P
     localStorage.setItem('quoroom_room', String(id))
     localStorage.setItem('quoroom_tab', 'room-settings')
     localStorage.setItem('quoroom_walkthrough_seen', 'true')
+    localStorage.setItem('quoroom_contact_prompt_seen', '1')
     localStorage.removeItem('quoroom_setup_flow_room')
   }, roomId)
   await page.goto(base, { waitUntil: 'domcontentloaded' })

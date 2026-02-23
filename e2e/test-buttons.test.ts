@@ -52,7 +52,10 @@ test.afterEach(async ({ page }) => {
 
 test('Room toggle buttons update room settings', async ({ page }) => {
   // Suppress walkthrough modal
-  await page.addInitScript(() => localStorage.setItem('quoroom_walkthrough_seen', 'true'))
+  await page.addInitScript(() => {
+    localStorage.setItem('quoroom_walkthrough_seen', 'true')
+    localStorage.setItem('quoroom_contact_prompt_seen', '1')
+  })
 
   // Create a test room via API
   const create = await page.request.post(`${base}/api/rooms`, {
