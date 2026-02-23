@@ -12,6 +12,7 @@ import { fetchPublicRooms, getRoomCloudId, listCloudStations, type PublicRoom, t
 import { resolveApiKeyForModel } from './model-provider'
 import { createCycleLogBuffer, type CycleLogEntryCallback } from './console-log-buffer'
 import { QUEEN_TOOL_DEFINITIONS, SLIM_QUEEN_TOOL_DEFINITIONS, executeQueenTool } from './queen-tools'
+import { getOllamaModelMinTier, isTierSufficient } from './ollama-models'
 
 interface LoopState {
   running: boolean
@@ -449,15 +450,39 @@ export async function runCycle(
     }
 
     // Station awareness — all models get this (relevant for planning worker execution)
+    const activeStations = cloudStations.filter(s => s.status === 'active')
     if (cloudStations.length > 0) {
-      const activeCount = cloudStations.filter(s => s.status === 'active').length
-      contextParts.push(`## Stations (${activeCount} active)\n${cloudStations.map(s =>
+      const stationLines = cloudStations.map(s =>
         `- #${s.id} "${s.stationName}" (${s.tier}) — ${s.status} — $${s.monthlyCost}/mo`
-      ).join('\n')}`)
+      )
+      contextParts.push(`## Stations (${activeStations.length} active)\n${stationLines.join('\n')}`)
+
+      // Tier compatibility warnings
+      const tierWarnings: string[] = []
+      const queenModel = worker.model
+      if (queenModel?.startsWith('ollama:')) {
+        const minTier = getOllamaModelMinTier(queenModel)
+        if (minTier && activeStations.length > 0 && !activeStations.some(s => isTierSufficient(s.tier, minTier))) {
+          const tierList = [...new Set(activeStations.map(s => s.tier))].join(', ')
+          tierWarnings.push(`⚠ QUEEN TIER MISMATCH: Your model ${queenModel} requires ${minTier}. Active stations: ${tierList} — YOU will fail to run. Use quoroom_station_create to rent a ${minTier} station, or change your model with quoroom_update_worker.`)
+        }
+      }
+      const effectiveWorkerModel = status.room.workerModel === 'queen' ? queenModel : status.room.workerModel
+      if (effectiveWorkerModel?.startsWith('ollama:') && effectiveWorkerModel !== queenModel) {
+        const minTier = getOllamaModelMinTier(effectiveWorkerModel)
+        if (minTier && activeStations.length > 0 && !activeStations.some(s => isTierSufficient(s.tier, minTier))) {
+          const tierList = [...new Set(activeStations.map(s => s.tier))].join(', ')
+          tierWarnings.push(`⚠ WORKER TIER MISMATCH: Worker model ${effectiveWorkerModel} requires ${minTier}. Active stations: ${tierList} — workers CANNOT run. Use quoroom_station_create to rent a ${minTier} station, or use quoroom_configure_room to switch workers to ollama:llama3.2.`)
+        }
+      }
+      if (tierWarnings.length > 0) {
+        contextParts.push(`## Station Compatibility Warnings\n${tierWarnings.join('\n')}`)
+      }
     } else {
       const effectiveWorkerModel = status.room.workerModel === 'queen' ? (worker.model ?? 'claude') : (status.room.workerModel ?? 'claude')
       if (effectiveWorkerModel.startsWith('ollama:')) {
-        contextParts.push(`## Stations\n⚠ NO ACTIVE STATIONS. Worker model is ${effectiveWorkerModel} — workers CANNOT run without a station.\nRent a station with quoroom_station_create (minimum tier: small at $15/mo) as your FIRST action before creating any tasks or workers.`)
+        const minTier = getOllamaModelMinTier(effectiveWorkerModel) ?? 'small'
+        contextParts.push(`## Stations\n⚠ NO ACTIVE STATIONS. Worker model is ${effectiveWorkerModel} — workers CANNOT run without a station.\nRent a station with quoroom_station_create (minimum tier: ${minTier}) as your FIRST action before creating any tasks or workers.`)
       }
     }
 

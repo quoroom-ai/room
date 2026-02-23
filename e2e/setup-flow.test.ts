@@ -178,21 +178,24 @@ test('setup popup applies selected model path', async ({ page }) => {
   await page.getByRole('button', { name: 'Next' }).click()
   await page.getByRole('button', { name: 'Next' }).click()
 
-  const workerPatchReq = page.waitForRequest((req) => {
-    if (req.method() !== 'PATCH') return false
-    const pathname = new URL(req.url()).pathname
-    if (!/^\/api\/workers\/\d+$/.test(pathname)) return false
-    try {
-      const body = req.postDataJSON() as Record<string, unknown>
-      return body.model === 'openai:gpt-4o-mini'
-    } catch {
-      return false
-    }
-  })
+  const workerPatchDone = page.waitForResponse(
+    (resp) => {
+      if (resp.request().method() !== 'PATCH') return false
+      const pathname = new URL(resp.url()).pathname
+      if (!/^\/api\/workers\/\d+$/.test(pathname)) return false
+      try {
+        const body = resp.request().postDataJSON() as Record<string, unknown>
+        return body.model === 'openai:gpt-4o-mini'
+      } catch {
+        return false
+      }
+    },
+    { timeout: 10000 }
+  )
 
   await page.getByRole('button', { name: 'Apply and Continue' }).click()
-  await workerPatchReq
-  await expect(page.getByRole('heading', { name: 'Room Setup Flow' })).not.toBeVisible()
+  await workerPatchDone
+  await expect(page.getByRole('heading', { name: 'Room Setup Flow' })).not.toBeVisible({ timeout: 8000 })
 })
 
 test('archive uses cloud-station deletion route', async ({ page, request }) => {
