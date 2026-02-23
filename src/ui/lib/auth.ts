@@ -11,7 +11,7 @@ function normalizeApiBase(url: string): string {
   return url.replace(/\/+$/, '')
 }
 
-function isLocalHost(): boolean {
+export function isLocalHost(): boolean {
   if (typeof location === 'undefined') return true
   const host = location.hostname
   return host === 'localhost' || host === '127.0.0.1' || host === '::1' || host === '[::1]'

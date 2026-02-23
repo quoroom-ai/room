@@ -231,6 +231,13 @@ export function ConnectPage({ port, onRetry }: ConnectPageProps): React.JSX.Elem
           <a href="https://github.com/quoroom-ai/room/issues/new" target="_blank" rel="noopener noreferrer" className="text-xs text-text-muted hover:text-text-secondary">Report Bug</a>
           <span className="text-border-primary">|</span>
           <a href="https://x.com/VTrofimchuk" target="_blank" rel="noopener noreferrer" className="text-xs text-text-muted hover:text-text-secondary">Developer</a>
+          <span className="text-border-primary">|</span>
+          <button
+            onClick={() => window.open('mailto:hello@email.quoroom.ai?subject=Connection issue&body=I am having trouble connecting to Quoroom.')}
+            className="text-xs text-text-muted hover:text-text-secondary"
+          >
+            Email Developer
+          </button>
         </div>
 
         {/* Privacy */}

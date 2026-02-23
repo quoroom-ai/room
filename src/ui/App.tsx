@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { getToken, clearToken, API_BASE, APP_MODE } from './lib/auth'
+import { getToken, clearToken, API_BASE, APP_MODE, isLocalHost } from './lib/auth'
 import { TabBar, mainTabs, tabIcons, type Tab } from './components/TabBar'
 import { StatusPanel } from './components/StatusPanel'
 import { MemoryPanel } from './components/MemoryPanel'
@@ -541,7 +541,7 @@ function App(): React.JSX.Element {
   }
 
   async function handleRestartServer(): Promise<void> {
-    if (APP_MODE !== 'local') return
+    if (!isLocalHost()) return
     setRestartingServer(true)
     try {
       const res = await fetch(`${API_BASE}/api/server/restart`, {
@@ -594,7 +594,7 @@ function App(): React.JSX.Element {
           >
             Retry
           </button>
-          {APP_MODE === 'local' && (
+          {isLocalHost() && (
             <button
               onClick={() => void handleRestartServer()}
               disabled={restartingServer}
@@ -604,6 +604,12 @@ function App(): React.JSX.Element {
             </button>
           )}
         </div>
+        <button
+          onClick={() => window.open('mailto:hello@email.quoroom.ai?subject=Connection issue&body=I am having trouble connecting to Quoroom.')}
+          className="mt-3 text-xs text-text-muted hover:text-text-secondary transition-colors"
+        >
+          Email Developer
+        </button>
       </div>
     )
   }

@@ -40,6 +40,12 @@ export class ErrorBoundary extends Component<Props, State> {
           >
             Reload page
           </button>
+          <button
+            onClick={() => window.open('mailto:hello@email.quoroom.ai?subject=App error&body=Something went wrong in Quoroom.')}
+            className="text-xs text-text-muted hover:text-text-secondary transition-colors"
+          >
+            Email Developer
+          </button>
         </div>
       </div>
     )

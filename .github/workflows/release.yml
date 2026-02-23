@@ -199,8 +199,13 @@ jobs:
         if: steps.certs.outputs.has_app_cert == 'true'
         run: |
           codesign --force --options runtime --timestamp \
+            --entitlements installers/macos/node-entitlements.plist \
             --sign "Developer ID Application: Myroslava Bune (BYZMJXLL2N)" \
             staging/quoroom/runtime/node
+
+      - name: Verify codesigned runtime
+        run: |
+          staging/quoroom/runtime/node -e "console.log('Runtime OK:', process.version, process.arch)"
 
       - name: Codesign native modules for notarization
         if: steps.certs.outputs.has_app_cert == 'true'

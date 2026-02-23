@@ -887,7 +887,7 @@ export function SettingsPanel({ advancedMode, onAdvancedModeChange, installPromp
             Star on GitHub
           </button>
           <button
-            onClick={() => window.open('mailto:hello@quoroom.ai?subject=Subscribe&body=Subscribe me for Quoroom updates')}
+            onClick={() => window.open('mailto:updates@email.quoroom.ai?subject=Subscribe&body=Subscribe me for Quoroom updates')}
             className="w-full py-2 text-sm bg-interactive text-text-invert rounded-lg hover:bg-interactive-hover transition-colors"
           >
             Subscribe for Updates
