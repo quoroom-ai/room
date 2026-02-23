@@ -714,6 +714,22 @@ jobs:
         id: version
         run: echo "version=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
 
+      - name: Generate changelog
+        id: changelog
+        run: |
+          PREV_TAG=$(git tag --sort=-v:refname | grep -v "^${GITHUB_REF_NAME}$" | head -1)
+          if [ -n "$PREV_TAG" ]; then
+            # Get commits between tags, skip version-bump-only commits
+            CHANGELOG=$(git log "${PREV_TAG}..HEAD" --pretty=format:"- %s" --no-merges \
+              | grep -v "^- [0-9]\+\.[0-9]\+\.[0-9]" || true)
+          fi
+          if [ -z "$CHANGELOG" ]; then
+            CHANGELOG="- Bug fixes and improvements"
+          fi
+          echo "text<<CHANGELOG_EOF" >> "$GITHUB_OUTPUT"
+          echo "$CHANGELOG" >> "$GITHUB_OUTPUT"
+          echo "CHANGELOG_EOF" >> "$GITHUB_OUTPUT"
+
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
@@ -724,6 +740,10 @@ jobs:
             dist/*.deb
             dist/*-setup.exe
           body: |
+            ## What's new
+
+            ${{ steps.changelog.outputs.text }}
+
             ## Install
 
             ```
