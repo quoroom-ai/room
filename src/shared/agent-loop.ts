@@ -509,8 +509,9 @@ export async function runCycle(
         useJsonActionMode: true,
         previousMessages: ollamaPreviousMessages,
         onSessionUpdate: (msgs: Array<{ role: string; content: string }>) => {
-          // Keep last 40 messages (20 turns) to prevent context explosion
-          const trimmed = msgs.length > 40 ? msgs.slice(-40) : msgs
+          // Keep last 16 messages (8 turns) to stay within 4096-token context window
+          // Each turn ~300-400 tokens; 8 turns ≈ 2800 tokens leaving room for new prompt
+          const trimmed = msgs.length > 16 ? msgs.slice(-16) : msgs
           queries.saveOllamaSession(db, worker.id, roomId, trimmed)
         }
       } : {}),
