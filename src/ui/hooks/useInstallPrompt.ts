@@ -21,8 +21,7 @@ export function useInstallPrompt(): InstallPrompt {
 
   useEffect(() => {
     const ua = window.navigator.userAgent.toLowerCase()
-    const isiOS = /iphone|ipad|ipod/.test(ua)
-    const isSafari = ua.includes('safari') && !ua.includes('crios') && !ua.includes('fxios') && !ua.includes('edgios')
+    const isSafari = ua.includes('safari') && !ua.includes('chrome') && !ua.includes('crios') && !ua.includes('fxios') && !ua.includes('edgios')
 
     // Already running as installed PWA
     const inStandalone = window.matchMedia('(display-mode: standalone)').matches || (window.navigator as Navigator & { standalone?: boolean }).standalone === true
@@ -31,7 +30,7 @@ export function useInstallPrompt(): InstallPrompt {
       setIsManualInstallPlatform(false)
       return
     }
-    setIsManualInstallPlatform(isiOS && isSafari)
+    setIsManualInstallPlatform(isSafari)
 
     const onPrompt = (e: Event) => {
       e.preventDefault()

@@ -36,6 +36,7 @@ import { initUpdateChecker, stopUpdateChecker, getUpdateInfo } from './updateChe
 import { startServerRuntime, stopServerRuntime } from './runtime'
 import { closeBrowser } from '../shared/web-tools'
 import { handleWebhookRequest } from './webhooks'
+import { inheritShellPath } from './shell-path'
 
 try {
   (process as unknown as { loadEnvFile?: (path?: string) => void }).loadEnvFile?.('.env')
@@ -692,6 +693,7 @@ function registerMcpGlobally(dbPath: string): void {
 
 /** Start the server (for CLI use) */
 export function startServer(options: ServerOptions = {}): void {
+  inheritShellPath()
   const port = options.port ?? DEFAULT_PORT
   const deploymentMode = getDeploymentMode()
   const bindHost = process.env.QUOROOM_BIND_HOST

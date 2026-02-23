@@ -810,6 +810,12 @@ function App(): React.JSX.Element {
                 Data: <span className="font-mono">{devDbBanner.dataDir}</span>
               </div>
             )}
+            <button
+              onClick={() => { localStorage.clear(); location.reload() }}
+              className="mt-1 text-[11px] text-status-warning underline hover:no-underline"
+            >
+              Clear storage
+            </button>
           </div>
         )}
 
@@ -902,7 +908,7 @@ function App(): React.JSX.Element {
         />
       )}
       {showWalkthrough && (
-        <WalkthroughModal onClose={() => {
+        <WalkthroughModal installPrompt={installPrompt} onClose={() => {
           setShowWalkthrough(false)
           if (contactPromptNeeded) {
             setShowContactPrompt(true)

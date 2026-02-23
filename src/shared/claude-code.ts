@@ -100,7 +100,7 @@ function resolveClaudePath(): string | null {
     for (const sh of shells) {
       if (!existsSync(sh)) continue
       try {
-        const resolved = execSync(`${sh} -l -c 'which claude'`, {
+        const resolved = execSync(`${sh} -lic 'which claude'`, {
           encoding: 'utf-8',
           env,
           timeout: 5000
