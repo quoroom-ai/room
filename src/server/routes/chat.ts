@@ -57,7 +57,15 @@ export function registerChatRoutes(router: Router): void {
     })
 
     if (result.exitCode !== 0 || result.timedOut) {
-      const reason = result.output?.trim() || (result.timedOut ? 'Chat request timed out' : 'Chat execution failed')
+      const rawOutput = result.output?.trim()
+      let reason: string
+      if (result.timedOut) {
+        reason = 'Chat request timed out'
+      } else if (rawOutput) {
+        reason = rawOutput
+      } else {
+        reason = `Chat execution failed (model: ${model}, exit code: ${result.exitCode})`
+      }
       return { status: result.timedOut ? 504 : 502, error: reason.slice(0, 500) }
     }
 

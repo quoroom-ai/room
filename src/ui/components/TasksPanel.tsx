@@ -1,5 +1,6 @@
 import { usePolling } from '../hooks/usePolling'
 import { useWebSocket } from '../hooks/useWebSocket'
+import { useTick } from '../hooks/useTick'
 import type { Task, TaskRun, Worker, ConsoleLogEntry } from '@shared/types'
 import { formatRelativeTime } from '../utils/time'
 import { useState, useEffect, useRef } from 'react'
@@ -384,6 +385,7 @@ function CreateTaskForm({ workers, onCreated, roomId }: { workers: Worker[] | nu
 }
 
 export function TasksPanel({ roomId, autonomyMode }: { roomId?: number | null; autonomyMode: 'auto' | 'semi' }): React.JSX.Element {
+  useTick()
   const { semi, guard, requestSemiMode, showLockModal, closeLockModal } = useAutonomyControlGate(autonomyMode)
   const [containerRef, containerWidth] = useContainerWidth<HTMLDivElement>()
   const wide = containerWidth >= 600

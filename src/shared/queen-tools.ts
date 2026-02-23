@@ -331,6 +331,47 @@ export const QUEEN_TOOL_DEFINITIONS: ToolDef[] = [
         required: ['url', 'actions']
       }
     }
+  },
+  // ── Wallet ──────────────────────────────────────────────────────────────
+  {
+    type: 'function',
+    function: {
+      name: 'quoroom_wallet_balance',
+      description: 'Get the room\'s wallet balance (USDC). Returns address and transaction summary.',
+      parameters: {
+        type: 'object',
+        properties: {},
+        required: []
+      }
+    }
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'quoroom_wallet_send',
+      description: 'Send USDC from the room\'s wallet to an address.',
+      parameters: {
+        type: 'object',
+        properties: {
+          to: { type: 'string', description: 'Recipient address (0x...)' },
+          amount: { type: 'string', description: 'Amount (e.g., "10.50")' }
+        },
+        required: ['to', 'amount']
+      }
+    }
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'quoroom_wallet_history',
+      description: 'Get recent wallet transaction history.',
+      parameters: {
+        type: 'object',
+        properties: {
+          limit: { type: 'string', description: 'Max transactions to return (default: 10)' }
+        }
+      }
+    }
   }
 ]
 
@@ -576,6 +617,29 @@ export async function executeQueenTool(
         const actions = (args.actions ?? []) as BrowserAction[]
         if (!url) return { content: 'Error: url is required', isError: true }
         return { content: await browserAction(url, actions) }
+      }
+
+      // ── Wallet ────────────────────────────────────────────────────
+      case 'quoroom_wallet_balance': {
+        const wallet = queries.getWalletByRoom(db, roomId)
+        if (!wallet) return { content: 'No wallet found for this room.', isError: true }
+        const summary = queries.getWalletTransactionSummary(db, wallet.id)
+        const net = (parseFloat(summary.received) - parseFloat(summary.sent)).toFixed(2)
+        return { content: `Wallet ${wallet.address}: ${net} USDC (received: ${summary.received}, sent: ${summary.sent})` }
+      }
+
+      case 'quoroom_wallet_send': {
+        return { content: 'Wallet send requires on-chain transaction — use the MCP tool quoroom_wallet_send with encryptionKey, or ask the keeper to send funds.', isError: true }
+      }
+
+      case 'quoroom_wallet_history': {
+        const wallet = queries.getWalletByRoom(db, roomId)
+        if (!wallet) return { content: 'No wallet found for this room.', isError: true }
+        const limit = Math.min(Number(args.limit) || 10, 50)
+        const txs = queries.listWalletTransactions(db, wallet.id, limit)
+        if (txs.length === 0) return { content: 'No transactions yet.' }
+        const lines = txs.map(tx => `[${tx.type}] ${tx.amount} USDC — ${tx.description ?? ''} (${tx.status})`).join('\n')
+        return { content: lines }
       }
 
       default:

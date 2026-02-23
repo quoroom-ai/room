@@ -461,6 +461,14 @@ export async function runCycle(
       ).join('\n')}`)
     }
 
+    // Wallet awareness — every queen sees their room's financial state
+    const wallet = queries.getWalletByRoom(db, roomId)
+    if (wallet) {
+      const summary = queries.getWalletTransactionSummary(db, wallet.id)
+      const net = (parseFloat(summary.received) - parseFloat(summary.sent)).toFixed(2)
+      contextParts.push(`## Wallet\nAddress: ${wallet.address}\nBalance: ${net} USDC (received: ${summary.received}, spent: ${summary.sent})`)
+    }
+
     if (unreadMessages.length > 0) {
       contextParts.push(`## Unread Messages\n${unreadMessages.map(m =>
         `- #${m.id} from ${m.fromRoomId ?? 'unknown'}: ${m.subject}`
@@ -515,10 +523,13 @@ export async function runCycle(
     const webTools = isCli
       ? '(use your built-in web search and fetch tools)'
       : 'quoroom_web_search, quoroom_web_fetch, quoroom_browser'
-    const toolList = `**Goals:** quoroom_set_goal, quoroom_update_progress, quoroom_create_subgoal, quoroom_complete_goal, quoroom_abandon_goal\n**Governance:** quoroom_propose, quoroom_vote\n**Workers:** quoroom_create_worker, quoroom_update_worker\n**Tasks:** quoroom_schedule\n**Memory:** quoroom_remember, quoroom_recall\n**Web:** ${webTools}\n**Comms:** ${commsTools}\n**Settings:** quoroom_configure_room${selfRegulateHint}`
+    const walletTools = isCli
+      ? 'quoroom_wallet_balance, quoroom_wallet_send, quoroom_wallet_history, quoroom_wallet_topup'
+      : 'quoroom_wallet_balance, quoroom_wallet_send, quoroom_wallet_history'
+    const toolList = `**Goals:** quoroom_set_goal, quoroom_update_progress, quoroom_create_subgoal, quoroom_complete_goal, quoroom_abandon_goal\n**Governance:** quoroom_propose, quoroom_vote\n**Workers:** quoroom_create_worker, quoroom_update_worker\n**Tasks:** quoroom_schedule\n**Memory:** quoroom_remember, quoroom_recall\n**Wallet:** ${walletTools}\n**Web:** ${webTools}\n**Comms:** ${commsTools}\n**Settings:** quoroom_configure_room${selfRegulateHint}`
 
     const sendKeeperTool = isCli ? 'quoroom_inbox_send_keeper' : 'quoroom_ask_keeper'
-    contextParts.push(`## Instructions\nBased on the current state, decide what to do next and call the appropriate tools. Available tools:\n\n${toolList}\n\nDo NOT "stand by" or wait for anyone — every cycle must make progress. Act autonomously: make decisions and execute. Inform the keeper of progress or important updates using ${sendKeeperTool}, but never block on a response. If the keeper hasn't replied, proceed with your best judgment.\n\n${toolCallInstruction}`)
+    contextParts.push(`## Instructions\nBased on the current state, decide what to do next and call the appropriate tools. Available tools:\n\n${toolList}\n\nDo NOT "stand by" or wait for anyone — every cycle must make progress. Act autonomously: make decisions and execute. Inform the keeper of progress or important updates using ${sendKeeperTool}, but never block on a response. If the keeper hasn't replied, proceed with your best judgment.\n\nRevenue is always a priority. Every room must sustain itself financially. Actively seek ways to earn: offer services to the keeper, propose paid work to other rooms, or find monetizable opportunities in your domain. Check your wallet balance and report financial status to the keeper.\n\n${toolCallInstruction}`)
 
     const prompt = contextParts.join('\n\n')
 
@@ -571,6 +582,20 @@ export async function runCycle(
     const rateLimitInfo = checkRateLimit(result)
     if (rateLimitInfo) {
       throw new RateLimitError(rateLimitInfo)
+    }
+
+    // Check for non-rate-limit execution failure
+    if (result.exitCode !== 0) {
+      const errorDetail = result.output?.trim() || `exit code ${result.exitCode}`
+      logBuffer.addSynthetic('error', `Agent execution failed: ${errorDetail.slice(0, 500)}`)
+      logBuffer.flush()
+      queries.completeWorkerCycle(db, cycle.id, errorDetail.slice(0, 500), result.usage)
+      options?.onCycleLifecycle?.('failed', cycle.id, roomId)
+      queries.logRoomActivity(db, roomId, 'error',
+        `Agent cycle failed (${worker.name}): ${errorDetail.slice(0, 200)}`,
+        errorDetail, worker.id)
+      queries.updateAgentState(db, worker.id, 'idle')
+      return result.output
     }
 
     // CLI models: save returned sessionId for --resume in next cycle

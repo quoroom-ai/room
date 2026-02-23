@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react'
 import { usePolling } from '../hooks/usePolling'
 import { useWebSocket } from '../hooks/useWebSocket'
+import { useTick } from '../hooks/useTick'
 import { useContainerWidth } from '../hooks/useContainerWidth'
 import { api } from '../lib/client'
 import { wsClient, type WsMessage } from '../lib/ws'
@@ -157,6 +158,7 @@ interface ResultsPanelProps {
 }
 
 export function ResultsPanel({ roomId, autonomyMode }: ResultsPanelProps): React.JSX.Element {
+  useTick()
   const { semi, showLockModal, closeLockModal, requestSemiMode } = useAutonomyControlGate(autonomyMode)
   const [containerRef, containerWidth] = useContainerWidth<HTMLDivElement>()
   const wide = containerWidth >= 600

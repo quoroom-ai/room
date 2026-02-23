@@ -3,7 +3,7 @@
 const net = require('net')
 
 const TARGETS = [
-  { host: '127.0.0.1', port: 3710 },
+  { host: '127.0.0.1', port: 3715 },
   { host: '127.0.0.1', port: 4700 },
 ]
 
@@ -41,8 +41,8 @@ async function allReady() {
 
 function printLinks() {
   console.log('\n[dev] Services ready')
-  console.log('Cloud landing:   http://127.0.0.1:3710/')
-  console.log('Cloud dashboard: http://127.0.0.1:3710/app')
+  console.log('Cloud landing:   http://127.0.0.1:3715/')
+  console.log('Cloud dashboard: http://127.0.0.1:3715/app')
   console.log('Local dashboard: http://localhost:4700')
   console.log('')
 }

@@ -2,6 +2,7 @@ import { useState, useEffect, useRef, useCallback } from 'react'
 import { usePolling } from '../hooks/usePolling'
 import { useWebSocket } from '../hooks/useWebSocket'
 import { useContainerWidth } from '../hooks/useContainerWidth'
+import { useTick } from '../hooks/useTick'
 import { LiveConsoleSection } from './LiveConsoleSection'
 import { api } from '../lib/client'
 import {
@@ -62,6 +63,7 @@ interface StatusPanelProps {
 }
 
 export function StatusPanel({ onNavigate, advancedMode, roomId }: StatusPanelProps): React.JSX.Element {
+  useTick()
   const [containerRef, containerWidth] = useContainerWidth<HTMLDivElement>()
   const wide = containerWidth >= 600
 

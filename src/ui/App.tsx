@@ -777,6 +777,11 @@ function App(): React.JSX.Element {
                         <span className="flex items-center gap-1.5">
                           {tabIcons[t.id]}
                           {t.label}
+                          {t.id === 'chat' && messagesUnread > 0 && (
+                            <span className="inline-flex items-center justify-center min-w-[16px] h-4 px-1 rounded-full bg-status-error text-text-invert text-[10px] font-bold leading-none">
+                              {messagesUnread}
+                            </span>
+                          )}
                           {t.id === 'votes' && votesActive > 0 && (
                             <span className="inline-flex items-center justify-center min-w-[16px] h-4 px-1 rounded-full bg-interactive text-text-invert text-[10px] font-bold leading-none">
                               {votesActive}
