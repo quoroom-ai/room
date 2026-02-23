@@ -18,6 +18,7 @@ import { registerCredentialRoutes } from './credentials'
 import { registerStationRoutes } from './stations'
 import { registerRoomMessageRoutes } from './room-messages'
 import { registerProviderRoutes } from './providers'
+import { registerContactRoutes } from './contacts'
 
 export function registerAllRoutes(router: Router): void {
   registerRoomRoutes(router)
@@ -39,4 +40,5 @@ export function registerAllRoutes(router: Router): void {
   registerStationRoutes(router)
   registerRoomMessageRoutes(router)
   registerProviderRoutes(router)
+  registerContactRoutes(router)
 }

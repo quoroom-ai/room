@@ -10,7 +10,8 @@ export function registerSettingsTools(server: McpServer): void {
       title: 'Get Setting',
       description: 'Get a Quoroom setting value by key. '
         + 'Available settings: large_window_enabled (true/false) — use a larger popover window in the Quoroom desktop app. '
-        + 'max_concurrent_tasks (integer, 1-10, default: 3) — how many tasks the queen can work on at once.',
+        + 'max_concurrent_tasks (integer, 1-10, default: 3) — how many tasks the queen can work on at once. '
+        + 'keeper_referral_code (string) — keeper-level invite/referral code used for network invites.',
       inputSchema: {
         key: z.string().describe('The setting key (e.g. "max_concurrent_tasks")')
       }
@@ -36,6 +37,7 @@ export function registerSettingsTools(server: McpServer): void {
       description: 'Set a Quoroom setting. '
         + 'Available settings: large_window_enabled (true/false) — use a larger popover window in the Quoroom desktop app. '
         + 'max_concurrent_tasks (integer, 1-10, default: 3) — how many tasks the queen can work on at once. '
+        + 'keeper_referral_code (string) — keeper-level invite/referral code used for network invites. '
         + 'RESPONSE STYLE: Confirm briefly in 1 sentence. No notes, tips, or implementation details.',
       inputSchema: {
         key: z.string().describe('The setting key'),

@@ -35,7 +35,7 @@ export interface RoomCreateResult {
 
 export function createRoom(db: Database.Database, input: CreateRoomInput): RoomCreateResult {
   const config: RoomConfig = { ...DEFAULT_ROOM_CONFIG, ...input.config }
-  const room = queries.createRoom(db, input.name, input.goal, config, input.inviteCode)
+  const room = queries.createRoom(db, input.name, input.goal, config, input.referredByCode)
 
   // Create queen worker
   const queen = queries.createWorker(db, {

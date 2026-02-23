@@ -31,7 +31,8 @@ async function bootstrapRoomToken(roomId: number): Promise<void> {
     name: room.name,
     goal: room.goal ?? null,
     visibility: room.visibility,
-    inviteCode: room.inviteCode,
+    referredByCode: room.referredByCode,
+    keeperReferralCode: queries.getSetting(db, 'keeper_referral_code'),
   })
 }
 

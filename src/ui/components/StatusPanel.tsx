@@ -1,9 +1,14 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef, useCallback } from 'react'
 import { usePolling } from '../hooks/usePolling'
 import { useWebSocket } from '../hooks/useWebSocket'
 import { useContainerWidth } from '../hooks/useContainerWidth'
 import { LiveConsoleSection } from './LiveConsoleSection'
 import { api } from '../lib/client'
+import {
+  ROOM_BALANCE_EVENT_TYPES,
+  ROOM_NETWORK_EVENT_TYPES,
+} from '../lib/room-events'
+import { wsClient, type WsMessage } from '../lib/ws'
 import type { Task, TaskRun, RoomActivityEntry, Worker, Wallet, RevenueSummary, OnChainBalance } from '@shared/types'
 import { formatRelativeTime } from '../utils/time'
 import { CopyAddressButton } from './CopyAddressButton'
@@ -17,26 +22,6 @@ interface StatusData {
   watchCount: number
 }
 
-async function fetchStatus(): Promise<StatusData> {
-  const [stats, tasks, runs, workers, watches] = await Promise.all([
-    api.memory.getStats(),
-    api.tasks.list(),
-    api.runs.list(1),
-    api.workers.list(),
-    api.watches.list()
-  ])
-
-  const runningRuns = await api.runs.list(20, { status: 'running' })
-
-  return {
-    entityCount: stats.entityCount,
-    tasks,
-    latestRun: runs[0] ?? null,
-    runningRuns,
-    workerCount: workers.length,
-    watchCount: watches.length
-  }
-}
 
 const cardClass =
   'w-full text-left p-3 bg-surface-secondary rounded-lg shadow-sm hover:bg-surface-hover transition-colors cursor-pointer'
@@ -72,38 +57,118 @@ interface StatusPanelProps {
 export function StatusPanel({ onNavigate, advancedMode, roomId }: StatusPanelProps): React.JSX.Element {
   const [containerRef, containerWidth] = useContainerWidth<HTMLDivElement>()
   const wide = containerWidth >= 600
-  const { data, error, isLoading } = usePolling(fetchStatus, 10000)
 
-  // Room activity
-  const { data: activity, refresh: refreshActivity } = usePolling<RoomActivityEntry[]>(
-    () => roomId ? api.rooms.getActivity(roomId, 30) : Promise.resolve([]),
+  const fetchStatus = useCallback(async (): Promise<StatusData> => {
+    const [stats, tasks, runs, workers, watches, runningRuns] = await Promise.all([
+      api.memory.getStats(),
+      api.tasks.list(roomId ?? undefined),
+      api.runs.list(1),
+      api.workers.list(),
+      api.watches.list(),
+      api.runs.list(20, { status: 'running' }),
+    ])
+    return {
+      entityCount: stats.entityCount,
+      tasks,
+      latestRun: runs[0] ?? null,
+      runningRuns,
+      workerCount: workers.length,
+      watchCount: watches.length
+    }
+  }, [roomId])
+
+  const { data, error, isLoading, refresh: refreshStatus } = usePolling(fetchStatus, 60000)
+  const refreshStatusTimeoutRef = useRef<number | null>(null)
+
+  // Refresh immediately when room changes
+  useEffect(() => { refreshStatus() }, [roomId, refreshStatus])
+  const taskEvent = useWebSocket('tasks')
+  const runsEvent = useWebSocket('runs')
+  const workersEvent = useWebSocket('workers')
+  const memoryEvent = useWebSocket('memory')
+  const watchesEvent = useWebSocket('watches')
+
+  useEffect(() => {
+    if (!taskEvent && !runsEvent && !workersEvent && !memoryEvent && !watchesEvent) return
+    if (refreshStatusTimeoutRef.current) return
+    refreshStatusTimeoutRef.current = window.setTimeout(() => {
+      refreshStatusTimeoutRef.current = null
+      void refreshStatus()
+    }, 250)
+  }, [memoryEvent, refreshStatus, runsEvent, taskEvent, watchesEvent, workersEvent])
+
+  useEffect(() => () => {
+    if (refreshStatusTimeoutRef.current) {
+      window.clearTimeout(refreshStatusTimeoutRef.current)
+      refreshStatusTimeoutRef.current = null
+    }
+  }, [])
+
+  // Queen status
+  const { data: queenStatus, refresh: refreshQueenStatus } = usePolling<{
+    workerId: number
+    agentState: string
+    running: boolean
+    name: string
+  } | null>(
+    () => roomId ? api.rooms.queenStatus(roomId).catch(() => null) : Promise.resolve(null),
     5000
   )
-  const { data: workers } = usePolling<Worker[]>(() => api.workers.list(), 30000)
-  const wsEvent = useWebSocket(roomId ? `room:${roomId}` : '')
-  useEffect(() => { if (wsEvent) refreshActivity() }, [wsEvent, refreshActivity])
+  const queenRunning = queenStatus?.running === true
+  const queenActive = queenRunning && queenStatus?.agentState !== 'idle'
+
+  // Room activity — poll faster when queen is actively running
+  const { data: activity, refresh: refreshActivity } = usePolling<RoomActivityEntry[]>(
+    () => roomId ? api.rooms.getActivity(roomId, 30) : Promise.resolve([]),
+    queenActive ? 5000 : 30000
+  )
+  const { data: workers } = usePolling<Worker[]>(() => api.workers.list(), 60000)
   useEffect(() => { refreshActivity() }, [roomId, refreshActivity])
 
   // Wallet info
-  const { data: wallet } = usePolling<Wallet | null>(
+  const { data: wallet, refresh: refreshWallet } = usePolling<Wallet | null>(
     () => roomId ? api.wallet.get(roomId).catch(() => null) : Promise.resolve(null),
-    30000
+    60000
   )
-  const { data: revenueSummary } = usePolling<RevenueSummary | null>(
+  const { data: revenueSummary, refresh: refreshRevenueSummary } = usePolling<RevenueSummary | null>(
     () => roomId ? api.wallet.summary(roomId).catch(() => null) : Promise.resolve(null),
-    30000
+    60000
   )
-  const { data: onChainBalance } = usePolling<OnChainBalance | null>(
+  const { data: onChainBalance, refresh: refreshOnChainBalance } = usePolling<OnChainBalance | null>(
     () => roomId && wallet ? api.wallet.balance(roomId).catch(() => null) : Promise.resolve(null),
-    30000
+    120000
   )
 
-  const { data: networkCount } = usePolling<number>(
+  const { data: networkCount, refresh: refreshNetworkCount } = usePolling<number>(
     () => roomId
       ? api.rooms.network(roomId).then(r => r.length).catch(() => 0)
       : Promise.resolve(0),
-    60000
+    120000
   )
+
+  useEffect(() => {
+    if (!roomId) return
+    return wsClient.subscribe(`room:${roomId}`, (event: WsMessage) => {
+      void refreshActivity()
+      void refreshQueenStatus()
+      if (ROOM_BALANCE_EVENT_TYPES.has(event.type)) {
+        void refreshWallet()
+        void refreshRevenueSummary()
+        void refreshOnChainBalance()
+      }
+      if (ROOM_NETWORK_EVENT_TYPES.has(event.type)) {
+        void refreshNetworkCount()
+      }
+    })
+  }, [
+    refreshActivity,
+    refreshNetworkCount,
+    refreshOnChainBalance,
+    refreshQueenStatus,
+    refreshRevenueSummary,
+    refreshWallet,
+    roomId,
+  ])
 
   const [viewMode, setViewMode] = useState<'activity' | 'console'>('activity')
   const [activeFilters, setActiveFilters] = useState<Set<string>>(new Set())
@@ -226,6 +291,31 @@ export function StatusPanel({ onNavigate, advancedMode, roomId }: StatusPanelPro
     </button>
   ) : null
 
+  const AGENT_STATE_LABELS: Record<string, { label: string; color: string }> = {
+    thinking: { label: 'Thinking', color: 'text-interactive' },
+    acting: { label: 'Acting', color: 'text-status-warning' },
+    idle: { label: 'Idle', color: 'text-text-muted' },
+    rate_limited: { label: 'Rate limited', color: 'text-status-error' },
+  }
+
+  const queenCard = roomId && queenStatus ? (
+    <button key="queen" className={cardClass} onClick={() => onNavigate?.('settings')}>
+      <div className="flex items-center justify-between mb-1">
+        <span className="text-sm font-medium text-text-secondary">Queen</span>
+        <span className={`text-sm ${queenRunning ? 'text-status-success' : 'text-text-muted'}`}>
+          {queenRunning ? 'Running' : 'Stopped'}
+        </span>
+      </div>
+      {queenRunning && (
+        <div className="text-sm">
+          <span className={AGENT_STATE_LABELS[queenStatus.agentState]?.color ?? 'text-text-muted'}>
+            {AGENT_STATE_LABELS[queenStatus.agentState]?.label ?? queenStatus.agentState}
+          </span>
+        </div>
+      )}
+    </button>
+  ) : null
+
   const runningSection =
     data.runningRuns.length > 0 ? (
       <div className="p-3 bg-interactive-bg rounded-lg shadow-sm">
@@ -247,17 +337,16 @@ export function StatusPanel({ onNavigate, advancedMode, roomId }: StatusPanelPro
       </div>
     ) : null
 
-  const taskNames: Record<number, string> = {}
-  for (const t of data.tasks) taskNames[t.id] = t.name
-
-  const consoleSection = <LiveConsoleSection runningRuns={data.runningRuns} taskNames={taskNames} />
+  const consoleSection = <LiveConsoleSection isActive={viewMode === 'console' && !!roomId} tasks={data.tasks} roomId={roomId} workers={workers ?? []} queenWorkerId={queenStatus?.workerId ?? null} />
 
   const errorAlert = error ? (
     <div className="px-3 py-2 text-sm text-status-warning bg-status-warning-bg rounded-lg">Temporary data refresh issue: {error}</div>
   ) : null
 
   // Activity timeline
-  const allActivity = activity ?? []
+  const allActivity = [...(activity ?? [])].sort(
+    (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
+  )
   const presentTypes = [...new Set(allActivity.map(a => a.eventType))]
   const isFiltering = activeFilters.size > 0
   const filteredActivity = !isFiltering
@@ -367,7 +456,7 @@ export function StatusPanel({ onNavigate, advancedMode, roomId }: StatusPanelPro
   const activeView = showToggle ? viewMode : 'console'
 
   const toggleBar = showToggle ? (
-    <div className="flex gap-1 bg-interactive-bg rounded-lg p-0.5 self-start shrink-0">
+    <div className="inline-flex gap-1 bg-interactive-bg rounded-lg p-0.5 self-start shrink-0">
       <button
         onClick={() => setViewMode('activity')}
         className={`px-2.5 py-1.5 rounded-lg text-xs font-medium transition-colors ${
@@ -394,15 +483,22 @@ export function StatusPanel({ onNavigate, advancedMode, roomId }: StatusPanelPro
   const header = (
     <div className="flex items-center gap-2 flex-wrap">
       <h2 className="text-base font-semibold text-text-primary">Status</h2>
-      {toggleBar}
     </div>
   )
 
   function renderMainSection(): React.JSX.Element {
-    if (activeView === 'activity') {
-      return activitySection ?? <LiveConsoleSection runningRuns={data.runningRuns} taskNames={taskNames} />
-    }
-    return consoleSection
+    const content = activeView === 'activity'
+      ? (activitySection ?? consoleSection)
+      : consoleSection
+
+    if (!showToggle || !toggleBar) return content
+
+    return (
+      <div className="space-y-2">
+        {toggleBar}
+        {content}
+      </div>
+    )
   }
 
   if (!wide) {
@@ -410,6 +506,7 @@ export function StatusPanel({ onNavigate, advancedMode, roomId }: StatusPanelPro
       <div ref={containerRef} className="p-4 flex flex-col gap-3 min-h-full overflow-x-hidden">
         {header}
         {errorAlert}
+        {queenCard}
         {memoryCard}
         {workersCard}
         {tasksCard}
@@ -423,13 +520,13 @@ export function StatusPanel({ onNavigate, advancedMode, roomId }: StatusPanelPro
     )
   }
 
-  const cards = [memoryCard, workersCard, tasksCard, watchesCard, lastRunCard, walletCard, networkCard].filter(Boolean)
+  const cards = [queenCard, memoryCard, workersCard, tasksCard, watchesCard, lastRunCard, walletCard, networkCard].filter(Boolean)
 
   return (
     <div ref={containerRef} className="p-4 flex flex-col gap-3 min-h-full overflow-x-hidden">
       {header}
       {errorAlert}
-      <div className="grid grid-cols-2 gap-3">{cards}</div>
+      <div className="grid grid-cols-3 gap-3">{cards}</div>
       {runningSection}
       {renderMainSection()}
     </div>

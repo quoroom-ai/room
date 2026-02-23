@@ -1,5 +1,26 @@
 import { useEffect, useRef, useState, useCallback } from 'react'
 import { wsClient, type WsMessage } from '../lib/ws'
+import {
+  ROOM_DECISION_KEEPER_VOTE_EVENT,
+  ROOM_DECISION_RESOLVED_EVENT,
+  ROOM_DECISION_VOTE_CAST_EVENT,
+  ROOM_ESCALATION_CREATED_EVENT,
+  ROOM_GOAL_PROGRESS_EVENT,
+  ROOM_GOAL_UPDATED_EVENT,
+  ROOM_SELF_MOD_EDITED_EVENT,
+  ROOM_SELF_MOD_REVERTED_EVENT,
+  ROOM_SKILL_CREATED_EVENT,
+  ROOM_STATION_CANCELED_EVENT,
+  ROOM_STATION_CREATED_EVENT,
+  ROOM_STATION_DELETED_EVENT,
+  ROOM_STATION_STARTED_EVENT,
+  ROOM_STATION_STOPPED_EVENT,
+  ROOM_WALLET_RECEIVED_EVENT,
+  ROOM_WALLET_SENT_EVENT,
+  RUN_COMPLETED_EVENT,
+  RUN_CREATED_EVENT,
+  RUN_FAILED_EVENT,
+} from '../lib/room-events'
 import type { Room, Worker } from '@shared/types'
 
 // ─── Types ──────────────────────────────────────────────────
@@ -113,75 +134,81 @@ function mapWsEvent(msg: WsMessage, rooms: Room[]): { kind: SwarmEventKind; labe
   }
 
   switch (msg.type) {
-    case 'decision:vote_cast': {
+    case ROOM_DECISION_VOTE_CAST_EVENT: {
       const vote = (data.vote as string) ?? '?'
       return roomId ? { kind: 'vote_cast', label: `Vote: ${vote}`, roomId } : null
     }
-    case 'decision:resolved': {
+    case ROOM_DECISION_RESOLVED_EVENT: {
       const status = data.status as string
       if (status === 'approved') return roomId ? { kind: 'decision_approved', label: 'Approved', roomId } : null
       if (status === 'rejected') return roomId ? { kind: 'decision_rejected', label: 'Rejected', roomId } : null
       if (status === 'vetoed') return roomId ? { kind: 'decision_rejected', label: 'Vetoed', roomId } : null
       return null
     }
-    case 'decision:keeper_vote': {
+    case ROOM_DECISION_KEEPER_VOTE_EVENT: {
       return roomId ? { kind: 'vote_cast', label: 'Keeper voted', roomId } : null
     }
-    case 'goal:progress': {
+    case ROOM_GOAL_PROGRESS_EVENT: {
       const val = data.metricValue as number | undefined
       const label = val != null ? `Goal ${Math.round(val * 100)}%` : 'Goal updated'
       return roomId ? { kind: 'goal_progress', label, roomId } : null
     }
-    case 'goal:updated': {
+    case ROOM_GOAL_UPDATED_EVENT: {
       const status = data.status as string | undefined
       if (status === 'completed') return roomId ? { kind: 'goal_completed', label: 'Goal completed', roomId } : null
       return null
     }
-    case 'escalation:created': {
+    case ROOM_ESCALATION_CREATED_EVENT: {
       return roomId ? { kind: 'escalation', label: 'Escalation', roomId } : null
     }
-    case 'run:created': {
+    case RUN_CREATED_EVENT: {
       // Runs channel doesn't have roomId — try to find the task's room
       // For now just use the first active room as fallback
       const targetRoom = rooms.find(r => r.status === 'active')?.id
       return targetRoom ? { kind: 'task_started', label: 'Task started', roomId: targetRoom } : null
     }
-    case 'run:completed': {
+    case RUN_COMPLETED_EVENT: {
       const targetRoom = (roomId ?? rooms.find(r => r.status === 'active')?.id)
       return targetRoom ? { kind: 'task_completed', label: 'Task done', roomId: targetRoom } : null
     }
-    case 'run:failed': {
+    case RUN_FAILED_EVENT: {
       const targetRoom = (roomId ?? rooms.find(r => r.status === 'active')?.id)
       return targetRoom ? { kind: 'task_failed', label: 'Task failed', roomId: targetRoom } : null
     }
-    case 'skill:created': {
+    case ROOM_SKILL_CREATED_EVENT: {
       return roomId ? { kind: 'skill_created', label: 'Skill created', roomId } : null
     }
-    case 'wallet:sent': {
+    case ROOM_WALLET_SENT_EVENT: {
       const amount = data.amount as number | undefined
       const label = amount ? `-$${amount}` : 'Sent'
       return roomId ? { kind: 'money_sent', label, roomId } : null
     }
-    case 'wallet:received': {
+    case ROOM_WALLET_RECEIVED_EVENT: {
       const amount = data.amount as number | undefined
       const label = amount ? `+$${amount}` : 'Received'
       return roomId ? { kind: 'money_received', label, roomId } : null
     }
-    case 'station:created': {
+    case ROOM_STATION_CREATED_EVENT: {
       return roomId ? { kind: 'station_created', label: 'Station created', roomId } : null
     }
-    case 'station:started': {
+    case ROOM_STATION_STARTED_EVENT: {
       return roomId ? { kind: 'station_started', label: 'Station started', roomId } : null
     }
-    case 'station:stopped': {
+    case ROOM_STATION_STOPPED_EVENT: {
       return roomId ? { kind: 'station_stopped', label: 'Station stopped', roomId } : null
     }
-    case 'self_mod:edited': {
+    case ROOM_STATION_CANCELED_EVENT: {
+      return roomId ? { kind: 'station_stopped', label: 'Station canceled', roomId } : null
+    }
+    case ROOM_STATION_DELETED_EVENT: {
+      return roomId ? { kind: 'station_stopped', label: 'Station deleted', roomId } : null
+    }
+    case ROOM_SELF_MOD_EDITED_EVENT: {
       const reason = (data.reason as string) ?? 'Code modified'
       const short = reason.length > 18 ? reason.slice(0, 17) + '\u2026' : reason
       return roomId ? { kind: 'self_mod', label: short, roomId } : null
     }
-    case 'self_mod:reverted': {
+    case ROOM_SELF_MOD_REVERTED_EVENT: {
       return roomId ? { kind: 'self_mod', label: 'Mod reverted', roomId } : null
     }
     default:

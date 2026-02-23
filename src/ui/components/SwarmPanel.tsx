@@ -1,9 +1,17 @@
-import { useState, useMemo, useCallback, useRef } from 'react'
+import { useState, useMemo, useCallback, useRef, useEffect } from 'react'
 import { usePolling } from '../hooks/usePolling'
 import { useContainerWidth } from '../hooks/useContainerWidth'
 import { useSwarmEvents, type SwarmEventKind } from '../hooks/useSwarmEvents'
 import { api } from '../lib/client'
+import {
+  ROOM_BALANCE_EVENT_TYPES,
+  ROOM_NETWORK_EVENT_TYPES,
+  ROOM_STATION_EVENT_TYPES,
+  ROOMS_UPDATE_EVENT,
+} from '../lib/room-events'
+import { wsClient, type WsMessage } from '../lib/ws'
 import { storageGet, storageSet } from '../lib/storage'
+import { buildKeeperInviteLink, buildKeeperShareLink } from '../lib/referrals'
 import type { Room, Worker, Station, RevenueSummary, OnChainBalance } from '@shared/types'
 
 interface ReferredRoom {
@@ -16,10 +24,28 @@ interface ReferredRoom {
 interface SwarmPanelProps {
   rooms: Room[]
   queenRunning: Record<number, boolean>
+  forcedInviteOpenNonce?: number
   onNavigateToRoom: (roomId: number) => void
 }
 
+interface PlaceholderRoom {
+  kind: 'placeholder'
+  id: string
+  name: string
+  goal: string
+  workerModel: string
+  stationCount: number
+}
+
+interface RealRoomNode {
+  kind: 'room'
+  room: Room
+}
+
+type DisplayRoomNode = RealRoomNode | PlaceholderRoom
+
 interface InviteCard {
+  shareId: string
   imagePath: string
   previewText: string
   label: string
@@ -413,57 +439,94 @@ async function shareToTikTok(svgEl: SVGSVGElement, hideMoney: boolean): Promise<
 
 const INVITE_URL = 'https://quoroom.ai'
 
+const SHARE_IMAGE_BY_ID: Record<string, string> = {
+  '01': '/social-pool-01.png',
+  '02': '/social-pool-02.png',
+  '03': '/social-pool-03.png',
+  '04': '/social-pool-04.png',
+  '06': '/social-pool-06.png',
+  '07': '/social-pool-07.png',
+  '09': '/social-pool-09.png',
+  'v1': '/social-v1-research.png',
+  'v2': '/social-v2-money.png',
+  'v3': '/social-v3-persist.png',
+}
+
 const INVITE_CARDS: InviteCard[] = [
   {
+    shareId: '01',
     imagePath: '/social-variants/social-01.png',
     label: 'AUTONOMOUS INCOME SYSTEMS',
     previewText: 'Is it a game, a money machine, or your new AI team?',
   },
   {
+    shareId: '02',
     imagePath: '/social-variants/social-02.png',
     label: 'AUTONOMOUS INCOME SYSTEMS',
     previewText: 'Is this your next competitive game, or your first autonomous business?',
   },
   {
+    shareId: '03',
     imagePath: '/social-variants/social-03.png',
     label: 'AUTONOMOUS INCOME SYSTEMS',
     previewText: 'Autonomous AI agents earning for their keeper, day and night',
   },
   {
+    shareId: '04',
     imagePath: '/social-variants/social-04.png',
     label: 'LIVE RESEARCH EXPERIMENT',
     previewText: 'Can AI agents turn consistent action into income?',
   },
   {
+    shareId: '06',
     imagePath: '/social-variants/social-06.png',
     label: 'LIVE RESEARCH EXPERIMENT',
     previewText: 'Built like research, shared like a social experiment, focused on making money with AI',
   },
   {
+    shareId: '07',
     imagePath: '/social-variants/social-07.png',
     label: 'SELF-EVOLVING WORKFLOWS',
     previewText: 'Persistent AI that learns, adapts, and keeps earning',
   },
   {
+    shareId: '09',
     imagePath: '/social-variants/social-09.png',
     label: 'SELF-EVOLVING WORKFLOWS',
     previewText: 'Persistent by design, self-evolving by default, focused on real income for their keeper',
   },
   {
+    shareId: 'v1',
     imagePath: '/social-variants-upgraded/social-v1-research.png',
     label: 'LIVE RESEARCH EXPERIMENT',
     previewText: 'Research in public: testing how AI can help ordinary people make money online',
   },
   {
+    shareId: 'v2',
     imagePath: '/social-variants-upgraded/social-v2-money.png',
     label: 'AUTONOMOUS INCOME SYSTEMS',
     previewText: 'Autonomous AI agents that make money for their keeper',
   },
   {
+    shareId: 'v3',
     imagePath: '/social-variants-upgraded/social-v3-persist.png',
     label: 'SELF-EVOLVING WORKFLOWS',
     previewText: 'Persistent by design, self-evolving by default, focused on real income for their keeper',
   },
+]
+
+const SWARM_PLACEHOLDERS: Array<{
+  name: string
+  goal: string
+  workerModel: string
+  stationCount: number
+}> = [
+  { name: 'Placeholder Market Lab', goal: 'Test 3 market angles and keep winners', workerModel: 'claude', stationCount: 2 },
+  { name: 'Placeholder Offer Studio', goal: 'Build offer pages and run conversion checks', workerModel: 'codex', stationCount: 3 },
+  { name: 'Placeholder Support Mesh', goal: 'Handle inbound leads and route hot threads', workerModel: 'claude', stationCount: 2 },
+  { name: 'Placeholder Growth Relay', goal: 'Run daily growth tasks across channels', workerModel: 'claude', stationCount: 2 },
+  { name: 'Placeholder Treasury Pod', goal: 'Track spend, income, and weekly burn', workerModel: 'codex', stationCount: 1 },
+  { name: 'Placeholder QA Ring', goal: 'Review outputs and ship safe updates', workerModel: 'claude', stationCount: 2 },
 ]
 
 function pickDifferentIndex(current: number, total: number): number {
@@ -486,20 +549,38 @@ async function copyText(text: string): Promise<boolean> {
 
 // ─── Component ─────────────────────────────────────────────
 
-export function SwarmPanel({ rooms, queenRunning, onNavigateToRoom }: SwarmPanelProps): React.JSX.Element {
+export function SwarmPanel({ rooms, queenRunning, forcedInviteOpenNonce, onNavigateToRoom }: SwarmPanelProps): React.JSX.Element {
   const [containerRef, containerWidth] = useContainerWidth<HTMLDivElement>()
   const [hoveredRoomId, setHoveredRoomId] = useState<number | null>(null)
   const [tooltipPos, setTooltipPos] = useState<{ x: number; y: number }>({ x: 0, y: 0 })
   const [shareOpen, setShareOpen] = useState(false)
   const [inviteOpen, setInviteOpen] = useState(false)
   const [shareStatus, setShareStatus] = useState<string | null>(null)
+  const [inviteCopyStatus, setInviteCopyStatus] = useState<string | null>(null)
   const [showMoney, setShowMoney] = useState<boolean>(() => storageGet('quoroom_swarm_money') !== 'false')
   const [inviteCardIndex, setInviteCardIndex] = useState<number>(() => Math.floor(Math.random() * INVITE_CARDS.length))
   const svgRef = useRef<SVGSVGElement>(null)
+  const forcedInviteRef = useRef<number | undefined>(forcedInviteOpenNonce)
 
-  const { data: allWorkers } = usePolling<Worker[]>(() => api.workers.list(), 15000)
+  const { data: keeperReferral } = usePolling<{ code: string; inviteUrl: string; shareUrl: string }>(
+    () => api.settings.getReferral(),
+    120000
+  )
+  const keeperReferralCode = (keeperReferral?.code ?? '').trim()
+  const keeperInviteUrl = keeperReferralCode ? buildKeeperInviteLink(keeperReferralCode, INVITE_URL) : `${INVITE_URL}/app/start`
+  const activeInviteShareUrl = buildKeeperShareLink(keeperReferralCode, INVITE_CARDS[inviteCardIndex]?.shareId ?? 'v2', INVITE_URL)
 
-  const { data: stationMap } = usePolling<Record<number, Station[]>>(
+  useEffect(() => {
+    if (forcedInviteOpenNonce === undefined) return
+    if (forcedInviteRef.current === forcedInviteOpenNonce) return
+    forcedInviteRef.current = forcedInviteOpenNonce
+    setInviteOpen(true)
+    setShareOpen(false)
+  }, [forcedInviteOpenNonce])
+
+  const { data: allWorkers, refresh: refreshWorkers } = usePolling<Worker[]>(() => api.workers.list(), 30000)
+
+  const { data: stationMap, refresh: refreshStationMap } = usePolling<Record<number, Station[]>>(
     async () => {
       if (rooms.length === 0) return {}
       const entries = await Promise.all(
@@ -510,10 +591,10 @@ export function SwarmPanel({ rooms, queenRunning, onNavigateToRoom }: SwarmPanel
       )
       return Object.fromEntries(entries)
     },
-    20000
+    60000
   )
 
-  const { data: revenueMap } = usePolling<Record<number, RevenueSummary>>(
+  const { data: revenueMap, refresh: refreshRevenueMap } = usePolling<Record<number, RevenueSummary>>(
     async () => {
       if (rooms.length === 0) return {}
       const entries = await Promise.all(
@@ -524,10 +605,10 @@ export function SwarmPanel({ rooms, queenRunning, onNavigateToRoom }: SwarmPanel
       )
       return Object.fromEntries(entries.filter(([, v]) => v !== null)) as Record<number, RevenueSummary>
     },
-    30000
+    60000
   )
 
-  const { data: balanceMap } = usePolling<Record<number, OnChainBalance>>(
+  const { data: balanceMap, refresh: refreshBalanceMap } = usePolling<Record<number, OnChainBalance>>(
     async () => {
       if (rooms.length === 0) return {}
       const wallets = await Promise.all(
@@ -543,22 +624,105 @@ export function SwarmPanel({ rooms, queenRunning, onNavigateToRoom }: SwarmPanel
       )
       return Object.fromEntries(entries.filter(([, v]) => v !== null)) as Record<number, OnChainBalance>
     },
-    30000
+    90000
   )
 
-  const { data: referredMap } = usePolling<Record<number, ReferredRoom[]>>(
+  const { data: referredMap, refresh: refreshReferredMap } = usePolling<Record<number, ReferredRoom[]>>(
     async () => {
       if (rooms.length === 0) return {}
-      const entries = await Promise.all(
-        rooms.map(async r => {
-          const referred = await api.rooms.network(r.id).catch(() => [] as ReferredRoom[])
-          return [r.id, referred] as const
+      const [allRooms, entries] = await Promise.all([
+        api.rooms.list().catch(() => [] as Room[]),
+        Promise.all(
+          rooms.map(async r => {
+            const referred = await api.rooms.network(r.id).catch(() => [] as ReferredRoom[])
+            return [r.id, referred] as const
+          })
+        )
+      ])
+
+      const networkMap = Object.fromEntries(entries)
+      if (allRooms.length === 0 || !keeperReferralCode) return networkMap
+
+      // Local fallback: show rooms referred by keeper code under one anchor room.
+      const anchorRoomId = [...rooms].sort((a, b) => a.id - b.id)[0]?.id ?? null
+      if (!anchorRoomId) return networkMap
+      if ((networkMap[anchorRoomId] ?? []).length > 0) return networkMap
+
+      const refs = allRooms
+        .filter((candidate) =>
+          candidate.id !== anchorRoomId
+          && (candidate.referredByCode?.trim() ?? '') === keeperReferralCode
+          && candidate.status === 'stopped'
+        )
+        .map((candidate): ReferredRoom => {
+          if (candidate.visibility !== 'public') {
+            return {
+              roomId: `local-${candidate.id}`,
+              visibility: 'private',
+              registeredAt: candidate.createdAt,
+            }
+          }
+          return {
+            roomId: `local-${candidate.id}`,
+            visibility: 'public',
+            name: candidate.name,
+            goal: candidate.goal ?? undefined,
+            queenModel: candidate.workerModel ?? null,
+            online: false,
+            registeredAt: candidate.createdAt,
+          }
         })
-      )
-      return Object.fromEntries(entries)
+
+      if (refs.length > 0) networkMap[anchorRoomId] = refs
+
+      return networkMap
     },
     60000
   )
+
+  useEffect(() => {
+    refreshReferredMap()
+  }, [rooms, refreshReferredMap])
+
+  useEffect(() => {
+    return wsClient.subscribe('workers', () => {
+      void refreshWorkers()
+    })
+  }, [refreshWorkers])
+
+  useEffect(() => {
+    return wsClient.subscribe('rooms', (event: WsMessage) => {
+      if (event.type !== ROOMS_UPDATE_EVENT) return
+      void refreshReferredMap()
+      void refreshStationMap()
+      void refreshRevenueMap()
+      void refreshBalanceMap()
+    })
+  }, [refreshBalanceMap, refreshReferredMap, refreshRevenueMap, refreshStationMap])
+
+  useEffect(() => {
+    if (rooms.length === 0) return
+    const unsubs = rooms.map((room) =>
+      wsClient.subscribe(`room:${room.id}`, (event: WsMessage) => {
+        if (ROOM_STATION_EVENT_TYPES.has(event.type)) {
+          void refreshStationMap()
+        }
+        if (ROOM_BALANCE_EVENT_TYPES.has(event.type)) {
+          void refreshRevenueMap()
+          void refreshBalanceMap()
+        }
+        if (ROOM_NETWORK_EVENT_TYPES.has(event.type)) {
+          void refreshReferredMap()
+        }
+        if (event.type === 'room:queen_started' || event.type === 'room:queen_stopped' || event.type === 'room:deleted') {
+          void refreshReferredMap()
+        }
+      })
+    )
+    return () => {
+      for (const unsub of unsubs) unsub()
+    }
+  }, [rooms, refreshBalanceMap, refreshReferredMap, refreshRevenueMap, refreshStationMap])
 
   const totalReferred = useMemo(
     () => Object.values(referredMap ?? {}).reduce((s, arr) => s + arr.length, 0),
@@ -582,6 +746,20 @@ export function SwarmPanel({ rooms, queenRunning, onNavigateToRoom }: SwarmPanel
   const { events: swarmEvents, ripples: swarmRipples } = useSwarmEvents(rooms, allWorkers)
 
   const showSatellites = containerWidth >= 400
+  const displayRooms = useMemo<DisplayRoomNode[]>(() => {
+    const realNodes: DisplayRoomNode[] = rooms.map((room) => ({ kind: 'room', room }))
+    if (rooms.length >= 2) return realNodes
+    const needed = Math.max(0, 6 - rooms.length)
+    const placeholders = SWARM_PLACEHOLDERS.slice(0, needed).map((tpl, idx): DisplayRoomNode => ({
+      kind: 'placeholder',
+      id: `placeholder-${idx + 1}`,
+      name: tpl.name,
+      goal: tpl.goal,
+      workerModel: tpl.workerModel,
+      stationCount: tpl.stationCount,
+    }))
+    return [...realNodes, ...placeholders]
+  }, [rooms])
 
   // Honeycomb grid — satellites now hug the hex border
   const satOutreach = SAT_R * 2 + 6 // how far satellites stick out past hex border
@@ -593,16 +771,27 @@ export function SwarmPanel({ rooms, queenRunning, onNavigateToRoom }: SwarmPanel
   const cols = Math.max(1, Math.floor(usableWidth / colSpacing) + 1)
 
   const positions = useMemo(() => {
-    return rooms.map((room, i) => {
+    return displayRooms.map((node, i) => {
       const col = i % cols
       const row = Math.floor(i / cols)
       const cx = margin + col * colSpacing
       const cy = margin + row * rowSpacing + (col % 2 === 1 ? rowSpacing * 0.5 : 0)
-      return { room, cx, cy }
+      return { node, cx, cy }
     })
-  }, [rooms, cols, margin, colSpacing, rowSpacing])
+  }, [displayRooms, cols, margin, colSpacing, rowSpacing])
 
-  // Ring positions for referred rooms around each user room
+  const mainMaxY = useMemo(() => {
+    if (positions.length === 0) return margin
+    return Math.max(...positions.map((p) => p.cy))
+  }, [positions, margin])
+
+  const realRoomMaxY = useMemo(() => {
+    const ys = positions.filter((p) => p.node.kind === 'room').map((p) => p.cy)
+    if (ys.length === 0) return mainMaxY
+    return Math.max(...ys)
+  }, [positions, mainMaxY])
+
+  // Referred rooms are placed below the main swarm so they are always reachable via scroll.
   const referredPositions = useMemo(() => {
     const result: Array<{
       ref: ReferredRoom
@@ -610,28 +799,26 @@ export function SwarmPanel({ rooms, queenRunning, onNavigateToRoom }: SwarmPanel
       cx: number
       cy: number
     }> = []
-    for (const { room, cx, cy } of positions) {
+    const referredStartY = realRoomMaxY + ROOM_R + REFERRED_R + 8
+    const referredRowGap = REFERRED_R * 2 + 22
+
+    for (const { node, cx, cy } of positions) {
+      if (node.kind !== 'room') continue
+      const room = node.room
       const refs = (referredMap ?? {})[room.id] ?? []
       if (refs.length === 0) continue
-      const ringDist = ROOM_R + 24 + REFERRED_R
-      const maxPerRing = Math.max(6, Math.floor((2 * Math.PI * ringDist) / (REFERRED_R * 2.2)))
+
       refs.forEach((ref, i) => {
-        const ring = Math.floor(i / maxPerRing)
-        const idxInRing = i % maxPerRing
-        const countInRing = Math.min(refs.length - ring * maxPerRing, maxPerRing)
-        const dist = ringDist + ring * (REFERRED_R * 2.2)
-        const angleStep = (2 * Math.PI) / countInRing
-        const angle = -Math.PI / 2 + idxInRing * angleStep
         result.push({
           ref,
           parentRoomId: room.id,
-          cx: cx + dist * Math.cos(angle),
-          cy: cy + dist * Math.sin(angle),
+          cx,
+          cy: referredStartY + i * referredRowGap,
         })
       })
     }
     return result
-  }, [positions, referredMap])
+  }, [positions, referredMap, realRoomMaxY])
 
   const svgWidth = useMemo(() => {
     if (positions.length === 0) return 300
@@ -648,7 +835,10 @@ export function SwarmPanel({ rooms, queenRunning, onNavigateToRoom }: SwarmPanel
   // Event bubble positioning
   const roomPositionMap = useMemo(() => {
     const map = new Map<number, { cx: number; cy: number }>()
-    for (const p of positions) map.set(p.room.id, { cx: p.cx, cy: p.cy })
+    for (const p of positions) {
+      if (p.node.kind !== 'room') continue
+      map.set(p.node.room.id, { cx: p.cx, cy: p.cy })
+    }
     return map
   }, [positions])
 
@@ -677,30 +867,36 @@ export function SwarmPanel({ rooms, queenRunning, onNavigateToRoom }: SwarmPanel
     setInviteCardIndex(prev => pickDifferentIndex(prev, INVITE_CARDS.length))
   }, [])
 
+  const handleCopyInviteItem = useCallback(async (value: string, label: string) => {
+    const copied = await copyText(value)
+    setInviteCopyStatus(copied ? `${label} copied` : `Failed to copy ${label.toLowerCase()}`)
+    setTimeout(() => setInviteCopyStatus(null), 2500)
+  }, [])
+
   const handleInviteShare = useCallback(async (platform: 'twitter' | 'instagram' | 'facebook' | 'sms' | 'telegram') => {
     const card = INVITE_CARDS[inviteCardIndex]
-    const imageUrl = `${window.location.origin}${card.imagePath}`
-    const shareText = `${card.previewText}\n\n${INVITE_URL}`
+    const shareUrl = buildKeeperShareLink(keeperReferralCode, card.shareId, INVITE_URL)
+    const cloudImagePath = SHARE_IMAGE_BY_ID[card.shareId] ?? '/social-v2-money.png'
+    const imageUrl = `${INVITE_URL}${cloudImagePath}`
+    const shareText = `${card.previewText}\n\n${shareUrl}`
     switch (platform) {
       case 'twitter': {
-        // X/Twitter web intent cannot upload a local file, so we attach the selected
-        // hosted image URL and keep quoroom.ai in the tweet body.
-        const text = encodeURIComponent(`${card.previewText}\n${INVITE_URL}`)
-        const url = encodeURIComponent(imageUrl)
+        const text = encodeURIComponent(card.previewText)
+        const url = encodeURIComponent(shareUrl)
         window.open(`https://twitter.com/intent/tweet?text=${text}&url=${url}`, '_blank')
         setShareStatus('Opened Twitter')
         break
       }
       case 'facebook': {
         const quote = encodeURIComponent(card.previewText)
-        const url = encodeURIComponent(INVITE_URL)
+        const url = encodeURIComponent(shareUrl)
         window.open(`https://www.facebook.com/sharer/sharer.php?u=${url}&quote=${quote}`, '_blank')
         setShareStatus('Opened Facebook')
         break
       }
       case 'telegram': {
         const text = encodeURIComponent(card.previewText)
-        const url = encodeURIComponent(INVITE_URL)
+        const url = encodeURIComponent(shareUrl)
         window.open(`https://t.me/share/url?url=${url}&text=${text}`, '_blank')
         setShareStatus('Opened Telegram')
         break
@@ -712,7 +908,7 @@ export function SwarmPanel({ rooms, queenRunning, onNavigateToRoom }: SwarmPanel
         break
       }
       case 'instagram': {
-        const copied = await copyText(`${card.previewText}\n${INVITE_URL}`)
+        const copied = await copyText(`${card.previewText}\n${shareUrl}`)
         window.open(imageUrl, '_blank')
         window.open('https://www.instagram.com/', '_blank')
         setShareStatus(copied ? 'Caption copied. Upload image in Instagram.' : 'Opened Instagram and image.')
@@ -720,7 +916,7 @@ export function SwarmPanel({ rooms, queenRunning, onNavigateToRoom }: SwarmPanel
       }
     }
     setTimeout(() => setShareStatus(null), 3500)
-  }, [inviteCardIndex])
+  }, [inviteCardIndex, keeperReferralCode])
 
   const handleShare = useCallback(async (platform: 'download' | 'twitter' | 'instagram' | 'tiktok') => {
     if (!svgRef.current) return
@@ -737,20 +933,6 @@ export function SwarmPanel({ rooms, queenRunning, onNavigateToRoom }: SwarmPanel
     setTimeout(() => setShareStatus(null), 3000)
     setShareOpen(false)
   }, [showMoney])
-
-  // ─── Empty state ─────────────────────────────────────────
-
-  if (rooms.length === 0) {
-    return (
-      <div className="flex flex-col items-center justify-center h-full text-center py-12">
-        <svg width="72" height="72" viewBox="0 0 72 72" className="mb-3">
-          <polygon points={hexPoints(36, 36, 30)} fill="none" stroke="var(--border-primary)" strokeWidth="2" />
-        </svg>
-        <p className="text-sm text-text-muted">No rooms in the swarm yet.</p>
-        <p className="text-xs text-text-muted mt-1">Create a room to see it here.</p>
-      </div>
-    )
-  }
 
   // ─── Render ──────────────────────────────────────────────
 
@@ -797,7 +979,7 @@ export function SwarmPanel({ rooms, queenRunning, onNavigateToRoom }: SwarmPanel
               setInviteOpen(true)
               setShareOpen(false)
             }}
-            className="px-4 py-2 text-sm font-medium rounded-lg bg-surface-secondary text-text-secondary border border-border-primary hover:bg-surface-hover transition-colors flex items-center gap-1.5"
+            className="px-4 py-2 text-sm font-medium rounded-lg bg-interactive text-text-invert hover:bg-interactive-hover transition-colors flex items-center gap-1.5 shadow-sm"
           >
             <svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" className="shrink-0">
               <path d="M8 2v12M2 8h12" strokeLinecap="round" />
@@ -876,19 +1058,56 @@ export function SwarmPanel({ rooms, queenRunning, onNavigateToRoom }: SwarmPanel
             </div>
 
             <div className="grid gap-4 p-4 md:grid-cols-[1.4fr_1fr]">
-              <div className="rounded-lg border border-border-primary bg-surface-secondary p-2">
-                <img
-                  src={INVITE_CARDS[inviteCardIndex].imagePath}
-                  alt={`Invite preview: ${INVITE_CARDS[inviteCardIndex].previewText}`}
-                  className="w-full h-auto rounded-md"
-                />
-              </div>
-
               <div className="flex flex-col gap-3">
+                <div className="rounded-lg border border-border-primary bg-surface-secondary p-2">
+                  <img
+                    src={INVITE_CARDS[inviteCardIndex].imagePath}
+                    alt={`Invite preview: ${INVITE_CARDS[inviteCardIndex].previewText}`}
+                    className="w-full h-auto rounded-md"
+                  />
+                </div>
+
                 <div className="rounded-lg border border-border-primary bg-surface-secondary px-3 py-2">
                   <div className="text-[11px] tracking-[0.16em] uppercase text-text-muted mb-2">{INVITE_CARDS[inviteCardIndex].label}</div>
                   <p className="text-sm text-text-secondary leading-relaxed">{INVITE_CARDS[inviteCardIndex].previewText}</p>
-                  <p className="text-xs text-interactive mt-2">{INVITE_URL}</p>
+                  <p className="text-xs text-interactive mt-2 break-all">{activeInviteShareUrl}</p>
+                </div>
+              </div>
+
+              <div className="flex flex-col gap-3">
+                <div className="rounded-lg border border-border-primary bg-surface-secondary px-3 py-2 space-y-2">
+                  <div>
+                    <div className="text-[11px] uppercase tracking-[0.12em] text-text-muted mb-1">Your keeper code</div>
+                    <div className="flex items-center gap-2">
+                      <code className="flex-1 text-xs px-2 py-1 rounded bg-surface-primary border border-border-primary text-text-secondary break-all">
+                        {keeperReferralCode || 'Code unavailable'}
+                      </code>
+                      <button
+                        onClick={() => { if (keeperReferralCode) void handleCopyInviteItem(keeperReferralCode, 'Code') }}
+                        disabled={!keeperReferralCode}
+                        className="px-2.5 py-1 text-xs rounded-lg bg-interactive text-text-invert hover:bg-interactive-hover transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                      >
+                        Copy
+                      </button>
+                    </div>
+                  </div>
+                  <div>
+                    <div className="text-[11px] uppercase tracking-[0.12em] text-text-muted mb-1">Invite link</div>
+                    <div className="flex items-center gap-2">
+                      <code className="flex-1 text-xs px-2 py-1 rounded bg-surface-primary border border-border-primary text-text-secondary break-all">
+                        {keeperInviteUrl}
+                      </code>
+                      <button
+                        onClick={() => void handleCopyInviteItem(keeperInviteUrl, 'Link')}
+                        className="px-2.5 py-1 text-xs rounded-lg bg-interactive text-text-invert hover:bg-interactive-hover transition-colors"
+                      >
+                        Copy
+                      </button>
+                    </div>
+                  </div>
+                  {inviteCopyStatus && (
+                    <p className="text-xs text-text-muted">{inviteCopyStatus}</p>
+                  )}
                 </div>
 
                 <button
@@ -920,27 +1139,36 @@ export function SwarmPanel({ rooms, queenRunning, onNavigateToRoom }: SwarmPanel
           className="block"
           style={{ fontFamily: 'system-ui, -apple-system, sans-serif' }}
         >
-          {positions.map(({ room, cx, cy }) => {
-            const running = room.status === 'active' && queenRunning[room.id]
-            const { fill, stroke } = roomColors(room, running)
-            const workers = workersPerRoom[room.id] ?? []
-            const stations = (stationMap ?? {})[room.id] ?? []
-            const revenue = (revenueMap ?? {})[room.id]
-            const isHovered = hoveredRoomId === room.id
-            const totalSats = workers.length + stations.length
+          {positions.map(({ node, cx, cy }) => {
+            const isPlaceholder = node.kind === 'placeholder'
+            const room = node.kind === 'room' ? node.room : null
+            const running = room ? (room.status === 'active' && queenRunning[room.id]) : false
+            const roomStateColors = room ? roomColors(room, running) : { fill: 'var(--surface-secondary)', stroke: 'var(--border-primary)' }
+            const fill = isPlaceholder ? 'var(--surface-secondary)' : roomStateColors.fill
+            const stroke = isPlaceholder ? 'var(--border-primary)' : roomStateColors.stroke
+            const workers = room ? (workersPerRoom[room.id] ?? []) : []
+            const stations = room ? ((stationMap ?? {})[room.id] ?? []) : []
+            const placeholderStationCount = isPlaceholder ? node.stationCount : 0
+            const revenue = room ? ((revenueMap ?? {})[room.id]) : undefined
+            const isHovered = room ? hoveredRoomId === room.id : false
+            const totalSats = workers.length + stations.length + placeholderStationCount
             const satPositions = showSatellites ? satellitePositions(cx, cy, totalSats) : []
 
             // Queen model
-            const queenWorker = workers.find(w => w.id === room.queenWorkerId)
-            const queenModel = queenWorker?.model || room.workerModel
+            const queenWorker = room ? workers.find(w => w.id === room.queenWorkerId) : null
+            const queenModel = room ? (queenWorker?.model || room.workerModel) : node.workerModel
 
             // Goal text wrapped into lines
-            const goalText = room.goal || 'No objective set'
-            const goalLines = wrapText(goalText, 28).slice(0, 6) // max 6 lines
+            const goalLines = isPlaceholder
+              ? [...wrapText(node.name, 24), ...wrapText(node.goal, 28)].slice(0, 6)
+              : wrapText(room?.goal || 'No objective set', 28).slice(0, 6) // max 6 lines
 
             // Life indicators
             const busyWorkers = workers.filter(w => w.agentState === 'thinking' || w.agentState === 'acting').length
             const activeStations = stations.filter(s => s.status === 'active').length
+            const lifeLabel = isPlaceholder
+              ? `0w · ${placeholderStationCount}s preview`
+              : `${workers.length}w${busyWorkers > 0 ? ` (${busyWorkers} active)` : ''}${stations.length > 0 ? ` · ${stations.length}s${activeStations > 0 ? ` (${activeStations} up)` : ''}` : ''}`
 
             // Layout: goal lines at top, then gap, then life bar, then model, then money
             const lineH = 16
@@ -955,11 +1183,12 @@ export function SwarmPanel({ rooms, queenRunning, onNavigateToRoom }: SwarmPanel
 
             return (
               <g
-                key={room.id}
-                className="cursor-pointer"
-                onClick={() => onNavigateToRoom(room.id)}
-                onMouseEnter={() => setHoveredRoomId(room.id)}
-                onMouseLeave={() => setHoveredRoomId(null)}
+                key={room ? String(room.id) : node.id}
+                className={room ? 'cursor-pointer' : 'cursor-default'}
+                onClick={room ? () => onNavigateToRoom(room.id) : undefined}
+                onMouseEnter={room ? () => setHoveredRoomId(room.id) : undefined}
+                onMouseLeave={room ? () => setHoveredRoomId(null) : undefined}
+                opacity={isPlaceholder ? 0.72 : 1}
               >
                 {/* Room hexagon */}
                 <polygon
@@ -967,6 +1196,7 @@ export function SwarmPanel({ rooms, queenRunning, onNavigateToRoom }: SwarmPanel
                   fill={fill}
                   stroke={stroke}
                   strokeWidth={isHovered ? 3 : 1.5}
+                  strokeDasharray={isPlaceholder ? '10 5' : undefined}
                   className={running ? 'hex-pulse' : ''}
                   style={{ transition: 'stroke-width 150ms' }}
                 />
@@ -981,7 +1211,7 @@ export function SwarmPanel({ rooms, queenRunning, onNavigateToRoom }: SwarmPanel
                     dominantBaseline="middle"
                     fontSize={li === 0 ? '14' : '13'}
                     fontWeight={li === 0 ? '600' : '400'}
-                    fill={room.goal ? 'var(--text-primary)' : 'var(--text-muted)'}
+                    fill={isPlaceholder ? 'var(--text-muted)' : (room?.goal ? 'var(--text-primary)' : 'var(--text-muted)')}
                     style={{ pointerEvents: 'none' }}
                   >
                     {line}
@@ -998,8 +1228,7 @@ export function SwarmPanel({ rooms, queenRunning, onNavigateToRoom }: SwarmPanel
                   fill="var(--text-secondary)"
                   style={{ pointerEvents: 'none' }}
                 >
-                  {workers.length}w{busyWorkers > 0 ? ` (${busyWorkers} active)` : ''}
-                  {stations.length > 0 ? ` \u00b7 ${stations.length}s${activeStations > 0 ? ` (${activeStations} up)` : ''}` : ''}
+                  {lifeLabel}
                 </text>
 
                 {/* Queen model */}
@@ -1010,14 +1239,14 @@ export function SwarmPanel({ rooms, queenRunning, onNavigateToRoom }: SwarmPanel
                   dominantBaseline="middle"
                   fontSize="13"
                   fontWeight="500"
-                  fill="var(--interactive)"
+                  fill={isPlaceholder ? 'var(--text-muted)' : 'var(--interactive)'}
                   style={{ pointerEvents: 'none' }}
                 >
                   {fmtModel(queenModel)}
                 </text>
 
                 {/* Money line — always shown when $ toggle is on */}
-                {showMoney && (
+                {showMoney && !isPlaceholder && (
                   <text
                     x={cx}
                     y={startY + goalBlockH + moneyLineY + 8}
@@ -1042,12 +1271,12 @@ export function SwarmPanel({ rooms, queenRunning, onNavigateToRoom }: SwarmPanel
                 )}
 
                 {/* Queen running indicator */}
-                {running && (
+                {!isPlaceholder && running && (
                   <circle cx={cx + ROOM_R - 20} cy={cy - ROOM_R * 0.42} r={6} fill="var(--status-success)" className="hex-pulse" />
                 )}
 
                 {/* Status dot (paused) */}
-                {room.status === 'paused' && (
+                {!isPlaceholder && room?.status === 'paused' && (
                   <circle cx={cx + ROOM_R - 20} cy={cy - ROOM_R * 0.42} r={6} fill="var(--status-warning)" />
                 )}
 
@@ -1078,6 +1307,34 @@ export function SwarmPanel({ rooms, queenRunning, onNavigateToRoom }: SwarmPanel
                         fill={stationColor(s.status)}
                         stroke="var(--border-primary)"
                         strokeWidth={0.8}
+                      />
+                      <rect
+                        x={pos[0] - 5}
+                        y={pos[1] - 3.5}
+                        width={10}
+                        height={6}
+                        rx={1.5}
+                        fill="none"
+                        stroke="var(--text-muted)"
+                        strokeWidth={0.8}
+                        style={{ pointerEvents: 'none' }}
+                      />
+                    </g>
+                  )
+                })}
+
+                {/* Placeholder station satellites */}
+                {showSatellites && isPlaceholder && Array.from({ length: placeholderStationCount }).map((_, si) => {
+                  const pos = satPositions[workers.length + stations.length + si]
+                  if (!pos) return null
+                  return (
+                    <g key={`placeholder-s-${si}`}>
+                      <polygon
+                        points={hexPoints(pos[0], pos[1], SAT_R)}
+                        fill={stationColor(si % 2 === 0 ? 'pending' : 'idle')}
+                        stroke="var(--border-primary)"
+                        strokeWidth={0.8}
+                        strokeDasharray="5 2"
                       />
                       <rect
                         x={pos[0] - 5}
@@ -1224,6 +1481,7 @@ export function SwarmPanel({ rooms, queenRunning, onNavigateToRoom }: SwarmPanel
             <span className="flex items-center gap-1.5"><span className="inline-block w-2.5 h-2.5 rounded-full bg-status-warning" /> Paused</span>
             <span className="flex items-center gap-1.5"><span className="inline-block w-2.5 h-2.5 rounded-full bg-surface-tertiary" /> Idle / stopped</span>
           </div>
+          <p>Small dashed hexagons are <strong className="text-text-secondary">invited network rooms</strong> linked to a parent room.</p>
           <p>Each large hexagon is a <strong className="text-text-secondary">room</strong> — an autonomous agent collective with a queen, workers, and optional stations. Small hexagons on the border are <strong className="text-text-secondary">workers</strong> (agents) and <strong className="text-text-secondary">stations</strong> (cloud compute). Smaller hexagons with dashed borders are rooms in your <strong className="text-text-secondary">network</strong> — created via your invite links. Click a room to open it.</p>
           <p>Toggle the <strong className="text-text-secondary">$</strong> button to show or hide financial info. Use <strong className="text-text-secondary">Share</strong> to export your swarm as an image.</p>
         </div>

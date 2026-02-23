@@ -65,6 +65,7 @@ export function registerTaskRoutes(router: Router): void {
     const body = ctx.body as Record<string, unknown> || {}
     queries.updateTask(ctx.db, id, body)
     const updated = queries.getTask(ctx.db, id)
+    if (updated) eventBus.emit('tasks', 'task:updated', updated)
     return { data: updated }
   })
 
@@ -74,6 +75,7 @@ export function registerTaskRoutes(router: Router): void {
     if (!task) return { status: 404, error: 'Task not found' }
 
     queries.deleteTask(ctx.db, id)
+    eventBus.emit('tasks', 'task:deleted', { id })
     return { data: { ok: true } }
   })
 
@@ -83,6 +85,7 @@ export function registerTaskRoutes(router: Router): void {
     if (!task) return { status: 404, error: 'Task not found' }
 
     queries.pauseTask(ctx.db, id)
+    eventBus.emit('tasks', 'task:paused', { id })
     return { data: { ok: true } }
   })
 
@@ -92,6 +95,7 @@ export function registerTaskRoutes(router: Router): void {
     if (!task) return { status: 404, error: 'Task not found' }
 
     queries.resumeTask(ctx.db, id)
+    eventBus.emit('tasks', 'task:resumed', { id })
     return { data: { ok: true } }
   })
 
@@ -111,6 +115,7 @@ export function registerTaskRoutes(router: Router): void {
       return { status: 409, error: result.reason ?? 'Task is already running' }
     }
 
+    eventBus.emit('tasks', 'task:run_requested', { id })
     return { status: 202, data: { ok: true } }
   })
 
@@ -120,6 +125,7 @@ export function registerTaskRoutes(router: Router): void {
     if (!task) return { status: 404, error: 'Task not found' }
 
     queries.clearTaskSession(ctx.db, id)
+    eventBus.emit('tasks', 'task:session_reset', { id })
     return { data: { ok: true } }
   })
 }

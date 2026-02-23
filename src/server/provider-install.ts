@@ -111,6 +111,13 @@ function toSessionView(session: ProviderInstallSessionInternal, includeLines = t
 
 function emitSessionStatus(session: ProviderInstallSessionInternal): void {
   eventBus.emit(`provider-install:${session.sessionId}`, 'provider_install:status', toSessionView(session, false))
+  eventBus.emit('providers', 'providers:install_status', {
+    provider: session.provider,
+    sessionId: session.sessionId,
+    status: session.status,
+    active: isActiveStatus(session.status),
+    updatedAt: session.updatedAt,
+  })
 }
 
 function emitSessionLine(session: ProviderInstallSessionInternal, line: ProviderInstallLine): void {

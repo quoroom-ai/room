@@ -1,5 +1,5 @@
 import type Database from 'better-sqlite3'
-import type { Entity, Observation, Relation, MemoryStats, Task, CreateTaskInput, TaskRun, Worker, CreateWorkerInput, TriggerType, TaskStatus, Watch, ConsoleLogEntry, Room, RoomConfig, RoomActivityEntry, ActivityEventType, QuorumDecision, DecisionType, DecisionStatus, QuorumVote, VoteValue, Goal, GoalStatus, GoalUpdate, Skill, SelfModAuditEntry, SelfModSnapshot, Escalation, EscalationStatus, ChatMessage, Credential, Wallet, WalletTransaction, WalletTransactionType, Station, StationStatus, StationProvider, StationTier, RoomMessage, RevenueSummary } from './types'
+import type { Entity, Observation, Relation, MemoryStats, Task, CreateTaskInput, TaskRun, Worker, CreateWorkerInput, TriggerType, TaskStatus, Watch, ConsoleLogEntry, Room, RoomConfig, RoomActivityEntry, ActivityEventType, QuorumDecision, DecisionType, DecisionStatus, QuorumVote, VoteValue, Goal, GoalStatus, GoalUpdate, Skill, SelfModAuditEntry, SelfModSnapshot, Escalation, EscalationStatus, ChatMessage, Credential, Wallet, WalletTransaction, WalletTransactionType, Station, StationStatus, StationProvider, StationTier, RoomMessage, RevenueSummary, WorkerCycle, CycleLogEntry } from './types'
 import { DEFAULT_ROOM_CONFIG } from './constants'
 import { encryptSecret, decryptSecret } from './secret-store'
 
@@ -466,6 +466,17 @@ export function listAllRuns(db: Database.Database, limit: number = 20): TaskRun[
   const rows = db
     .prepare('SELECT * FROM task_runs ORDER BY started_at DESC LIMIT ?')
     .all(safeLimit)
+  return (rows as Record<string, unknown>[]).map(mapTaskRunRow)
+}
+
+export function listRunsByRoom(db: Database.Database, roomId: number, limit: number = 50): TaskRun[] {
+  const safeLimit = clampLimit(limit, 50, 500)
+  const rows = db
+    .prepare(`SELECT tr.* FROM task_runs tr
+              JOIN tasks t ON tr.task_id = t.id
+              WHERE t.room_id = ?
+              ORDER BY tr.started_at DESC LIMIT ?`)
+    .all(roomId, safeLimit)
   return (rows as Record<string, unknown>[]).map(mapTaskRunRow)
 }
 
@@ -1034,17 +1045,17 @@ function mapRoomRow(row: Record<string, unknown>): Room {
     queenQuietUntil: (row.queen_quiet_until as string | null) ?? null,
     config,
     chatSessionId: (row.chat_session_id as string | null) ?? null,
-    inviteCode: (row.invite_code as string | null) ?? null,
+    referredByCode: (row.referred_by_code as string | null) ?? null,
     createdAt: row.created_at as string,
     updatedAt: row.updated_at as string
   }
 }
 
-export function createRoom(db: Database.Database, name: string, goal?: string, config?: Partial<RoomConfig>, inviteCode?: string): Room {
+export function createRoom(db: Database.Database, name: string, goal?: string, config?: Partial<RoomConfig>, referredByCode?: string): Room {
   const configJson = config ? JSON.stringify({ ...DEFAULT_ROOM_CONFIG, ...config }) : JSON.stringify(DEFAULT_ROOM_CONFIG)
   const result = db
-    .prepare('INSERT INTO rooms (name, goal, config, invite_code) VALUES (?, ?, ?, ?)')
-    .run(name, goal ?? null, configJson, inviteCode ?? null)
+    .prepare('INSERT INTO rooms (name, goal, config, referred_by_code) VALUES (?, ?, ?, ?)')
+    .run(name, goal ?? null, configJson, referredByCode ?? null)
   return getRoom(db, result.lastInsertRowid as number)!
 }
 
@@ -1063,7 +1074,7 @@ export function listRooms(db: Database.Database, status?: string): Room[] {
 }
 
 export function updateRoom(db: Database.Database, id: number, updates: Partial<{
-  name: string; queenWorkerId: number | null; goal: string | null; status: string; visibility: string; autonomyMode: string; maxConcurrentTasks: number; workerModel: string; queenCycleGapMs: number; queenMaxTurns: number; queenQuietFrom: string | null; queenQuietUntil: string | null; config: RoomConfig; inviteCode: string | null
+  name: string; queenWorkerId: number | null; goal: string | null; status: string; visibility: string; autonomyMode: string; maxConcurrentTasks: number; workerModel: string; queenCycleGapMs: number; queenMaxTurns: number; queenQuietFrom: string | null; queenQuietUntil: string | null; config: RoomConfig; referredByCode: string | null
 }>): void {
   const fieldMap: Record<string, string> = {
     name: 'name', queenWorkerId: 'queen_worker_id', goal: 'goal',
@@ -1071,7 +1082,7 @@ export function updateRoom(db: Database.Database, id: number, updates: Partial<{
     maxConcurrentTasks: 'max_concurrent_tasks', workerModel: 'worker_model',
     queenCycleGapMs: 'queen_cycle_gap_ms', queenMaxTurns: 'queen_max_turns',
     queenQuietFrom: 'queen_quiet_from', queenQuietUntil: 'queen_quiet_until',
-    config: 'config', inviteCode: 'invite_code'
+    config: 'config', referredByCode: 'referred_by_code'
   }
   const fields: string[] = []
   const values: unknown[] = []
@@ -1980,4 +1991,126 @@ export function updateRoomMessageStatus(db: Database.Database, id: number, statu
 
 export function deleteRoomMessage(db: Database.Database, id: number): void {
   db.prepare('DELETE FROM room_messages WHERE id = ?').run(id)
+}
+
+// ─── Worker Cycles ──────────────────────────────────────────
+
+function mapWorkerCycleRow(row: Record<string, unknown>): WorkerCycle {
+  return {
+    id: row.id as number,
+    workerId: row.worker_id as number,
+    roomId: row.room_id as number,
+    model: row.model as string | null,
+    startedAt: row.started_at as string,
+    finishedAt: row.finished_at as string | null,
+    status: row.status as string,
+    errorMessage: row.error_message as string | null,
+    durationMs: row.duration_ms as number | null,
+  }
+}
+
+function mapCycleLogRow(row: Record<string, unknown>): CycleLogEntry {
+  return {
+    id: row.id as number,
+    cycleId: row.cycle_id as number,
+    seq: row.seq as number,
+    entryType: row.entry_type as string,
+    content: row.content as string,
+    createdAt: row.created_at as string,
+  }
+}
+
+export function createWorkerCycle(db: Database.Database, workerId: number, roomId: number, model: string | null): WorkerCycle {
+  const result = db.prepare(
+    "INSERT INTO worker_cycles (worker_id, room_id, model) VALUES (?, ?, ?)"
+  ).run(workerId, roomId, model)
+  return getWorkerCycle(db, result.lastInsertRowid as number)!
+}
+
+export function getWorkerCycle(db: Database.Database, id: number): WorkerCycle | null {
+  const row = db.prepare('SELECT * FROM worker_cycles WHERE id = ?').get(id) as Record<string, unknown> | undefined
+  return row ? mapWorkerCycleRow(row) : null
+}
+
+export function completeWorkerCycle(db: Database.Database, cycleId: number, errorMessage?: string): void {
+  const cycle = getWorkerCycle(db, cycleId)
+  if (!cycle) return
+  const status = errorMessage ? 'failed' : 'completed'
+  const durationMs = Date.now() - new Date(cycle.startedAt).getTime()
+  db.prepare(
+    "UPDATE worker_cycles SET finished_at = datetime('now','localtime'), status = ?, error_message = ?, duration_ms = ? WHERE id = ?"
+  ).run(status, errorMessage ?? null, durationMs, cycleId)
+}
+
+export function listRoomCycles(db: Database.Database, roomId: number, limit: number = 20): WorkerCycle[] {
+  const safeLimit = clampLimit(limit, 20, 200)
+  const rows = db.prepare(
+    'SELECT * FROM worker_cycles WHERE room_id = ? ORDER BY started_at DESC LIMIT ?'
+  ).all(roomId, safeLimit)
+  return (rows as Record<string, unknown>[]).map(mapWorkerCycleRow)
+}
+
+export function cleanupStaleCycles(db: Database.Database): number {
+  const result = db.prepare(
+    "UPDATE worker_cycles SET status = 'failed', error_message = 'Server restarted', finished_at = datetime('now','localtime') WHERE status = 'running'"
+  ).run()
+  return result.changes
+}
+
+export function insertCycleLogs(
+  db: Database.Database,
+  entries: Array<{ cycleId: number; seq: number; entryType: string; content: string }>
+): void {
+  const stmt = db.prepare(
+    'INSERT INTO cycle_logs (cycle_id, seq, entry_type, content) VALUES (?, ?, ?, ?)'
+  )
+  const insertMany = db.transaction((items: typeof entries) => {
+    for (const e of items) {
+      stmt.run(e.cycleId, e.seq, e.entryType, e.content)
+    }
+  })
+  insertMany(entries)
+}
+
+export function getCycleLogs(
+  db: Database.Database,
+  cycleId: number,
+  afterSeq: number = 0,
+  limit: number = 100
+): CycleLogEntry[] {
+  const safeAfterSeq = Number.isFinite(afterSeq) ? Math.max(0, Math.trunc(afterSeq)) : 0
+  const safeLimit = clampLimit(limit, 100, 1000)
+  const rows = db.prepare(
+    'SELECT * FROM cycle_logs WHERE cycle_id = ? AND seq > ? ORDER BY seq ASC LIMIT ?'
+  ).all(cycleId, safeAfterSeq, safeLimit)
+  return (rows as Record<string, unknown>[]).map(mapCycleLogRow)
+}
+
+const MAX_CYCLES_PER_WORKER = 50
+const CYCLE_PRUNE_INTERVAL_MS = 5 * 60 * 1000
+let lastCyclePruneTime = 0
+
+export function pruneOldCycles(db: Database.Database): number {
+  const now = Date.now()
+  if (now - lastCyclePruneTime < CYCLE_PRUNE_INTERVAL_MS) return 0
+  lastCyclePruneTime = now
+
+  const staleIds = db.prepare(`
+    SELECT id FROM (
+      SELECT id, ROW_NUMBER() OVER (PARTITION BY worker_id ORDER BY id DESC) AS rn
+      FROM worker_cycles
+    ) WHERE rn > ?
+  `).all(MAX_CYCLES_PER_WORKER) as Array<{ id: number }>
+
+  if (staleIds.length === 0) return 0
+
+  const ids = staleIds.map(r => r.id)
+  const placeholders = ids.map(() => '?').join(',')
+
+  const deleteAll = db.transaction(() => {
+    db.prepare(`DELETE FROM cycle_logs WHERE cycle_id IN (${placeholders})`).run(...ids)
+    db.prepare(`DELETE FROM worker_cycles WHERE id IN (${placeholders})`).run(...ids)
+  })
+  deleteAll()
+  return ids.length
 }

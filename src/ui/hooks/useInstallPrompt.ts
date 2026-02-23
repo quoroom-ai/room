@@ -9,6 +9,7 @@ export interface InstallPrompt {
   canInstall: boolean
   isInstalled: boolean
   isManualInstallPlatform: boolean
+  installSignal: number
   install: () => Promise<boolean>
 }
 
@@ -16,6 +17,7 @@ export function useInstallPrompt(): InstallPrompt {
   const [deferredPrompt, setDeferredPrompt] = useState<BeforeInstallPromptEvent | null>(null)
   const [isInstalled, setIsInstalled] = useState(false)
   const [isManualInstallPlatform, setIsManualInstallPlatform] = useState(false)
+  const [installSignal, setInstallSignal] = useState(0)
 
   useEffect(() => {
     const ua = window.navigator.userAgent.toLowerCase()
@@ -39,6 +41,7 @@ export function useInstallPrompt(): InstallPrompt {
     const onInstalled = () => {
       setIsInstalled(true)
       setDeferredPrompt(null)
+      setInstallSignal((prev) => prev + 1)
     }
 
     window.addEventListener('beforeinstallprompt', onPrompt)
@@ -55,8 +58,11 @@ export function useInstallPrompt(): InstallPrompt {
     deferredPrompt.prompt()
     const { outcome } = await deferredPrompt.userChoice
     setDeferredPrompt(null)
+    if (outcome === 'accepted') {
+      setInstallSignal((prev) => prev + 1)
+    }
     return outcome === 'accepted'
   }
 
-  return { canInstall: !!deferredPrompt, isInstalled, isManualInstallPlatform, install }
+  return { canInstall: !!deferredPrompt, isInstalled, isManualInstallPlatform, installSignal, install }
 }

@@ -1,8 +1,11 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { usePolling } from '../hooks/usePolling'
 import { useContainerWidth } from '../hooks/useContainerWidth'
 import { api } from '../lib/client'
+import { ROOM_SKILL_EVENT_TYPES } from '../lib/room-events'
+import { wsClient, type WsMessage } from '../lib/ws'
 import { formatRelativeTime } from '../utils/time'
+import { AutoModeLockModal, AUTO_MODE_LOCKED_BUTTON_CLASS, modeAwareButtonClass, useAutonomyControlGate } from './AutonomyControlGate'
 import type { Skill } from '@shared/types'
 
 interface SkillsPanelProps {
@@ -11,11 +14,11 @@ interface SkillsPanelProps {
 }
 
 export function SkillsPanel({ roomId, autonomyMode }: SkillsPanelProps): React.JSX.Element {
-  const semi = autonomyMode === 'semi'
+  const { semi, guard, showLockModal, closeLockModal, requestSemiMode } = useAutonomyControlGate(autonomyMode)
 
   const { data: skills, refresh } = usePolling<Skill[]>(
     () => api.skills.list(roomId ?? undefined),
-    5000
+    30000
   )
 
   const [expandedId, setExpandedId] = useState<number | null>(null)
@@ -29,6 +32,15 @@ export function SkillsPanel({ roomId, autonomyMode }: SkillsPanelProps): React.J
   const [createContent, setCreateContent] = useState('')
   const [createContexts, setCreateContexts] = useState('')
   const [createAutoActivate, setCreateAutoActivate] = useState(false)
+
+  useEffect(() => {
+    if (!roomId) return
+    return wsClient.subscribe(`room:${roomId}`, (event: WsMessage) => {
+      if (ROOM_SKILL_EVENT_TYPES.has(event.type)) {
+        void refresh()
+      }
+    })
+  }, [refresh, roomId])
 
   async function handleCreate(): Promise<void> {
     if (!createName.trim() || !createContent.trim()) return
@@ -73,14 +85,12 @@ export function SkillsPanel({ roomId, autonomyMode }: SkillsPanelProps): React.J
         <span className="text-xs text-text-muted">
           {skills ? `${skills.length} total` : 'Loading...'}
         </span>
-        {semi && (
-          <button
-            onClick={() => setShowCreate(!showCreate)}
-            className="text-xs px-2.5 py-1.5 rounded-lg bg-interactive text-text-invert hover:bg-interactive-hover"
-          >
-            {showCreate ? 'Cancel' : '+ New Skill'}
-          </button>
-        )}
+        <button
+          onClick={() => guard(() => setShowCreate(!showCreate))}
+          className={`text-xs px-2.5 py-1.5 rounded-lg ${modeAwareButtonClass(semi, 'bg-interactive text-text-invert hover:bg-interactive-hover')}`}
+        >
+          {showCreate ? 'Cancel' : '+ New Skill'}
+        </button>
       </div>
 
       {semi && showCreate && (
@@ -143,11 +153,13 @@ export function SkillsPanel({ roomId, autonomyMode }: SkillsPanelProps): React.J
                 onToggleAutoActivate={() => handleToggleAutoActivate(skill)}
                 onDelete={() => handleDelete(skill.id)}
                 onBlurDelete={() => setConfirmDeleteId(null)}
+                onLockedControl={requestSemiMode}
               />
             ))}
           </div>
         )}
       </div>
+      <AutoModeLockModal open={showLockModal} onClose={closeLockModal} />
     </div>
   )
 }
@@ -161,9 +173,10 @@ interface SkillCardProps {
   onToggleAutoActivate: () => void
   onDelete: () => void
   onBlurDelete: () => void
+  onLockedControl: () => void
 }
 
-function SkillCard({ skill, expanded, semi, confirmDelete, onToggle, onToggleAutoActivate, onDelete, onBlurDelete }: SkillCardProps): React.JSX.Element {
+function SkillCard({ skill, expanded, semi, confirmDelete, onToggle, onToggleAutoActivate, onDelete, onBlurDelete, onLockedControl }: SkillCardProps): React.JSX.Element {
   return (
     <div className="bg-surface-secondary border border-border-primary rounded-lg overflow-hidden">
       <div
@@ -216,19 +229,29 @@ function SkillCard({ skill, expanded, semi, confirmDelete, onToggle, onToggleAut
                 Auto-activate
               </label>
             ) : (
-              <span className="text-xs text-text-muted">
-                {skill.autoActivate ? 'Auto-activate enabled' : 'Manual activation'}
-              </span>
+              <button
+                onClick={onLockedControl}
+                className={`text-xs px-2.5 py-1.5 rounded-lg ${AUTO_MODE_LOCKED_BUTTON_CLASS}`}
+              >
+                {skill.autoActivate ? 'Disable auto-activate' : 'Enable auto-activate'}
+              </button>
             )}
             <div className="flex-1" />
             <span className="text-xs text-text-muted">{formatRelativeTime(skill.updatedAt)}</span>
-            {semi && (
+            {semi ? (
               <button
                 onClick={onDelete}
                 onBlur={onBlurDelete}
                 className="text-xs px-2.5 py-1.5 rounded-lg border border-red-200 text-status-error hover:text-red-600"
               >
                 {confirmDelete ? 'Confirm?' : 'Delete'}
+              </button>
+            ) : (
+              <button
+                onClick={onLockedControl}
+                className={`text-xs px-2.5 py-1.5 rounded-lg ${AUTO_MODE_LOCKED_BUTTON_CLASS}`}
+              >
+                Delete
               </button>
             )}
           </div>

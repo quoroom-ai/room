@@ -1,8 +1,10 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { usePolling } from '../hooks/usePolling'
+import { useWebSocket } from '../hooks/useWebSocket'
 import { api } from '../lib/client'
 import type { Worker } from '@shared/types'
 import { WORKER_TEMPLATES, type WorkerTemplatePreset } from '@shared/worker-templates'
+import { AutoModeLockModal, AUTO_MODE_LOCKED_BUTTON_CLASS, modeAwareButtonClass, useAutonomyControlGate } from './AutonomyControlGate'
 
 interface WorkersPanelProps {
   roomId?: number | null
@@ -10,12 +12,13 @@ interface WorkersPanelProps {
 }
 
 export function WorkersPanel({ roomId, autonomyMode }: WorkersPanelProps): React.JSX.Element {
-  const semi = autonomyMode === 'semi'
+  const { semi, guard, requestSemiMode, showLockModal, closeLockModal } = useAutonomyControlGate(autonomyMode)
 
   const { data: workers, refresh } = usePolling(
     () => roomId ? api.workers.listForRoom(roomId) : api.workers.list(),
-    5000
+    30000
   )
+  const workerEvent = useWebSocket('workers')
   const [expandedId, setExpandedId] = useState<number | null>(null)
   const [showCreate, setShowCreate] = useState(false)
   const [createName, setCreateName] = useState('')
@@ -29,6 +32,14 @@ export function WorkersPanel({ roomId, autonomyMode }: WorkersPanelProps): React
   const [editPrompt, setEditPrompt] = useState('')
 
   const [confirmDeleteId, setConfirmDeleteId] = useState<number | null>(null)
+
+  useEffect(() => {
+    if (workerEvent) refresh()
+  }, [workerEvent, refresh])
+
+  useEffect(() => {
+    refresh()
+  }, [roomId, refresh])
 
   async function handleCreate(): Promise<void> {
     if (!createName.trim() || !createPrompt.trim()) return
@@ -98,14 +109,12 @@ export function WorkersPanel({ roomId, autonomyMode }: WorkersPanelProps): React
         <span className="text-xs text-text-muted">
           {workers ? `${workers.length} total` : 'Loading...'}
         </span>
-        {semi && (
-          <button
-            onClick={() => setShowCreate(!showCreate)}
-            className="text-xs px-2.5 py-1.5 rounded-lg bg-interactive text-text-invert hover:bg-interactive-hover"
-          >
-            {showCreate ? 'Cancel' : '+ New Worker'}
-          </button>
-        )}
+        <button
+          onClick={() => guard(() => setShowCreate(!showCreate))}
+          className={`text-xs px-2.5 py-1.5 rounded-lg ${modeAwareButtonClass(semi, 'bg-interactive text-text-invert hover:bg-interactive-hover')}`}
+        >
+          {showCreate ? 'Cancel' : '+ New Worker'}
+        </button>
       </div>
 
       {semi && showCreate && (
@@ -193,6 +202,28 @@ export function WorkersPanel({ roomId, autonomyMode }: WorkersPanelProps): React
                         <pre className="text-xs text-text-secondary bg-surface-primary border border-border-primary rounded-lg p-3 overflow-x-auto whitespace-pre-wrap font-mono max-h-[200px] overflow-y-auto">
                           {worker.systemPrompt}
                         </pre>
+                        <div className="flex gap-2 flex-wrap">
+                          <button
+                            onClick={requestSemiMode}
+                            className={`text-xs px-2.5 py-1.5 rounded-lg ${AUTO_MODE_LOCKED_BUTTON_CLASS}`}
+                          >
+                            Edit
+                          </button>
+                          {!worker.isDefault && (
+                            <button
+                              onClick={requestSemiMode}
+                              className={`text-xs px-2.5 py-1.5 rounded-lg ${AUTO_MODE_LOCKED_BUTTON_CLASS}`}
+                            >
+                              Set Default
+                            </button>
+                          )}
+                          <button
+                            onClick={requestSemiMode}
+                            className={`text-xs px-2.5 py-1.5 rounded-lg ${AUTO_MODE_LOCKED_BUTTON_CLASS}`}
+                          >
+                            Delete
+                          </button>
+                        </div>
                       </>
                     )}
                   </div>
@@ -202,24 +233,27 @@ export function WorkersPanel({ roomId, autonomyMode }: WorkersPanelProps): React
           </div>
         )}
 
-        {semi && (
-          <div className="p-4 space-y-2">
-            <div className="text-sm text-text-muted font-medium">Templates</div>
-            <div className="grid gap-2 md:grid-cols-4">
-              {WORKER_TEMPLATES.map((t) => (
-                <button
-                  key={t.name}
-                  onClick={() => useTemplate(t)}
-                  className="w-full text-left px-3 py-2 rounded-lg border border-border-primary hover:border-interactive hover:bg-interactive-bg transition-colors"
-                >
-                  <div className="text-sm font-medium text-text-secondary">{t.name} <span className="text-text-muted font-normal">— {t.role}</span></div>
-                  <div className="text-sm text-text-muted">{t.description}</div>
-                </button>
-              ))}
-            </div>
+        <div className="p-4 space-y-2">
+          <div className="text-sm text-text-muted font-medium">Templates</div>
+          <div className="grid gap-2 md:grid-cols-4">
+            {WORKER_TEMPLATES.map((t) => (
+              <button
+                key={t.name}
+                onClick={() => guard(() => useTemplate(t))}
+                className={`w-full text-left px-3 py-2 rounded-lg border transition-colors ${modeAwareButtonClass(
+                  semi,
+                  'border-border-primary hover:border-interactive hover:bg-interactive-bg',
+                  'border-border-primary bg-status-info-bg text-status-info hover:bg-surface-hover'
+                )}`}
+              >
+                <div className="text-sm font-medium">{t.name} <span className="font-normal">— {t.role}</span></div>
+                <div className={semi ? 'text-sm text-text-muted' : 'text-sm text-status-info'}>{t.description}</div>
+              </button>
+            ))}
           </div>
-        )}
+        </div>
       </div>
+      <AutoModeLockModal open={showLockModal} onClose={closeLockModal} />
     </div>
   )
 }

@@ -1,6 +1,7 @@
 import type { Router } from '../router'
 import * as queries from '../../shared/db-queries'
 import { validateWatchPath } from '../../shared/watch-path'
+import { eventBus } from '../event-bus'
 
 export function registerWatchRoutes(router: Router): void {
   router.post('/api/watches', (ctx) => {
@@ -17,6 +18,7 @@ export function registerWatchRoutes(router: Router): void {
       body.description as string | undefined,
       body.actionPrompt as string | undefined,
       body.roomId as number | undefined)
+    eventBus.emit('watches', 'watch:created', watch)
     return { status: 201, data: watch }
   })
 
@@ -38,6 +40,7 @@ export function registerWatchRoutes(router: Router): void {
     if (!watch) return { status: 404, error: 'Watch not found' }
 
     queries.deleteWatch(ctx.db, id)
+    eventBus.emit('watches', 'watch:deleted', { id })
     return { data: { ok: true } }
   })
 
@@ -47,6 +50,7 @@ export function registerWatchRoutes(router: Router): void {
     if (!watch) return { status: 404, error: 'Watch not found' }
 
     queries.pauseWatch(ctx.db, id)
+    eventBus.emit('watches', 'watch:paused', { id })
     return { data: { ok: true } }
   })
 
@@ -56,6 +60,7 @@ export function registerWatchRoutes(router: Router): void {
     if (!watch) return { status: 404, error: 'Watch not found' }
 
     queries.resumeWatch(ctx.db, id)
+    eventBus.emit('watches', 'watch:resumed', { id })
     return { data: { ok: true } }
   })
 }

@@ -1,7 +1,13 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { usePolling } from '../hooks/usePolling'
 import { api } from '../lib/client'
+import {
+  ROOM_BALANCE_EVENT_TYPES,
+  ROOM_STATION_EVENT_TYPES,
+} from '../lib/room-events'
+import { wsClient, type WsMessage } from '../lib/ws'
 import { formatRelativeTime } from '../utils/time'
+import { AutoModeLockModal, AUTO_MODE_LOCKED_BUTTON_CLASS, modeAwareButtonClass, useAutonomyControlGate } from './AutonomyControlGate'
 import type { Wallet } from '@shared/types'
 
 const CLOUD_BASE = (import.meta.env.VITE_CLOUD_URL || 'https://quoroom.ai').replace(/\/$/, '')
@@ -57,17 +63,18 @@ interface StationsPanelProps {
 }
 
 export function StationsPanel({ roomId, autonomyMode }: StationsPanelProps): React.JSX.Element {
-  const semi = autonomyMode === 'semi'
+  const { semi, guard, requestSemiMode, showLockModal, closeLockModal } = useAutonomyControlGate(autonomyMode)
   const [cloudRoomId, setCloudRoomId] = useState<string | null>(null)
   const [confirmAction, setConfirmAction] = useState<{ id: number; action: 'cancel' | 'delete' } | null>(null)
   const [busy, setBusy] = useState<number | null>(null)
   const [actionError, setActionError] = useState<string | null>(null)
+  const refreshTimeoutRef = useRef<number | null>(null)
 
 
   // Check if room has a wallet
-  const { data: wallet } = usePolling<Wallet | null>(
+  const { data: wallet, refresh: refreshWallet } = usePolling<Wallet | null>(
     () => roomId ? api.wallet.get(roomId).catch(() => null) : Promise.resolve(null),
-    30000
+    60000
   )
 
 
@@ -89,8 +96,8 @@ export function StationsPanel({ roomId, autonomyMode }: StationsPanelProps): Rea
     cryptoChain?: string
   }
 
-  // Poll cloud API for stations every 10s
-  const { data: stations, refresh } = usePolling<CloudStation[]>(
+  // Fallback poll only; primary refresh comes from room websocket events.
+  const { data: stations, refresh: refreshStations } = usePolling<CloudStation[]>(
     async () => {
       if (!roomId) return []
       try {
@@ -100,11 +107,10 @@ export function StationsPanel({ roomId, autonomyMode }: StationsPanelProps): Rea
         return []
       }
     },
-    10000
+    60000
   )
 
-  // Poll cloud API for payment history every 30s
-  const { data: payments } = usePolling<CloudPayment[]>(
+  const { data: payments, refresh: refreshPayments } = usePolling<CloudPayment[]>(
     async () => {
       if (!roomId) return []
       try {
@@ -113,8 +119,35 @@ export function StationsPanel({ roomId, autonomyMode }: StationsPanelProps): Rea
         return []
       }
     },
-    30000
+    120000
   )
+
+  useEffect(() => {
+    if (!roomId) return
+    return wsClient.subscribe(`room:${roomId}`, (event: WsMessage) => {
+      const refreshStationsAndPayments = (): void => {
+        if (refreshTimeoutRef.current) return
+        refreshTimeoutRef.current = window.setTimeout(() => {
+          refreshTimeoutRef.current = null
+          void refreshStations()
+          void refreshPayments()
+        }, 200)
+      }
+      if (ROOM_STATION_EVENT_TYPES.has(event.type)) {
+        refreshStationsAndPayments()
+      }
+      if (ROOM_BALANCE_EVENT_TYPES.has(event.type)) {
+        void refreshWallet()
+      }
+    })
+  }, [refreshPayments, refreshStations, refreshWallet, roomId])
+
+  useEffect(() => () => {
+    if (refreshTimeoutRef.current) {
+      window.clearTimeout(refreshTimeoutRef.current)
+      refreshTimeoutRef.current = null
+    }
+  }, [])
 
   async function handleStart(id: number): Promise<void> {
     if (!roomId) return
@@ -122,7 +155,8 @@ export function StationsPanel({ roomId, autonomyMode }: StationsPanelProps): Rea
     setActionError(null)
     try {
       await api.cloudStations.start(roomId, id)
-      refresh()
+      refreshStations()
+      refreshPayments()
     } catch (err) {
       setActionError(err instanceof Error ? err.message : 'Failed to start station')
     } finally {
@@ -136,7 +170,8 @@ export function StationsPanel({ roomId, autonomyMode }: StationsPanelProps): Rea
     setActionError(null)
     try {
       await api.cloudStations.stop(roomId, id)
-      refresh()
+      refreshStations()
+      refreshPayments()
     } catch (err) {
       setActionError(err instanceof Error ? err.message : 'Failed to stop station')
     } finally {
@@ -151,7 +186,8 @@ export function StationsPanel({ roomId, autonomyMode }: StationsPanelProps): Rea
     try {
       await api.cloudStations.cancel(roomId, id)
       setConfirmAction(null)
-      refresh()
+      refreshStations()
+      refreshPayments()
     } catch (err) {
       setActionError(err instanceof Error ? err.message : 'Failed to cancel station')
     } finally {
@@ -166,7 +202,8 @@ export function StationsPanel({ roomId, autonomyMode }: StationsPanelProps): Rea
     try {
       await api.cloudStations.delete(roomId, id)
       setConfirmAction(null)
-      refresh()
+      refreshStations()
+      refreshPayments()
     } catch (err) {
       setActionError(err instanceof Error ? err.message : 'Failed to delete station')
     } finally {
@@ -240,36 +277,40 @@ export function StationsPanel({ roomId, autonomyMode }: StationsPanelProps): Rea
                 </div>
               </div>
 
-              {semi && (
-                <div className="flex gap-2 mt-2">
-                  {station.status === 'stopped' && (
-                    <button
-                      onClick={() => handleStart(station.id)}
-                      disabled={busy === station.id}
-                      className="text-xs px-2.5 py-1.5 bg-status-success-bg text-status-success rounded-lg hover:bg-status-success-bg disabled:opacity-50"
-                    >
-                      Start
-                    </button>
-                  )}
-                  {station.status === 'active' && (
-                    <button
-                      onClick={() => handleStop(station.id)}
-                      disabled={busy === station.id}
-                      className="text-xs px-2.5 py-1.5 bg-status-warning-bg text-status-warning rounded-lg hover:bg-status-warning-bg disabled:opacity-50"
-                    >
-                      Stop
-                    </button>
-                  )}
-                  {confirmAction?.id === station.id ? (
+              <div className="flex gap-2 mt-2 flex-wrap">
+                {station.status === 'stopped' && (
+                  <button
+                    onClick={() => guard(() => { void handleStart(station.id) })}
+                    disabled={semi && busy === station.id}
+                    className={`text-xs px-2.5 py-1.5 rounded-lg disabled:opacity-50 ${modeAwareButtonClass(semi, 'bg-status-success-bg text-status-success hover:bg-status-success-bg')}`}
+                  >
+                    Start
+                  </button>
+                )}
+                {station.status === 'active' && (
+                  <button
+                    onClick={() => guard(() => { void handleStop(station.id) })}
+                    disabled={semi && busy === station.id}
+                    className={`text-xs px-2.5 py-1.5 rounded-lg disabled:opacity-50 ${modeAwareButtonClass(semi, 'bg-status-warning-bg text-status-warning hover:bg-status-warning-bg')}`}
+                  >
+                    Stop
+                  </button>
+                )}
+                {semi ? (
+                  confirmAction?.id === station.id ? (
                     <div>
                       {confirmAction.action === 'cancel' && station.currentPeriodEnd && (
                         <div className="text-xs text-text-muted mb-1">Active till {formatShortDate(station.currentPeriodEnd)}</div>
                       )}
                       <div className="flex gap-2">
                         <button
-                          onClick={() => confirmAction.action === 'cancel'
-                            ? handleCancel(station.id)
-                            : handleDelete(station.id)}
+                          onClick={() => {
+                            if (confirmAction.action === 'cancel') {
+                              void handleCancel(station.id)
+                            } else {
+                              void handleDelete(station.id)
+                            }
+                          }}
                           disabled={busy === station.id}
                           className="text-xs px-2.5 py-1.5 bg-status-error text-text-invert rounded-lg disabled:opacity-50"
                         >
@@ -304,9 +345,30 @@ export function StationsPanel({ roomId, autonomyMode }: StationsPanelProps): Rea
                         </button>
                       )}
                     </>
-                  )}
-                </div>
-              )}
+                  )
+                ) : (
+                  <>
+                    {(station.status === 'active' || station.status === 'stopped') && (
+                      <button
+                        onClick={requestSemiMode}
+                        className={`text-xs px-2.5 py-1.5 rounded-lg ${AUTO_MODE_LOCKED_BUTTON_CLASS}`}
+                        title="Switch room to Semi mode to cancel station subscriptions"
+                      >
+                        Cancel sub
+                      </button>
+                    )}
+                    {station.status !== 'canceled' && (
+                      <button
+                        onClick={requestSemiMode}
+                        className={`text-xs px-2.5 py-1.5 rounded-lg ${AUTO_MODE_LOCKED_BUTTON_CLASS}`}
+                        title="Switch room to Semi mode to delete stations"
+                      >
+                        Delete
+                      </button>
+                    )}
+                  </>
+                )}
+              </div>
             </div>
           ))}
         </div>
@@ -335,6 +397,7 @@ export function StationsPanel({ roomId, autonomyMode }: StationsPanelProps): Rea
         </div>
       )}
 
+      <AutoModeLockModal open={showLockModal} onClose={closeLockModal} />
     </div>
   )
 }

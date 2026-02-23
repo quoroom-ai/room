@@ -15,6 +15,8 @@ import type {
   Credential,
   Station,
   RoomMessage,
+  WorkerCycle,
+  CycleLogEntry,
 } from '@shared/types'
 
 async function makeRequest(method: string, path: string, token: string, payload?: string): Promise<Response> {
@@ -131,6 +133,32 @@ interface ProviderStatusEntry {
   installSession: ProviderInstallSession | null
 }
 
+interface ContactEmailStatus {
+  value: string | null
+  verified: boolean
+  verifiedAt: string | null
+  pending: boolean
+  pendingExpiresAt: string | null
+  resendRetryAfterSec: number
+}
+
+interface ContactTelegramStatus {
+  id: string | null
+  username: string | null
+  firstName: string | null
+  verified: boolean
+  verifiedAt: string | null
+  pending: boolean
+  pendingExpiresAt: string | null
+  botUsername: string
+}
+
+interface ContactStatusResponse {
+  deploymentMode: 'local' | 'cloud'
+  email: ContactEmailStatus
+  telegram: ContactTelegramStatus
+}
+
 export const api = {
   // ─── Tasks ───────────────────────────────────────────────
   tasks: {
@@ -156,10 +184,18 @@ export const api = {
       request<TaskRun[]>('GET', `/api/tasks/${taskId}/runs${qs({ limit })}`),
   },
 
+  // ─── Cycles ──────────────────────────────────────────────
+  cycles: {
+    listByRoom: (roomId: number, limit?: number) =>
+      request<WorkerCycle[]>('GET', `/api/rooms/${roomId}/cycles${qs({ limit })}`),
+    getLogs: (cycleId: number, afterSeq?: number, limit?: number) =>
+      request<CycleLogEntry[]>('GET', `/api/cycles/${cycleId}/logs${qs({ afterSeq, limit })}`),
+  },
+
   // ─── Runs ────────────────────────────────────────────────
   runs: {
-    list: (limit?: number, opts?: { status?: string; includeResult?: boolean }) =>
-      request<TaskRun[]>('GET', `/api/runs${qs({ limit, status: opts?.status, includeResult: opts?.includeResult ? 1 : undefined })}`),
+    list: (limit?: number, opts?: { status?: string; includeResult?: boolean; roomId?: number }) =>
+      request<TaskRun[]>('GET', `/api/runs${qs({ limit, status: opts?.status, includeResult: opts?.includeResult ? 1 : undefined, roomId: opts?.roomId })}`),
     get: (id: number) =>
       request<TaskRun>('GET', `/api/runs/${id}`),
     getLogs: (runId: number, afterSeq?: number, limit?: number) =>
@@ -232,6 +268,29 @@ export const api = {
   settings: {
     getAll: () =>
       request<Record<string, string>>('GET', '/api/settings'),
+    getReferral: async () => {
+      const direct = await request<Record<string, unknown>>('GET', '/api/settings/referral')
+      const directCode = typeof direct.code === 'string' ? direct.code.trim() : ''
+      if (directCode) {
+        const directInviteUrl = typeof direct.inviteUrl === 'string' && direct.inviteUrl.trim()
+          ? direct.inviteUrl
+          : `https://quoroom.ai/invite/${encodeURIComponent(directCode)}`
+        const directShareUrl = typeof direct.shareUrl === 'string' && direct.shareUrl.trim()
+          ? direct.shareUrl
+          : `https://quoroom.ai/share/v2/${encodeURIComponent(directCode)}`
+        return { code: directCode, inviteUrl: directInviteUrl, shareUrl: directShareUrl }
+      }
+
+      // Fallback for older server route ordering where /api/settings/referral
+      // is handled by /api/settings/:key and returns { key, value }.
+      const legacy = await request<{ key: string; value: string | null }>('GET', '/api/settings/keeper_referral_code')
+      const legacyCode = (legacy.value ?? '').trim()
+      return {
+        code: legacyCode,
+        inviteUrl: legacyCode ? `https://quoroom.ai/invite/${encodeURIComponent(legacyCode)}` : '',
+        shareUrl: legacyCode ? `https://quoroom.ai/share/v2/${encodeURIComponent(legacyCode)}` : ''
+      }
+    },
     get: (key: string) =>
       request<{ key: string; value: string | null }>('GET', `/api/settings/${key}`)
         .then(r => r.value),
@@ -239,16 +298,80 @@ export const api = {
       request<{ key: string; value: string }>('PUT', `/api/settings/${key}`, { value }),
   },
 
+  auth: {
+    verify: () =>
+      request<{
+        ok: true
+        role: 'agent' | 'user' | 'member'
+        profile: null | { email: string | null; emailVerified: boolean | null; name: string | null }
+      }>('GET', '/api/auth/verify'),
+  },
+
+  contacts: {
+    status: () =>
+      request<ContactStatusResponse>('GET', '/api/contacts/status'),
+    emailStart: (email: string) =>
+      request<{
+        ok: true
+        alreadyVerified?: boolean
+        email?: string
+        sentTo?: string
+        expiresAt?: string
+        retryAfterSec?: number
+      }>('POST', '/api/contacts/email/start', { email }),
+    emailResend: () =>
+      request<{
+        ok: true
+        alreadyVerified?: boolean
+        email?: string
+        sentTo?: string
+        expiresAt?: string
+        retryAfterSec?: number
+      }>('POST', '/api/contacts/email/resend'),
+    emailVerify: (code: string) =>
+      request<{
+        ok: true
+        email: string
+        verifiedAt: string
+      }>('POST', '/api/contacts/email/verify', { code }),
+    telegramStart: () =>
+      request<{
+        ok: true
+        pending: true
+        expiresAt: string
+        botUsername: string
+        deepLink: string
+      }>('POST', '/api/contacts/telegram/start'),
+    telegramCheck: () =>
+      request<{
+        ok: true
+        status: 'not_pending' | 'pending' | 'verified' | 'expired' | 'missing'
+        botUsername?: string
+        telegram?: {
+          id: string
+          username: string | null
+          firstName: string | null
+          verifiedAt: string | null
+        }
+      }>('POST', '/api/contacts/telegram/check'),
+    telegramDisconnect: () =>
+      request<{ ok: true }>('POST', '/api/contacts/telegram/disconnect'),
+  },
+
   // ─── Rooms ───────────────────────────────────────────────
   rooms: {
     list: (status?: string) =>
       request<Room[]>('GET', `/api/rooms${qs({ status })}`),
+    queenStates: () =>
+      request<Record<number, boolean>>('GET', '/api/rooms/queen-states'),
     get: (id: number) =>
       request<Room>('GET', `/api/rooms/${id}`),
     getStatus: (id: number) =>
       request<unknown>('GET', `/api/rooms/${id}/status`),
     getActivity: (id: number, limit?: number, eventTypes?: string[]) =>
       request<RoomActivityEntry[]>('GET', `/api/rooms/${id}/activity${qs({ limit, eventTypes: eventTypes?.join(',') })}`),
+    badges: (id: number) =>
+      request<{ roomId: number; pendingEscalations: number; unreadMessages: number; activeVotes: number }>('GET', `/api/rooms/${id}/badges`),
     create: (body: CreateRoomInput) =>
       request<Room>('POST', '/api/rooms', body),
     update: (id: number, body: Record<string, unknown>) =>
@@ -377,15 +500,30 @@ export const api = {
       request<{
         version: string
         uptime: number
-        dataDir: string
-        dbPath: string
+        dataDir?: string
+        dbPath?: string
         claude: { available: boolean; version?: string }
         codex: { available: boolean; version?: string }
         ollama: { available: boolean; models: Array<{ name: string; size: number }> }
         resources: { cpuCount: number; loadAvg1m: number; loadAvg5m: number; memTotalGb: number; memFreeGb: number; memUsedPct: number }
         deploymentMode?: 'local' | 'cloud'
+        pending?: { claude?: boolean; codex?: boolean; ollama?: boolean }
         updateInfo?: { latestVersion: string; releaseUrl: string; assets: { mac: string | null; windows: string | null; linux: string | null } } | null
       }>('GET', '/api/status'),
+    getParts: (parts: Array<'storage' | 'providers' | 'ollama' | 'resources' | 'update'>) =>
+      request<{
+        version: string
+        uptime: number
+        dataDir?: string
+        dbPath?: string
+        claude?: { available: boolean; version?: string }
+        codex?: { available: boolean; version?: string }
+        ollama?: { available: boolean; models: Array<{ name: string; size: number }> }
+        resources?: { cpuCount: number; loadAvg1m: number; loadAvg5m: number; memTotalGb: number; memFreeGb: number; memUsedPct: number }
+        deploymentMode?: 'local' | 'cloud'
+        pending?: { claude?: boolean; codex?: boolean; ollama?: boolean }
+        updateInfo?: { latestVersion: string; releaseUrl: string; assets: { mac: string | null; windows: string | null; linux: string | null } } | null
+      }>('GET', `/api/status${qs({ parts: parts.join(',') })}`),
     checkUpdate: () =>
       request<{
         updateInfo: { latestVersion: string; releaseUrl: string; assets: { mac: string | null; windows: string | null; linux: string | null } } | null
@@ -521,6 +659,8 @@ export const api = {
   roomMessages: {
     list: (roomId: number, status?: string) =>
       request<RoomMessage[]>('GET', `/api/rooms/${roomId}/messages${qs({ status })}`),
+    create: (roomId: number, toRoomId: string, body: string, subject?: string) =>
+      request<RoomMessage>('POST', `/api/rooms/${roomId}/messages`, { toRoomId, body, subject }),
     markRead: (roomId: number, messageId: number) =>
       request<{ ok: true }>('POST', `/api/rooms/${roomId}/messages/${messageId}/read`),
     reply: (messageId: number, body: string, subject?: string, toRoomId?: string) =>

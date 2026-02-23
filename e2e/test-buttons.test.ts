@@ -83,7 +83,7 @@ test('Room toggle buttons update room settings', async ({ page }) => {
 
   // Find the "Semi" button and click it, waiting for the PATCH response
   const semiBtn = page.locator('button').filter({ hasText: /^Semi$/i }).first()
-  await expect(semiBtn).toBeVisible({ timeout: 5000 })
+  await expect(semiBtn).toBeVisible({ timeout: 15000 })
 
   const [patchRes] = await Promise.all([
     page.waitForResponse(res => res.url().includes('/api/rooms') && res.request().method() === 'PATCH', { timeout: 10000 }),

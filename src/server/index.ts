@@ -11,12 +11,12 @@ import { URL } from 'node:url'
 import fs from 'node:fs'
 import path from 'node:path'
 import { homedir } from 'node:os'
-import { exec, execSync } from 'node:child_process'
+import { exec, execSync, spawn } from 'node:child_process'
 import type Database from 'better-sqlite3'
 import { Router, type RouteContext } from './router'
 import {
   generateToken,
-  validateToken,
+  getTokenPrincipal,
   isAllowedOrigin,
   isLocalOrigin,
   isCloudDeployment,
@@ -160,6 +160,42 @@ function isLoopbackAddress(address: string | undefined): boolean {
   return address === '127.0.0.1' || address === '::1' || address === '::ffff:127.0.0.1'
 }
 
+function shellQuote(arg: string): string {
+  return `'${arg.replace(/'/g, `'\\''`)}'`
+}
+
+function windowsQuote(arg: string): string {
+  // Wrap with quotes and escape internal quotes for cmd.exe.
+  return `"${arg.replace(/"/g, '\\"')}"`
+}
+
+function scheduleSelfRestart(): boolean {
+  try {
+    const args = [...process.execArgv, ...process.argv.slice(1)]
+    if (process.platform === 'win32') {
+      const cmd = [process.execPath, ...args].map(windowsQuote).join(' ')
+      const child = spawn('cmd.exe', ['/d', '/s', '/c', `ping -n 2 127.0.0.1 >nul && ${cmd}`], {
+        detached: true,
+        stdio: 'ignore',
+        windowsHide: true,
+        env: process.env,
+      })
+      child.unref()
+    } else {
+      const cmd = [process.execPath, ...args].map(shellQuote).join(' ')
+      const child = spawn('/bin/sh', ['-c', `sleep 1; exec ${cmd}`], {
+        detached: true,
+        stdio: 'ignore',
+        env: process.env,
+      })
+      child.unref()
+    }
+    return true
+  } catch {
+    return false
+  }
+}
+
 const MIME_TYPES: Record<string, string> = {
   '.html': 'text/html; charset=utf-8',
   '.js': 'application/javascript; charset=utf-8',
@@ -174,6 +210,40 @@ const MIME_TYPES: Record<string, string> = {
   '.woff2': 'font/woff2',
   '.webp': 'image/webp',
   '.webmanifest': 'application/manifest+json',
+}
+
+const PROFILE_HTTP = process.env.QUOROOM_PROFILE_HTTP === '1'
+const PROFILE_HTTP_SLOW_MS = Math.max(1, Number.parseInt(process.env.QUOROOM_PROFILE_HTTP_SLOW_MS ?? '300', 10) || 300)
+const PROFILE_HTTP_ENDPOINTS = new Set([
+  '/api/status',
+  '/api/rooms',
+  '/api/rooms/:id',
+  '/api/rooms/:id/status',
+  '/api/rooms/:id/activity',
+  '/api/tasks',
+  '/api/runs',
+  '/api/runs/:id/logs',
+  '/api/workers',
+  '/api/memory/entities',
+])
+
+function normalizeApiPath(pathname: string): string {
+  return pathname
+    .replace(/^\/api\/rooms\/\d+(?=\/|$)/, '/api/rooms/:id')
+    .replace(/^\/api\/tasks\/\d+(?=\/|$)/, '/api/tasks/:id')
+    .replace(/^\/api\/runs\/\d+(?=\/|$)/, '/api/runs/:id')
+    .replace(/^\/api\/workers\/\d+(?=\/|$)/, '/api/workers/:id')
+    .replace(/^\/api\/watches\/\d+(?=\/|$)/, '/api/watches/:id')
+    .replace(/^\/api\/memory\/entities\/\d+(?=\/|$)/, '/api/memory/entities/:id')
+}
+
+function maybeLogHttpProfile(method: string, pathname: string, statusCode: number, durationMs: number): void {
+  if (!PROFILE_HTTP || !pathname.startsWith('/api/')) return
+  const normalized = normalizeApiPath(pathname)
+  const isTracked = PROFILE_HTTP_ENDPOINTS.has(normalized)
+  if (!isTracked && durationMs < PROFILE_HTTP_SLOW_MS) return
+  const slowMark = durationMs >= PROFILE_HTTP_SLOW_MS ? ' SLOW' : ''
+  console.error(`[http-prof] ${method} ${normalized} -> ${statusCode} (${durationMs}ms)${slowMark}`)
 }
 
 function getCacheControl(filePath: string, ext: string): string {
@@ -231,20 +301,24 @@ function serveStatic(staticDir: string, pathname: string, res: http.ServerRespon
     filePath = path.join(staticDir, 'index.html')
   }
 
-  try {
-    const data = fs.readFileSync(filePath)
-    const ext = path.extname(filePath).toLowerCase()
-    const contentType = MIME_TYPES[ext] ?? 'application/octet-stream'
-    const headers: Record<string, string> = {
-      'Content-Type': contentType,
-      'Cache-Control': getCacheControl(filePath, ext),
-    }
-    res.writeHead(200, headers)
-    res.end(data)
-  } catch {
-    res.writeHead(404, { 'Content-Type': 'text/plain' })
-    res.end('Not Found')
+  const ext = path.extname(filePath).toLowerCase()
+  const contentType = MIME_TYPES[ext] ?? 'application/octet-stream'
+  const headers: Record<string, string> = {
+    'Content-Type': contentType,
+    'Cache-Control': getCacheControl(filePath, ext),
   }
+
+  const stream = fs.createReadStream(filePath)
+  stream.on('open', () => {
+    res.writeHead(200, headers)
+    stream.pipe(res)
+  })
+  stream.on('error', () => {
+    if (!res.headersSent) {
+      res.writeHead(404, { 'Content-Type': 'text/plain' })
+    }
+    res.end('Not Found')
+  })
 }
 
 // ─── Rate limiting (cloud mode only) ───────────────────────────
@@ -314,6 +388,13 @@ export function createApiServer(options: ServerOptions = {}): {
     const url = new URL(req.url!, `http://${req.headers.host || 'localhost'}`)
     const pathname = url.pathname
     const origin = req.headers.origin as string | undefined
+    const requestStart = PROFILE_HTTP && pathname.startsWith('/api/') ? process.hrtime.bigint() : null
+    if (requestStart) {
+      res.on('finish', () => {
+        const elapsedMs = Number((process.hrtime.bigint() - requestStart) / BigInt(1_000_000))
+        maybeLogHttpProfile(req.method || 'GET', pathname, res.statusCode, elapsedMs)
+      })
+    }
 
     // CORS preflight
     if (req.method === 'OPTIONS') {
@@ -383,16 +464,47 @@ export function createApiServer(options: ServerOptions = {}): {
       return
     }
 
+    // Local restart endpoint (for recovery UI when auth handshake fails).
+    // No token required, but only available from localhost.
+    if (pathname === '/api/server/restart' && req.method === 'POST') {
+      const isLocalClient = isLoopbackAddress(req.socket.remoteAddress)
+      if (!isLocalClient || (origin && !isLocalOrigin(origin))) {
+        res.writeHead(403, responseHeaders)
+        res.end(JSON.stringify({ error: 'Restart allowed only from localhost clients' }))
+        return
+      }
+      const scheduled = scheduleSelfRestart()
+      if (!scheduled) {
+        res.writeHead(500, responseHeaders)
+        res.end(JSON.stringify({ error: 'Failed to schedule restart' }))
+        return
+      }
+      res.writeHead(202, responseHeaders)
+      res.end(JSON.stringify({ ok: true, restarting: true }))
+      setTimeout(() => process.exit(0), 120)
+      return
+    }
+
     // Auth verify
     if (pathname === '/api/auth/verify' && req.method === 'GET') {
-      const role = validateToken(req.headers.authorization)
-      if (!role) {
+      const principal = getTokenPrincipal(req.headers.authorization)
+      if (!principal) {
         res.writeHead(401, responseHeaders)
         res.end(JSON.stringify({ error: 'Unauthorized' }))
         return
       }
       res.writeHead(200, responseHeaders)
-      res.end(JSON.stringify({ ok: true, role }))
+      res.end(JSON.stringify({
+        ok: true,
+        role: principal.role,
+        profile: principal.cloudProfile
+          ? {
+              email: principal.cloudProfile.email,
+              emailVerified: principal.cloudProfile.emailVerified,
+              name: principal.cloudProfile.name,
+            }
+          : null,
+      }))
       return
     }
 
@@ -403,12 +515,13 @@ export function createApiServer(options: ServerOptions = {}): {
       const isRedirectRoute = pathname.endsWith('/onramp-redirect') && req.method === 'GET'
       const queryToken = (isDownloadRoute || isRedirectRoute) ? url.searchParams.get('token') : null
       const authValue = req.headers.authorization ?? (queryToken ? `Bearer ${queryToken}` : undefined)
-      const role = validateToken(authValue)
-      if (!role) {
+      const principal = getTokenPrincipal(authValue)
+      if (!principal) {
         res.writeHead(401, responseHeaders)
         res.end(JSON.stringify({ error: 'Unauthorized' }))
         return
       }
+      const role = principal.role
 
       // Binary streaming download — must be handled before router (not JSON)
       if (pathname === '/api/status/update/download' && req.method === 'GET') {

@@ -1,5 +1,6 @@
 import { useState, useCallback, useEffect, useRef } from 'react'
 import { usePolling } from '../hooks/usePolling'
+import { useWebSocket } from '../hooks/useWebSocket'
 import { useContainerWidth } from '../hooks/useContainerWidth'
 import { api } from '../lib/client'
 import type { Entity, Observation } from '@shared/types'
@@ -25,7 +26,12 @@ export function MemoryPanel({ roomId }: MemoryPanelProps): React.JSX.Element {
     [search, roomId]
   )
 
-  const { data: entities } = usePolling(fetcher, 5000)
+  const { data: entities, refresh } = usePolling(fetcher, 30000)
+  const memoryEvent = useWebSocket('memory')
+
+  useEffect(() => {
+    if (memoryEvent) refresh()
+  }, [memoryEvent, refresh])
 
   useEffect(() => {
     if (!wide || !entities || entities.length === 0) return

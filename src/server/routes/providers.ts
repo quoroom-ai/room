@@ -18,11 +18,25 @@ import {
   probeProviderConnected,
   probeProviderInstalled,
 } from '../provider-cli'
+import { eventBus } from '../event-bus'
 
 const PROVIDERS: ProviderName[] = ['codex', 'claude']
 
 function isProvider(value: string): value is ProviderName {
   return PROVIDERS.includes(value as ProviderName)
+}
+
+function emitProvidersUpdated(
+  provider: ProviderName,
+  action: string,
+  extra: Record<string, unknown> = {}
+): void {
+  eventBus.emit('providers', 'providers:updated', {
+    provider,
+    action,
+    ...extra,
+    updatedAt: new Date().toISOString(),
+  })
 }
 
 export function registerProviderRoutes(router: Router): void {
@@ -69,6 +83,9 @@ export function registerProviderRoutes(router: Router): void {
     setSetting(ctx.db, `provider_${provider}_connect_requested_at`, requestedAt)
 
     const { session, reused } = startProviderAuthSession(provider)
+    emitProvidersUpdated(provider, reused ? 'connect_reused' : 'connect_started', {
+      sessionId: session.sessionId,
+    })
     return {
       data: {
         ok: true,
@@ -88,6 +105,7 @@ export function registerProviderRoutes(router: Router): void {
 
     const installed = probeProviderInstalled(provider)
     if (installed.installed) {
+      emitProvidersUpdated(provider, 'install_already_installed')
       return {
         data: {
           ok: true,
@@ -103,6 +121,9 @@ export function registerProviderRoutes(router: Router): void {
     setSetting(ctx.db, `provider_${provider}_install_requested_at`, requestedAt)
 
     const { session, reused } = startProviderInstallSession(provider)
+    emitProvidersUpdated(provider, reused ? 'install_reused' : 'install_started', {
+      sessionId: session.sessionId,
+    })
     return {
       data: {
         ok: true,
@@ -126,6 +147,7 @@ export function registerProviderRoutes(router: Router): void {
     const disconnected = disconnectProvider(provider)
     const disconnectedAt = new Date().toISOString()
     setSetting(ctx.db, `provider_${provider}_disconnected_at`, disconnectedAt)
+    emitProvidersUpdated(provider, 'disconnected')
 
     return {
       data: {
@@ -165,6 +187,7 @@ export function registerProviderRoutes(router: Router): void {
     if (!sessionId) return { status: 400, error: 'sessionId is required' }
     const session = cancelProviderAuthSession(sessionId)
     if (!session) return { status: 404, error: 'Session not found' }
+    emitProvidersUpdated(session.provider, 'connect_canceled', { sessionId: session.sessionId })
     return { data: { ok: true, session } }
   })
 
@@ -181,6 +204,7 @@ export function registerProviderRoutes(router: Router): void {
     if (!sessionId) return { status: 400, error: 'sessionId is required' }
     const session = cancelProviderInstallSession(sessionId)
     if (!session) return { status: 404, error: 'Session not found' }
+    emitProvidersUpdated(session.provider, 'install_canceled', { sessionId: session.sessionId })
     return { data: { ok: true, session } }
   })
 }

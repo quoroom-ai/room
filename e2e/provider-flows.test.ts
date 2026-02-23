@@ -10,6 +10,10 @@ const base = getBaseUrl()
 const token = getToken()
 const ROOM_PREFIX = 'E2E Provider Flow Room'
 
+function uniqueRoomName(label: string): string {
+  return `${ROOM_PREFIX} ${label} ${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
+}
+
 function providerEntry(installed: boolean, connected: boolean | null, version?: string) {
   return {
     installed,
@@ -34,11 +38,21 @@ async function suppressBlockingModals(page: Page): Promise<void> {
 }
 
 async function cleanupRoomsByPrefix(request: APIRequestContext, prefix: string): Promise<void> {
-  const res = await request.get(`${base}/api/rooms`, {
-    headers: { Authorization: `Bearer ${token}` },
-  })
+  let res: Awaited<ReturnType<APIRequestContext['get']>>
+  try {
+    res = await request.get(`${base}/api/rooms`, {
+      headers: { Authorization: `Bearer ${token}` },
+    })
+  } catch {
+    return
+  }
   if (!res.ok()) return
-  const rooms = (await res.json()) as Array<{ id: number; name: string }>
+  let rooms: Array<{ id: number; name: string }>
+  try {
+    rooms = (await res.json()) as Array<{ id: number; name: string }>
+  } catch {
+    return
+  }
   for (const room of rooms) {
     if (!room.name.startsWith(prefix)) continue
     await request.delete(`${base}/api/rooms/${room.id}`, {
@@ -56,13 +70,30 @@ async function createRoomApi(request: APIRequestContext, name: string): Promise<
   return ((await res.json()) as { room: { id: number } }).room.id
 }
 
-async function openRoomSettings(page: Page, roomName: string): Promise<void> {
+async function openRoomSettings(page: Page, roomId: number, roomName: string): Promise<void> {
+  await page.addInitScript((id) => {
+    localStorage.setItem('quoroom_room', String(id))
+    localStorage.setItem('quoroom_tab', 'room-settings')
+    localStorage.setItem('quoroom_walkthrough_seen', 'true')
+    localStorage.removeItem('quoroom_setup_flow_room')
+  }, roomId)
+  await page.goto(base, { waitUntil: 'domcontentloaded' })
+
+  const setupGuide = page.locator('button').filter({ hasText: /Setup guide/i }).first()
+  try {
+    await expect(setupGuide).toBeVisible({ timeout: 6000 })
+    return
+  } catch {
+    // Fallback if persisted app state did not jump directly to room settings.
+  }
+
   const sidebar = page.getByTestId('sidebar')
   const roomBtn = sidebar.locator('button').filter({ hasText: roomName }).first()
   await roomBtn.waitFor({ timeout: 10000 })
   const text = await roomBtn.textContent()
   if (!text?.includes('\u25B4')) await roomBtn.click()
   await sidebar.locator('button').filter({ hasText: /^Settings$/i }).first().click()
+  await expect(setupGuide).toBeVisible({ timeout: 10000 })
 }
 
 test.beforeEach(async ({ page }) => {
@@ -71,13 +102,17 @@ test.beforeEach(async ({ page }) => {
 
 test.afterEach(async ({ request, page }) => {
   await page.unrouteAll({ behavior: 'ignoreErrors' })
-  await cleanupRoomsByPrefix(request, ROOM_PREFIX)
+  try {
+    await cleanupRoomsByPrefix(request, ROOM_PREFIX)
+  } catch {
+    // Non-fatal cleanup failures should not fail the spec.
+  }
 })
 
 // ─── Provider Connect ────────────────────────────────────────────────
 
 test('provider connect sends POST to correct endpoint', async ({ page, request }) => {
-  const roomName = `${ROOM_PREFIX} Connect`
+  const roomName = uniqueRoomName('Connect')
   const roomId = await createRoomApi(request, roomName)
 
   // Mock provider status: claude installed but not connected
@@ -90,12 +125,7 @@ test('provider connect sends POST to correct endpoint', async ({ page, request }
     })
   })
 
-  // Set queen model to claude so the Status row appears
-  await request.patch(`${base}/api/rooms/${roomId}`, {
-    headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
-    data: {},
-  })
-  // Find the queen worker and set model to claude
+  // Find the queen worker and set model to claude so provider state row appears.
   const workersRes = await request.get(`${base}/api/rooms/${roomId}/workers`, {
     headers: { Authorization: `Bearer ${token}` },
   })
@@ -123,8 +153,7 @@ test('provider connect sends POST to correct endpoint', async ({ page, request }
     })
   })
 
-  await page.goto(base, { waitUntil: 'domcontentloaded' })
-  await openRoomSettings(page, roomName)
+  await openRoomSettings(page, roomId, roomName)
 
   // Wait for queen status to load and show Claude status
   await expect(page.getByText('Claude disconnected')).toBeVisible({ timeout: 10000 })
@@ -139,7 +168,7 @@ test('provider connect sends POST to correct endpoint', async ({ page, request }
 // ─── Provider Disconnect ─────────────────────────────────────────────
 
 test('provider disconnect sends POST to correct endpoint', async ({ page, request }) => {
-  const roomName = `${ROOM_PREFIX} Disconnect`
+  const roomName = uniqueRoomName('Disconnect')
   const roomId = await createRoomApi(request, roomName)
 
   // Mock provider status: claude installed and connected
@@ -172,8 +201,7 @@ test('provider disconnect sends POST to correct endpoint', async ({ page, reques
     })
   })
 
-  await page.goto(base, { waitUntil: 'domcontentloaded' })
-  await openRoomSettings(page, roomName)
+  await openRoomSettings(page, roomId, roomName)
 
   await expect(page.getByText('Claude connected')).toBeVisible({ timeout: 10000 })
 
@@ -187,7 +215,7 @@ test('provider disconnect sends POST to correct endpoint', async ({ page, reques
 // ─── Ollama Setup (Success) ──────────────────────────────────────────
 
 test('ollama model selection triggers start and ensure-model', async ({ page, request }) => {
-  const roomName = `${ROOM_PREFIX} Ollama OK`
+  const roomName = uniqueRoomName('Ollama OK')
   const roomId = await createRoomApi(request, roomName)
 
   // Mock Ollama endpoints
@@ -198,12 +226,7 @@ test('ollama model selection triggers start and ensure-model', async ({ page, re
     await route.fulfill({ json: { ok: true, status: 'ready', model: 'qwen3:8b' } })
   })
 
-  await page.goto(base, { waitUntil: 'domcontentloaded' })
-
-  // Suppress the auto-open setup modal for this room (we want to test settings directly)
-  await page.evaluate(() => localStorage.removeItem('quoroom_setup_flow_room'))
-
-  await openRoomSettings(page, roomName)
+  await openRoomSettings(page, roomId, roomName)
 
   // Find the Queen Model select and pick an Ollama model
   const ollamaStartReq = page.waitForRequest(
@@ -228,7 +251,7 @@ test('ollama model selection triggers start and ensure-model', async ({ page, re
 // ─── Ollama Setup (Failure) ──────────────────────────────────────────
 
 test('ollama failure shows error feedback', async ({ page, request }) => {
-  const roomName = `${ROOM_PREFIX} Ollama Fail`
+  const roomName = uniqueRoomName('Ollama Fail')
   const roomId = await createRoomApi(request, roomName)
 
   // Mock Ollama start failure
@@ -236,9 +259,7 @@ test('ollama failure shows error feedback', async ({ page, request }) => {
     await route.fulfill({ json: { available: false, status: 'install_failed' } })
   })
 
-  await page.goto(base, { waitUntil: 'domcontentloaded' })
-  await page.evaluate(() => localStorage.removeItem('quoroom_setup_flow_room'))
-  await openRoomSettings(page, roomName)
+  await openRoomSettings(page, roomId, roomName)
 
   // Open setup guide and apply Ollama path
   await page.locator('button').filter({ hasText: /Setup guide/ }).first().click()
@@ -269,7 +290,7 @@ test('ollama failure shows error feedback', async ({ page, request }) => {
 // ─── Wallet Onramp URL ───────────────────────────────────────────────
 
 test('wallet top-up link points to onramp redirect', async ({ page, request }) => {
-  const roomName = `${ROOM_PREFIX} Onramp`
+  const roomName = uniqueRoomName('Onramp')
   const roomId = await createRoomApi(request, roomName)
 
   // Mock wallet endpoint to return a wallet with an address
@@ -305,9 +326,7 @@ test('wallet top-up link points to onramp redirect', async ({ page, request }) =
     })
   })
 
-  await page.goto(base, { waitUntil: 'domcontentloaded' })
-  await page.evaluate(() => localStorage.removeItem('quoroom_setup_flow_room'))
-  await openRoomSettings(page, roomName)
+  await openRoomSettings(page, roomId, roomName)
 
   // Find the "Top Up from Card" link in the wallet section
   const topUpLink = page.locator('a').filter({ hasText: 'Top Up from Card' }).first()

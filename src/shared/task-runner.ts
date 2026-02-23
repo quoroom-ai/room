@@ -2,7 +2,8 @@ import { join } from 'path'
 import { writeFileSync, mkdirSync, existsSync } from 'fs'
 import { executeClaudeCode } from './claude-code'
 import type { ConsoleLogCallback, ExecutionOptions, ExecutionResult } from './claude-code'
-import { executeAgent, executeOllamaOnStation } from './agent-executor'
+import { executeAgent, executeOllamaOnStation, executeApiOnStation } from './agent-executor'
+import { resolveApiKeyForModel } from './model-provider'
 import { getRoomCloudId, listCloudStations } from './cloud-sync'
 import * as queries from './db-queries'
 import { DEFAULTS } from './constants'
@@ -16,6 +17,7 @@ export interface TaskExecutionOptions {
   resultsDir: string
   onComplete?: (task: Task, output: string, durationMs: number) => void
   onFailed?: (task: Task, error: string) => void
+  onConsoleLogEntry?: (entry: { runId: number; seq: number; entryType: string; content: string }) => void
 }
 
 export interface TaskExecutionResult {
@@ -31,6 +33,22 @@ const runningTasks = new Set<number>()
 const SESSION_MAX_RUNS = 20
 const CONSOLE_LOG_FLUSH_INTERVAL_MS = 1000
 const DEFAULT_MAX_CONCURRENT_TASKS = 3
+
+function keeperReferralContext(db: Database.Database): string | null {
+  const code = queries.getSetting(db, 'keeper_referral_code')?.trim()
+  if (!code) return null
+  const encoded = encodeURIComponent(code)
+  return `## Keeper Referral
+- Keeper code: ${code}
+- Invite link: https://quoroom.ai/invite/${encoded}
+- Share link: https://quoroom.ai/share/v2/${encoded}`
+}
+
+function prependKeeperReferral(prompt: string, db: Database.Database): string {
+  const referral = keeperReferralContext(db)
+  if (!referral) return prompt
+  return `${referral}\n\n---\n\n${prompt}`
+}
 
 // ─── Concurrency limiter ─────────────────────────────────────
 // Prevents spawning unlimited Claude CLI processes when many tasks fire at once.
@@ -74,7 +92,11 @@ function releaseSlot(): void {
   }
 }
 
-function createConsoleLogBuffer(db: Database.Database, runId: number): {
+function createConsoleLogBuffer(
+  db: Database.Database,
+  runId: number,
+  onConsoleLogEntry?: (entry: { runId: number; seq: number; entryType: string; content: string }) => void
+): {
   onConsoleLog: ConsoleLogCallback
   flush: () => void
 } {
@@ -96,7 +118,9 @@ function createConsoleLogBuffer(db: Database.Database, runId: number): {
   return {
     onConsoleLog: (entry) => {
       seq++
-      buffer.push({ runId, seq, entryType: entry.entryType, content: entry.content })
+      const next = { runId, seq, entryType: entry.entryType, content: entry.content }
+      buffer.push(next)
+      onConsoleLogEntry?.(next)
       const now = Date.now()
       if (now - lastFlush >= CONSOLE_LOG_FLUSH_INTERVAL_MS) {
         flush()
@@ -115,7 +139,8 @@ async function executeWithRateLimitRetry(
   execOptions: ExecutionOptions,
   db: Database.Database,
   runId: number,
-  taskId: number
+  taskId: number,
+  onConsoleLogEntry?: (entry: { runId: number; seq: number; entryType: string; content: string }) => void
 ): Promise<ExecutionResult> {
   let result = await executeClaudeCode(prompt, execOptions)
 
@@ -137,12 +162,14 @@ async function executeWithRateLimitRetry(
 
     // Log to console so it appears in task progress history
     try {
-      queries.insertConsoleLogs(db, [{
+      const entry = {
         runId,
         seq: 999999 + retries,
         entryType: 'error',
         content: `Rate limit reached. Waiting ${waitSec}s until reset ${retryLabel}`
-      }])
+      }
+      queries.insertConsoleLogs(db, [entry])
+      onConsoleLogEntry?.(entry)
     } catch { /* non-fatal */ }
 
     await sleep(rateLimitInfo.waitMs)
@@ -150,7 +177,7 @@ async function executeWithRateLimitRetry(
     queries.updateTaskRunProgress(db, runId, null, `Retrying after rate limit ${retryLabel}`)
 
     // Re-create console log buffer for the retry
-    const retryConsoleLog = createConsoleLogBuffer(db, runId)
+    const retryConsoleLog = createConsoleLogBuffer(db, runId, onConsoleLogEntry)
     let lastProgressUpdate = 0
     result = await executeClaudeCode(prompt, {
       ...execOptions,
@@ -177,7 +204,7 @@ export async function executeTask(
   taskId: number,
   options: TaskExecutionOptions
 ): Promise<TaskExecutionResult> {
-  const { db, resultsDir, onComplete, onFailed } = options
+  const { db, resultsDir, onComplete, onFailed, onConsoleLogEntry } = options
 
   if (runningTasks.has(taskId)) {
     return { success: false, output: '', errorMessage: 'Task is already running', durationMs: 0 }
@@ -235,52 +262,73 @@ export async function executeTask(
     console.warn('Non-fatal: worker resolution failed:', err)
   }
 
-  // ─── Station path: Ollama in a room → bypass local concurrency limiter ──────
-  // Station tasks are remote API calls, not local processes — no slot needed.
-  if (model?.startsWith('ollama:') && task.roomId) {
+  // ─── Station path: Ollama / API-key models in a room → bypass local concurrency limiter ──────
+  // Station tasks are remote calls, not local processes — no slot needed.
+  const isStationModel = model?.startsWith('ollama:') || model?.startsWith('openai:') || model?.startsWith('anthropic:') || model?.startsWith('claude-api:')
+  if (isStationModel && task.roomId) {
     runningTasks.add(taskId)
-    const run = queries.createTaskRun(db, taskId)
     try {
       const cloudRoomId = getRoomCloudId(task.roomId)
       const stations = await listCloudStations(cloudRoomId)
       const activeStations = stations.filter(s => s.status === 'active')
 
-      if (activeStations.length === 0) {
+      // Ollama requires a station; API models can fall through to local path
+      if (activeStations.length === 0 && model?.startsWith('ollama:')) {
+        const run = queries.createTaskRun(db, taskId)
         const errorMsg = 'No active station available. Ollama workers require a station. Rent one with quoroom_station_create (minimum tier: small).'
         queries.completeTaskRun(db, run.id, '', undefined, errorMsg)
         onFailed?.(task, errorMsg)
         return { success: false, output: '', errorMessage: errorMsg, durationMs: Date.now() - startTime }
       }
 
-      // Round-robin: distribute across active stations
-      const station = activeStations[run.id % activeStations.length]
+      if (activeStations.length > 0) {
+        const run = queries.createTaskRun(db, taskId)
+        try {
+          // Round-robin: distribute across active stations
+          const station = activeStations[run.id % activeStations.length]
 
-      // Augment prompt with learned context + memory
-      let augmentedPrompt = task.prompt
-      try {
-        if (task.learnedContext) {
-          augmentedPrompt = `## Approach (learned from previous runs):\n${task.learnedContext}\n\n---\n\n${augmentedPrompt}`
-        }
-      } catch (err) { console.warn('Non-fatal: learned context injection failed:', err) }
-      try {
-        const memoryContext = queries.getTaskMemoryContext(db, taskId)
-        if (memoryContext) {
-          augmentedPrompt = `${memoryContext}\n\n---\n\n${augmentedPrompt}`
-        }
-      } catch (err) { console.warn('Non-fatal: memory injection failed:', err) }
+          // Augment prompt with learned context + memory
+          let augmentedPrompt = prependKeeperReferral(task.prompt, db)
+          try {
+            if (task.learnedContext) {
+              augmentedPrompt = `## Approach (learned from previous runs):\n${task.learnedContext}\n\n---\n\n${augmentedPrompt}`
+            }
+          } catch (err) { console.warn('Non-fatal: learned context injection failed:', err) }
+          try {
+            const memoryContext = queries.getTaskMemoryContext(db, taskId)
+            if (memoryContext) {
+              augmentedPrompt = `${memoryContext}\n\n---\n\n${augmentedPrompt}`
+            }
+          } catch (err) { console.warn('Non-fatal: memory injection failed:', err) }
 
-      const timeoutMs = task.timeoutMinutes != null ? task.timeoutMinutes * 60 * 1000 : undefined
-      const agentResult = await executeOllamaOnStation(cloudRoomId, station.id, {
-        model,
-        prompt: augmentedPrompt,
-        systemPrompt,
-        timeoutMs,
-      })
-      const result = ollamaResultToExecutionResult(agentResult)
-      return finishRun(db, run.id, taskId, task, result, resultsDir, onComplete, onFailed)
+          const timeoutMs = task.timeoutMinutes != null ? task.timeoutMinutes * 60 * 1000 : undefined
+
+          const stationModel = model as string
+          let agentResult
+          if (stationModel.startsWith('ollama:')) {
+            agentResult = await executeOllamaOnStation(cloudRoomId, station.id, {
+              model: stationModel, prompt: augmentedPrompt, systemPrompt, timeoutMs,
+            })
+          } else {
+            // API key model on station
+            const apiKey = resolveApiKeyForModel(db, task.roomId, stationModel)
+            agentResult = await executeApiOnStation(cloudRoomId, station.id, {
+              model: stationModel, prompt: augmentedPrompt, systemPrompt, timeoutMs, apiKey,
+            })
+          }
+
+          const result = ollamaResultToExecutionResult(agentResult)
+          return finishRun(db, run.id, taskId, task, result, resultsDir, onComplete, onFailed)
+        } catch (err) {
+          const errorMsg = err instanceof Error ? err.message : String(err)
+          queries.completeTaskRun(db, run.id, '', undefined, errorMsg)
+          onFailed?.(task, errorMsg)
+          return { success: false, output: '', errorMessage: errorMsg, durationMs: Date.now() - startTime }
+        }
+      }
+      // No active stations for API model — fall through to local execution
     } catch (err) {
       const errorMsg = err instanceof Error ? err.message : String(err)
-      queries.completeTaskRun(db, run.id, '', undefined, errorMsg)
       onFailed?.(task, errorMsg)
       return { success: false, output: '', errorMessage: errorMsg, durationMs: Date.now() - startTime }
     } finally {
@@ -311,7 +359,7 @@ export async function executeTask(
     }
 
     // Inject learned context (methodology from previous runs)
-    let augmentedPrompt = task.prompt
+    let augmentedPrompt = prependKeeperReferral(task.prompt, db)
     try {
       if (task.learnedContext) {
         augmentedPrompt = `## Approach (learned from previous runs):\n${task.learnedContext}\n\n---\n\n${augmentedPrompt}`
@@ -346,7 +394,7 @@ export async function executeTask(
     const allowedTools = task.allowedTools ?? undefined
     const disallowedTools = task.disallowedTools ?? undefined
 
-    const consoleLog = createConsoleLogBuffer(db, run.id)
+    const consoleLog = createConsoleLogBuffer(db, run.id, onConsoleLogEntry)
     let lastProgressUpdate = 0
 
     // Local Ollama (standalone tasks without a room — room tasks use stations above)
@@ -379,7 +427,7 @@ export async function executeTask(
         }
       }
     }
-    const result = await executeWithRateLimitRetry(augmentedPrompt, execOptions, db, run.id, taskId)
+    const result = await executeWithRateLimitRetry(augmentedPrompt, execOptions, db, run.id, taskId, onConsoleLogEntry)
     consoleLog.flush()
 
     // If resume failed, retry without session
@@ -389,7 +437,7 @@ export async function executeTask(
       } catch (err) { console.warn('Non-fatal: clear session failed:', err) }
 
       // Re-inject learned context + full memory context for the fresh run
-      let retryPrompt = task.prompt
+      let retryPrompt = prependKeeperReferral(task.prompt, db)
       try {
         if (task.learnedContext) {
           retryPrompt = `## Approach (learned from previous runs):\n${task.learnedContext}\n\n---\n\n${retryPrompt}`
@@ -402,7 +450,7 @@ export async function executeTask(
         }
       } catch (err) { console.warn('Non-fatal: memory context retry failed:', err) }
 
-      const retryConsoleLog = createConsoleLogBuffer(db, run.id)
+      const retryConsoleLog = createConsoleLogBuffer(db, run.id, onConsoleLogEntry)
       lastProgressUpdate = 0
       const retryExecOptions: ExecutionOptions = {
         systemPrompt,
@@ -420,7 +468,7 @@ export async function executeTask(
           }
         }
       }
-      const retryResult = await executeWithRateLimitRetry(retryPrompt, retryExecOptions, db, run.id, taskId)
+      const retryResult = await executeWithRateLimitRetry(retryPrompt, retryExecOptions, db, run.id, taskId, onConsoleLogEntry)
       retryConsoleLog.flush()
 
       return finishRun(db, run.id, taskId, task, retryResult, resultsDir, onComplete, onFailed)

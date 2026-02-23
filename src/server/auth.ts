@@ -23,6 +23,18 @@ import { join } from 'node:path'
 
 export type TokenRole = 'agent' | 'user' | 'member'
 export type DeploymentMode = 'local' | 'cloud'
+export interface CloudTokenProfile {
+  userId: string
+  instanceId: string | null
+  email: string | null
+  emailVerified: boolean | null
+  name: string | null
+}
+
+export interface TokenPrincipal {
+  role: TokenRole
+  cloudProfile: CloudTokenProfile | null
+}
 
 let agentToken: string | null = null
 let userToken: string | null = null
@@ -84,7 +96,14 @@ function isFiniteNumber(value: unknown): value is number {
   return typeof value === 'number' && Number.isFinite(value)
 }
 
-function validateCloudJwt(token: string): 'user' | 'member' | null {
+function normalizeOptionalString(value: unknown, maxLen: number): string | null {
+  if (typeof value !== 'string') return null
+  const trimmed = value.trim()
+  if (!trimmed) return null
+  return trimmed.slice(0, maxLen)
+}
+
+function validateCloudJwt(token: string): { role: 'user' | 'member'; profile: CloudTokenProfile } | null {
   const secret = getCloudJwtSecret()
   if (!secret) return null
   const parts = token.split('.')
@@ -99,6 +118,9 @@ function validateCloudJwt(token: string): 'user' | 'member' | null {
     nbf?: number
     instanceId?: string
     role?: string
+    email?: string
+    emailVerified?: boolean
+    name?: string
   }>(payloadB64)
   if (!header || !payload) return null
   if (header.alg !== 'HS256') return null
@@ -129,8 +151,17 @@ function validateCloudJwt(token: string): 'user' | 'member' | null {
   }
 
   const cloudRole = (payload.role || '').toLowerCase()
-  if (cloudRole === 'member') return 'member'
-  return 'user'
+  const role: 'user' | 'member' = cloudRole === 'member' ? 'member' : 'user'
+  return {
+    role,
+    profile: {
+      userId: payload.sub,
+      instanceId: typeof payload.instanceId === 'string' ? payload.instanceId : null,
+      email: normalizeOptionalString(payload.email, 320),
+      emailVerified: typeof payload.emailVerified === 'boolean' ? payload.emailVerified : null,
+      name: normalizeOptionalString(payload.name, 160),
+    }
+  }
 }
 
 export function getDeploymentMode(): DeploymentMode {
@@ -219,13 +250,23 @@ export function resetTokens(): void {
  * Validate auth header and return the token role, or null if invalid.
  */
 export function validateToken(authHeader: string | undefined): TokenRole | null {
+  const principal = getTokenPrincipal(authHeader)
+  return principal?.role ?? null
+}
+
+export function getTokenPrincipal(authHeader: string | undefined): TokenPrincipal | null {
   if (!authHeader?.startsWith('Bearer ')) return null
   const provided = authHeader.slice(7)
-  if (tokenEquals(agentToken, provided)) return 'agent'
-  if (tokenEquals(userToken, provided)) return 'user'
+  if (tokenEquals(agentToken, provided)) return { role: 'agent', cloudProfile: null }
+  if (tokenEquals(userToken, provided)) return { role: 'user', cloudProfile: null }
   if (isCloudDeployment()) {
-    const cloudRole = validateCloudJwt(provided)
-    if (cloudRole) return cloudRole
+    const cloudPrincipal = validateCloudJwt(provided)
+    if (cloudPrincipal) {
+      return {
+        role: cloudPrincipal.role,
+        cloudProfile: cloudPrincipal.profile,
+      }
+    }
   }
 
   return null

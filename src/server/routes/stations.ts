@@ -107,6 +107,7 @@ export function registerStationRoutes(router: Router): void {
       visibility: room.visibility,
     })
     await cancelCloudStation(cloudRoomId, stationId)
+    eventBus.emit(`room:${roomId}`, 'station:canceled', { roomId, stationId })
     return { data: { ok: true } }
   })
 
@@ -123,6 +124,7 @@ export function registerStationRoutes(router: Router): void {
       visibility: room.visibility,
     })
     await deleteCloudStation(cloudRoomId, stationId)
+    eventBus.emit(`room:${roomId}`, 'station:deleted', { roomId, stationId })
     return { data: { ok: true } }
   })
 

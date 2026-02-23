@@ -11,9 +11,16 @@ export function usePolling<T>(
   const fetcherRef = useRef(fetcher)
   const doFetchRef = useRef<() => Promise<void>>(async () => {})
   const inFlightRef = useRef(false)
+  const queuedRef = useRef(false)
   const nextDelayRef = useRef(intervalMs)
   const unmountedRef = useRef(false)
   fetcherRef.current = fetcher
+
+  const computeDelay = useCallback((baseMs: number): number => {
+    if (typeof document === 'undefined' || document.visibilityState === 'visible') return baseMs
+    // Back off aggressively when tab is hidden to reduce local CPU/network churn.
+    return Math.max(baseMs * 4, 30000)
+  }, [])
 
   const clearTimer = useCallback(() => {
     if (timerRef.current) {
@@ -31,8 +38,14 @@ export function usePolling<T>(
   }, [clearTimer])
 
   const doFetch = useCallback(async () => {
-    if (inFlightRef.current || unmountedRef.current) return
+    if (unmountedRef.current) return
+    if (inFlightRef.current) {
+      // Ensure we run one follow-up fetch with the latest fetcher/context.
+      queuedRef.current = true
+      return
+    }
     inFlightRef.current = true
+    queuedRef.current = false
 
     try {
       const result = await fetcherRef.current()
@@ -41,7 +54,7 @@ export function usePolling<T>(
       setError(null)
       setIsLoading(false)
       nextDelayRef.current = intervalMs
-      scheduleNext(intervalMs)
+      scheduleNext(computeDelay(intervalMs))
     } catch (err) {
       if (unmountedRef.current) return
       const message = err instanceof Error ? err.message : 'Failed to load data'
@@ -51,8 +64,13 @@ export function usePolling<T>(
       scheduleNext(nextDelayRef.current)
     } finally {
       inFlightRef.current = false
+      if (!unmountedRef.current && queuedRef.current) {
+        queuedRef.current = false
+        clearTimer()
+        void doFetchRef.current()
+      }
     }
-  }, [intervalMs, scheduleNext])
+  }, [clearTimer, computeDelay, intervalMs, scheduleNext])
   doFetchRef.current = doFetch
 
   useEffect(() => {
@@ -61,8 +79,18 @@ export function usePolling<T>(
     nextDelayRef.current = intervalMs
     void doFetch()
 
+    const onVisibilityChange = (): void => {
+      if (unmountedRef.current) return
+      if (document.visibilityState === 'visible') {
+        nextDelayRef.current = intervalMs
+        void doFetchRef.current()
+      }
+    }
+    document.addEventListener('visibilitychange', onVisibilityChange)
+
     return () => {
       unmountedRef.current = true
+      document.removeEventListener('visibilitychange', onVisibilityChange)
       clearTimer()
     }
   }, [clearTimer, doFetch, intervalMs])

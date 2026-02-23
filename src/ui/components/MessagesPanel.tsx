@@ -1,10 +1,15 @@
 import { useState, useEffect, useRef } from 'react'
 import { usePolling } from '../hooks/usePolling'
-import { useWebSocket } from '../hooks/useWebSocket'
 import { api } from '../lib/client'
+import {
+  ROOM_ESCALATION_EVENT_TYPES,
+  ROOM_MESSAGE_EVENT_TYPES,
+} from '../lib/room-events'
+import { wsClient, type WsMessage } from '../lib/ws'
 import { storageGet, storageSet } from '../lib/storage'
 import { formatRelativeTime } from '../utils/time'
 import { Select } from './Select'
+import { AutoModeLockModal, modeAwareButtonClass, useAutonomyControlGate } from './AutonomyControlGate'
 import type { Escalation, Worker, RoomMessage } from '@shared/types'
 
 const STATUS_COLORS: Record<string, string> = {
@@ -19,31 +24,42 @@ interface MessagesPanelProps {
 }
 
 export function MessagesPanel({ roomId, autonomyMode }: MessagesPanelProps): React.JSX.Element {
-  const semi = autonomyMode === 'semi'
+  const { semi, guard, showLockModal, closeLockModal } = useAutonomyControlGate(autonomyMode)
   const [viewSection, setViewSection] = useState<'escalations' | 'rooms'>('escalations')
   const [collapsed, setCollapsed] = useState(() => storageGet('quoroom_messages_collapsed') === 'true')
 
   const { data: escalations, refresh } = usePolling<Escalation[]>(
     () => roomId ? api.escalations.list(roomId) : Promise.resolve([]),
-    5000
+    30000
   )
   const { data: roomMessages, refresh: refreshMessages } = usePolling<RoomMessage[]>(
     () => roomId ? api.roomMessages.list(roomId) : Promise.resolve([]),
-    10000
+    30000
   )
-  const { data: workers } = usePolling<Worker[]>(() => api.workers.list(), 30000)
+  const { data: workers } = usePolling<Worker[]>(() => api.workers.list(), 60000)
 
-  // Real-time updates via WebSocket
-  const wsEvent = useWebSocket(roomId ? `room:${roomId}` : '')
-  useEffect(() => { if (wsEvent) { refresh(); refreshMessages() } }, [wsEvent, refresh, refreshMessages])
+  useEffect(() => {
+    if (!roomId) return
+    return wsClient.subscribe(`room:${roomId}`, (event: WsMessage) => {
+      if (ROOM_ESCALATION_EVENT_TYPES.has(event.type)) {
+        void refresh()
+      }
+      if (ROOM_MESSAGE_EVENT_TYPES.has(event.type)) {
+        void refreshMessages()
+      }
+    })
+  }, [refresh, refreshMessages, roomId])
 
-  useEffect(() => { refresh() }, [roomId, refresh])
+  useEffect(() => {
+    void refresh()
+    void refreshMessages()
+  }, [refresh, refreshMessages, roomId])
 
   // State — always declared unconditionally (React hooks rule)
   const [replyingTo, setReplyingTo] = useState<number | null>(null)
   const [replyText, setReplyText] = useState('')
   const [showCreateForm, setShowCreateForm] = useState(false)
-  const [toAgentId, setToAgentId] = useState<number | ''>('')
+  const [toAgentId, setToAgentId] = useState<number | '' | 'developer'>('')
   const [messageBody, setMessageBody] = useState('')
   const [createError, setCreateError] = useState<string | null>(null)
   const [replyingToMsg, setReplyingToMsg] = useState<number | null>(null)
@@ -75,16 +91,21 @@ export function MessagesPanel({ roomId, autonomyMode }: MessagesPanelProps): Rea
     if (!roomId || !messageBody.trim()) return
     setCreateError(null)
     try {
-      await api.escalations.create(
-        roomId,
-        null,
-        messageBody.trim(),
-        toAgentId === '' ? undefined : toAgentId,
-      )
+      if (toAgentId === 'developer') {
+        await api.roomMessages.create(roomId, 'developer', messageBody.trim(), 'Message to Developer')
+        refreshMessages()
+      } else {
+        await api.escalations.create(
+          roomId,
+          null,
+          messageBody.trim(),
+          toAgentId === '' ? undefined : toAgentId,
+        )
+        refresh()
+      }
       setMessageBody('')
       setToAgentId('')
       setShowCreateForm(false)
-      refresh()
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Failed to send message'
       setCreateError(message)
@@ -156,10 +177,10 @@ export function MessagesPanel({ roomId, autonomyMode }: MessagesPanelProps): Rea
         >
           {collapsed ? 'Expand all' : 'Collapse all'}
         </button>
-        {semi && roomId && viewSection === 'escalations' && (
+        {roomId && viewSection === 'escalations' && (
           <button
-            onClick={() => setShowCreateForm(!showCreateForm)}
-            className="text-xs px-2.5 py-1.5 rounded-lg bg-interactive text-text-invert hover:bg-interactive-hover"
+            onClick={() => guard(() => setShowCreateForm(!showCreateForm))}
+            className={`text-xs px-2.5 py-1.5 rounded-lg ${modeAwareButtonClass(semi, 'bg-interactive text-text-invert hover:bg-interactive-hover')}`}
           >
             {showCreateForm ? 'Cancel' : '+ New'}
           </button>
@@ -171,11 +192,12 @@ export function MessagesPanel({ roomId, autonomyMode }: MessagesPanelProps): Rea
         <div className="p-4 border-b-2 border-border-primary bg-surface-secondary space-y-2">
           <Select
             value={String(toAgentId)}
-            onChange={(v) => setToAgentId(v === '' ? '' : Number(v))}
+            onChange={(v) => setToAgentId(v === '' ? '' : v === 'developer' ? 'developer' : Number(v))}
             className="max-w-xs"
             placeholder="To worker (optional)"
             options={[
               { value: '', label: 'To worker (optional)' },
+              { value: 'developer', label: 'Developer' },
               ...workerList.map(w => ({ value: String(w.id), label: w.name }))
             ]}
           />
@@ -311,6 +333,7 @@ export function MessagesPanel({ roomId, autonomyMode }: MessagesPanelProps): Rea
           )
         )}
       </div>
+      <AutoModeLockModal open={showLockModal} onClose={closeLockModal} />
     </div>
   )
 }

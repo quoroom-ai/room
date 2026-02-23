@@ -78,6 +78,13 @@ function isActiveStatus(status: ProviderAuthStatus): boolean {
 
 function emitSessionStatus(session: ProviderAuthSessionInternal): void {
   eventBus.emit(`provider-auth:${session.sessionId}`, 'provider_auth:status', toSessionView(session, false))
+  eventBus.emit('providers', 'providers:auth_status', {
+    provider: session.provider,
+    sessionId: session.sessionId,
+    status: session.status,
+    active: isActiveStatus(session.status),
+    updatedAt: session.updatedAt,
+  })
 }
 
 function emitSessionLine(

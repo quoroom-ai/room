@@ -22,7 +22,8 @@ export default defineConfig({
   },
   build: {
     outDir: resolve(__dirname, '../../out/ui'),
-    emptyOutDir: true
+    emptyOutDir: true,
+    chunkSizeWarningLimit: 700
   },
   server: {
     port: 5173,

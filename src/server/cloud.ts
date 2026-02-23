@@ -33,6 +33,8 @@ const CLOUD_EVENT_MAP: Record<string, string> = {
   'station:created': 'station_created',
   'station:started': 'station_started',
   'station:stopped': 'station_stopped',
+  'station:canceled': 'station_stopped',
+  'station:deleted': 'station_stopped',
   'self_mod:edited': 'self_mod',
   'self_mod:reverted': 'self_mod',
   'wallet:sent': 'money_sent',
@@ -90,22 +92,21 @@ function stopActivityPush(): void {
 
 // ─── Cloud sync initialization ──────────────────────────────
 
-/** Initialize cloud sync for rooms with visibility='public'. */
+/** Initialize cloud sync for all rooms. Public rooms send full data; private rooms send anonymous heartbeats. */
 export function initCloudSync(db: Database.Database): void {
   stopCloudSync()
   stopActivityPush()
 
   const rooms = listRooms(db)
-  const hasPublicRoom = rooms.some(r => r.visibility === 'public')
-  if (!hasPublicRoom) return
+  if (rooms.length === 0) return
 
   startCloudSync({
-    getHeartbeatDataForPublicRooms(): CloudHeartbeat[] {
+    getHeartbeatData(): CloudHeartbeat[] {
       // Respect telemetry opt-out — keeper can go dark even with public rooms
       if (getSetting(db, 'telemetry_enabled') === 'false') return []
 
-      const publicRooms = listRooms(db).filter(r => r.visibility === 'public')
-      if (publicRooms.length === 0) return []
+      const allRooms = listRooms(db)
+      if (allRooms.length === 0) return []
 
       const allWorkers = listWorkers(db)
       const tasks = listTasks(db)
@@ -113,13 +114,13 @@ export function initCloudSync(db: Database.Database): void {
       const version = getVersion()
 
       // Pre-compute per-room data
-      const workersPerRoom = new Map<number, Array<{ name: string; state: string }>>()
+      const workersPerRoom = new Map<number, Array<{ name: string; state: string; model?: string }>>()
       const workerCounts = new Map<number, number>()
       for (const worker of allWorkers) {
         if (worker.roomId == null) continue
         workerCounts.set(worker.roomId, (workerCounts.get(worker.roomId) ?? 0) + 1)
         const list = workersPerRoom.get(worker.roomId) ?? []
-        list.push({ name: worker.name, state: worker.agentState })
+        list.push({ name: worker.name, state: worker.agentState, model: worker.model ?? undefined })
         workersPerRoom.set(worker.roomId, list)
       }
 
@@ -136,16 +137,41 @@ export function initCloudSync(db: Database.Database): void {
         if (task.roomId == null) continue
         taskCounts.set(task.roomId, (taskCounts.get(task.roomId) ?? 0) + 1)
       }
+      const keeperReferralCode = getSetting(db, 'keeper_referral_code')
 
-      return publicRooms.map(room => {
+      return allRooms.map(room => {
+        const isPrivate = room.visibility !== 'public'
+        const queen = room.queenWorkerId ? getWorker(db, room.queenWorkerId) : null
+
+        if (isPrivate) {
+          // Anonymous heartbeat — aggregate stats only, no identifying details
+          const privateWorkers = (workersPerRoom.get(room.id) ?? []).map(w => ({
+            name: 'Agent',
+            state: w.state,
+            model: w.model,
+          }))
+          return {
+            roomId: getRoomCloudId(room.id),
+            name: 'Private Room',
+            goal: null,
+            mode: room.autonomyMode,
+            workerCount: workerCounts.get(room.id) ?? 0,
+            taskCount: taskCounts.get(room.id) ?? 0,
+            earnings: '0',
+            version,
+            queenModel: queen?.model ?? null,
+            workers: privateWorkers,
+            stations: [],
+            visibility: 'private' as const,
+          }
+        }
+
         let earnings = '0'
         const wallet = getWalletByRoom(db, room.id)
         if (wallet) {
           const summary = getWalletTransactionSummary(db, wallet.id)
           earnings = summary.received
         }
-
-        const queen = room.queenWorkerId ? getWorker(db, room.queenWorkerId) : null
 
         return {
           roomId: getRoomCloudId(room.id),
@@ -159,7 +185,9 @@ export function initCloudSync(db: Database.Database): void {
           queenModel: queen?.model ?? null,
           workers: workersPerRoom.get(room.id) ?? [],
           stations: stationsPerRoom.get(room.id) ?? [],
-          inviteCode: room.inviteCode,
+          visibility: 'public' as const,
+          referredByCode: room.referredByCode,
+          keeperReferralCode,
         }
       })
     }

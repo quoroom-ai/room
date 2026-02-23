@@ -9,6 +9,20 @@ export function registerRoomMessageRoutes(router: Router): void {
     return { data: queries.listRoomMessages(ctx.db, roomId, status) }
   })
 
+  router.post('/api/rooms/:roomId/messages', (ctx) => {
+    const roomId = Number(ctx.params.roomId)
+    const body = ctx.body as Record<string, unknown> || {}
+    const subject = typeof body.subject === 'string' ? body.subject.trim() : ''
+    const msgBody = typeof body.body === 'string' ? body.body.trim() : ''
+    const toRoomId = typeof body.toRoomId === 'string' ? body.toRoomId.trim() : ''
+    if (!msgBody) return { status: 400, error: 'body is required' }
+    if (!toRoomId) return { status: 400, error: 'toRoomId is required' }
+
+    const msg = queries.createRoomMessage(ctx.db, roomId, 'outbound', subject || '(no subject)', msgBody, { toRoomId })
+    eventBus.emit(`room:${roomId}`, 'room_message:created', msg)
+    return { status: 201, data: msg }
+  })
+
   router.get('/api/messages/:id', (ctx) => {
     const id = Number(ctx.params.id)
     const msg = queries.getRoomMessage(ctx.db, id)

@@ -46,14 +46,14 @@ CREATE TABLE IF NOT EXISTS rooms (
     visibility TEXT NOT NULL DEFAULT 'private',
     autonomy_mode TEXT NOT NULL DEFAULT 'auto',
     max_concurrent_tasks INTEGER NOT NULL DEFAULT 3,
-    worker_model TEXT NOT NULL DEFAULT 'ollama:llama3',
+    worker_model TEXT NOT NULL DEFAULT 'ollama:llama3.2',
     queen_cycle_gap_ms INTEGER NOT NULL DEFAULT 1800000,
     queen_max_turns INTEGER NOT NULL DEFAULT 3,
     queen_quiet_from TEXT,
     queen_quiet_until TEXT,
     config TEXT,
     chat_session_id TEXT,
-    invite_code TEXT,
+    referred_by_code TEXT,
     created_at DATETIME DEFAULT (datetime('now','localtime')),
     updated_at DATETIME DEFAULT (datetime('now','localtime'))
 );
@@ -413,6 +413,32 @@ CREATE TABLE IF NOT EXISTS stations (
     updated_at DATETIME DEFAULT (datetime('now','localtime'))
 );
 CREATE INDEX IF NOT EXISTS idx_stations_room ON stations(room_id);
+
+-- Worker cycles (agent loop execution tracking)
+CREATE TABLE IF NOT EXISTS worker_cycles (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    worker_id INTEGER NOT NULL REFERENCES workers(id) ON DELETE CASCADE,
+    room_id INTEGER NOT NULL,
+    model TEXT,
+    started_at DATETIME DEFAULT (datetime('now','localtime')),
+    finished_at DATETIME,
+    status TEXT NOT NULL DEFAULT 'running',
+    error_message TEXT,
+    duration_ms INTEGER
+);
+CREATE INDEX IF NOT EXISTS idx_worker_cycles_room ON worker_cycles(room_id, started_at DESC);
+CREATE INDEX IF NOT EXISTS idx_worker_cycles_status ON worker_cycles(status);
+
+-- Cycle logs (streaming output from agent cycles)
+CREATE TABLE IF NOT EXISTS cycle_logs (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    cycle_id INTEGER NOT NULL REFERENCES worker_cycles(id) ON DELETE CASCADE,
+    seq INTEGER NOT NULL,
+    entry_type TEXT NOT NULL,
+    content TEXT NOT NULL,
+    created_at DATETIME DEFAULT (datetime('now','localtime'))
+);
+CREATE INDEX IF NOT EXISTS idx_cycle_logs_seq ON cycle_logs(cycle_id, seq);
 
 -- Schema version tracking
 CREATE TABLE IF NOT EXISTS schema_version (

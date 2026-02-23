@@ -1,6 +1,11 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { usePolling } from '../hooks/usePolling'
 import { api } from '../lib/client'
+import {
+  ROOM_BALANCE_EVENT_TYPES,
+  ROOM_STATION_EVENT_TYPES,
+} from '../lib/room-events'
+import { wsClient, type WsMessage } from '../lib/ws'
 import { getCachedToken } from '../lib/auth'
 import { formatRelativeTime } from '../utils/time'
 import { CopyAddressButton } from './CopyAddressButton'
@@ -55,30 +60,31 @@ interface TransactionsPanelProps {
 
 export function TransactionsPanel({ roomId }: TransactionsPanelProps): React.JSX.Element {
   const [subTab, setSubTab] = useState<'wallet' | 'billing'>('wallet')
+  const [showCryptoTopUp, setShowCryptoTopUp] = useState(false)
 
-  const { data: wallet } = usePolling<Wallet | null>(
+  const { data: wallet, refresh: refreshWallet } = usePolling<Wallet | null>(
     () => roomId ? api.wallet.get(roomId).catch(() => null) : Promise.resolve(null),
-    30000
+    60000
   )
 
-  const { data: transactions } = usePolling<WalletTransaction[]>(
+  const { data: transactions, refresh: refreshTransactions } = usePolling<WalletTransaction[]>(
     () => roomId && wallet ? api.wallet.transactions(roomId).catch(() => []) : Promise.resolve([]),
-    10000
+    30000
   )
 
-  const { data: summary } = usePolling<RevenueSummary | null>(
+  const { data: summary, refresh: refreshSummary } = usePolling<RevenueSummary | null>(
     () => roomId ? api.wallet.summary(roomId).catch(() => null) : Promise.resolve(null),
-    10000
+    60000
   )
 
-  const { data: onChainBalance } = usePolling<OnChainBalance | null>(
+  const { data: onChainBalance, refresh: refreshOnChainBalance } = usePolling<OnChainBalance | null>(
     () => roomId && wallet ? api.wallet.balance(roomId).catch(() => null) : Promise.resolve(null),
-    30000
+    90000
   )
 
-  const { data: billingStations } = usePolling<CloudStation[]>(
+  const { data: billingStations, refresh: refreshBillingStations } = usePolling<CloudStation[]>(
     () => roomId ? (api.cloudStations.list(roomId) as Promise<CloudStation[]>).catch(() => []) : Promise.resolve([]),
-    30000
+    60000
   )
 
   interface CloudPayment {
@@ -93,10 +99,34 @@ export function TransactionsPanel({ roomId }: TransactionsPanelProps): React.JSX
     cryptoChain?: string
   }
 
-  const { data: billingPayments } = usePolling<CloudPayment[]>(
+  const { data: billingPayments, refresh: refreshBillingPayments } = usePolling<CloudPayment[]>(
     () => roomId ? (api.cloudStations.payments(roomId) as Promise<CloudPayment[]>).catch(() => []) : Promise.resolve([]),
-    30000
+    120000
   )
+
+  useEffect(() => {
+    if (!roomId) return
+    return wsClient.subscribe(`room:${roomId}`, (event: WsMessage) => {
+      if (ROOM_BALANCE_EVENT_TYPES.has(event.type)) {
+        void refreshWallet()
+        void refreshTransactions()
+        void refreshSummary()
+        void refreshOnChainBalance()
+      }
+      if (ROOM_STATION_EVENT_TYPES.has(event.type)) {
+        void refreshBillingStations()
+        void refreshBillingPayments()
+      }
+    })
+  }, [
+    refreshBillingPayments,
+    refreshBillingStations,
+    refreshOnChainBalance,
+    refreshSummary,
+    refreshTransactions,
+    refreshWallet,
+    roomId,
+  ])
 
   if (!roomId) {
     return <div className="p-4 text-sm text-text-muted">Select a room to view transactions.</div>
@@ -131,14 +161,22 @@ export function TransactionsPanel({ roomId }: TransactionsPanelProps): React.JSX
             Billing
           </button>
           {subTab === 'wallet' && wallet && (
-            <a
-              href={roomId ? `/api/rooms/${roomId}/wallet/onramp-redirect?token=${encodeURIComponent(getCachedToken() ?? '')}` : '#'}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="text-xs px-2.5 py-1.5 rounded-lg bg-interactive text-text-invert hover:bg-interactive-hover no-underline"
-            >
-              Top Up from Card
-            </a>
+            <>
+              <a
+                href={roomId ? `/api/rooms/${roomId}/wallet/onramp-redirect?token=${encodeURIComponent(getCachedToken() ?? '')}` : '#'}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="text-xs px-2.5 py-1.5 rounded-lg bg-interactive text-text-invert hover:bg-interactive-hover no-underline"
+              >
+                Top Up from Card
+              </a>
+              <button
+                onClick={() => setShowCryptoTopUp(true)}
+                className="text-xs px-2.5 py-1.5 rounded-lg bg-surface-tertiary text-text-primary hover:bg-surface-hover"
+              >
+                Top Up with Crypto
+              </button>
+            </>
           )}
         </div>
       </div>
@@ -285,6 +323,53 @@ export function TransactionsPanel({ roomId }: TransactionsPanelProps): React.JSX
             </div>
           ) : null}
         </>
+      )}
+
+      {showCryptoTopUp && wallet && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/50"
+          onClick={e => { if (e.target === e.currentTarget) setShowCryptoTopUp(false) }}
+        >
+          <div className="bg-surface-primary rounded-2xl shadow-2xl w-full max-w-sm mx-4 p-6 relative">
+            <button
+              onClick={() => setShowCryptoTopUp(false)}
+              className="absolute top-4 right-4 text-text-muted hover:text-text-secondary text-lg leading-none transition-colors"
+              aria-label="Close"
+            >
+              {'\u2715'}
+            </button>
+            <h2 className="text-lg font-bold text-text-primary mb-4">Top Up with Crypto</h2>
+            <div className="space-y-3">
+              <p className="text-sm text-text-secondary">
+                Send USDC or USDT to the wallet address below. The balance updates automatically.
+              </p>
+              <div className="bg-surface-secondary rounded-lg p-3">
+                <div className="text-xs text-text-muted mb-1">Wallet address</div>
+                <div className="flex items-center gap-2">
+                  <code className="text-xs text-text-primary font-mono truncate flex-1">{wallet.address}</code>
+                  <CopyAddressButton address={wallet.address} />
+                </div>
+              </div>
+              <div className="bg-surface-secondary rounded-lg p-3">
+                <div className="text-xs text-text-muted mb-1">Supported chains</div>
+                <div className="text-sm text-text-primary">Base, Ethereum, Arbitrum, Optimism, Polygon</div>
+              </div>
+              <div className="bg-surface-secondary rounded-lg p-3">
+                <div className="text-xs text-text-muted mb-1">Supported tokens</div>
+                <div className="text-sm text-text-primary">USDC, USDT</div>
+              </div>
+              <p className="text-xs text-text-muted">
+                Same address works on all EVM chains. Send from any exchange or wallet. Balance is aggregated across all networks.
+              </p>
+              <button
+                onClick={() => setShowCryptoTopUp(false)}
+                className="w-full py-2 text-sm font-medium text-center text-text-primary bg-surface-tertiary hover:bg-surface-hover rounded-lg transition-colors"
+              >
+                Done
+              </button>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   )

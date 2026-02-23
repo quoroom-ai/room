@@ -1,9 +1,12 @@
 import { useState, useEffect } from 'react'
 import { usePolling } from '../hooks/usePolling'
+import { useWebSocket } from '../hooks/useWebSocket'
 import { useContainerWidth } from '../hooks/useContainerWidth'
 import { api } from '../lib/client'
+import { wsClient, type WsMessage } from '../lib/ws'
 import type { TaskRun, Task, ConsoleLogEntry, SelfModAuditEntry, Worker } from '@shared/types'
 import { formatDateTimeShort, formatRelativeTime } from '../utils/time'
+import { AutoModeLockModal, AUTO_MODE_LOCKED_BUTTON_CLASS, modeAwareButtonClass, useAutonomyControlGate } from './AutonomyControlGate'
 
 const CONSOLE_ENTRY_COLORS: Record<string, string> = {
   tool_call: 'text-yellow-400',
@@ -54,16 +57,25 @@ function ConsoleLogHistory({ runId }: { runId: number }): React.JSX.Element {
   )
 }
 
-function SelfModSection({ roomId, semi }: { roomId: number | null; semi: boolean }): React.JSX.Element {
+function SelfModSection({ roomId, semi, onLockedControl }: { roomId: number | null; semi: boolean; onLockedControl: () => void }): React.JSX.Element {
   const { data: entries, refresh } = usePolling<SelfModAuditEntry[]>(
     () => roomId ? api.selfMod.list(roomId) : Promise.resolve([]),
-    10000
+    30000
   )
-  const { data: workers } = usePolling<Worker[]>(() => api.workers.list(), 30000)
+  const { data: workers } = usePolling<Worker[]>(() => api.workers.list(), 60000)
 
   const [confirmRevertId, setConfirmRevertId] = useState<number | null>(null)
 
   const workerMap = new Map((workers ?? []).map(w => [w.id, w]))
+
+  useEffect(() => {
+    if (!roomId) return
+    return wsClient.subscribe(`room:${roomId}`, (event: WsMessage) => {
+      if (event.type === 'self_mod:reverted' || event.type === 'self_mod:edited') {
+        void refresh()
+      }
+    })
+  }, [refresh, roomId])
 
   async function handleRevert(id: number): Promise<void> {
     await api.selfMod.revert(id)
@@ -88,26 +100,35 @@ function SelfModSection({ roomId, semi }: { roomId: number | null; semi: boolean
               }`}>
                 {entry.reverted ? 'reverted' : 'active'}
               </span>
-              {semi && !entry.reverted && (
-                confirmRevertId === entry.id ? (
-                  <span className="flex items-center gap-1 shrink-0">
+              {!entry.reverted && (
+                semi ? (
+                  confirmRevertId === entry.id ? (
+                    <span className="flex items-center gap-1 shrink-0">
+                      <button
+                        onClick={() => { void handleRevert(entry.id) }}
+                        className="px-2.5 py-1.5 rounded-lg text-xs font-medium bg-status-error-bg text-status-error hover:bg-status-error-bg"
+                      >
+                        Confirm
+                      </button>
+                      <button
+                        onClick={() => setConfirmRevertId(null)}
+                        className="px-2.5 py-1.5 rounded-lg text-xs font-medium bg-surface-tertiary text-text-muted hover:bg-surface-hover"
+                      >
+                        Cancel
+                      </button>
+                    </span>
+                  ) : (
                     <button
-                      onClick={() => handleRevert(entry.id)}
-                      className="px-2.5 py-1.5 rounded-lg text-xs font-medium bg-status-error-bg text-status-error hover:bg-status-error-bg"
+                      onClick={() => setConfirmRevertId(entry.id)}
+                      className="px-2.5 py-1.5 rounded-lg text-xs font-medium bg-status-warning-bg text-status-warning hover:bg-status-warning-bg shrink-0"
                     >
-                      Confirm
+                      Revert
                     </button>
-                    <button
-                      onClick={() => setConfirmRevertId(null)}
-                      className="px-2.5 py-1.5 rounded-lg text-xs font-medium bg-surface-tertiary text-text-muted hover:bg-surface-hover"
-                    >
-                      Cancel
-                    </button>
-                  </span>
+                  )
                 ) : (
                   <button
-                    onClick={() => setConfirmRevertId(entry.id)}
-                    className="px-2.5 py-1.5 rounded-lg text-xs font-medium bg-status-warning-bg text-status-warning hover:bg-status-warning-bg shrink-0"
+                    onClick={onLockedControl}
+                    className={`px-2.5 py-1.5 rounded-lg text-xs font-medium shrink-0 ${AUTO_MODE_LOCKED_BUTTON_CLASS}`}
                   >
                     Revert
                   </button>
@@ -136,12 +157,19 @@ interface ResultsPanelProps {
 }
 
 export function ResultsPanel({ roomId, autonomyMode }: ResultsPanelProps): React.JSX.Element {
-  const semi = autonomyMode === 'semi'
+  const { semi, showLockModal, closeLockModal, requestSemiMode } = useAutonomyControlGate(autonomyMode)
   const [containerRef, containerWidth] = useContainerWidth<HTMLDivElement>()
   const wide = containerWidth >= 600
   const [expandedId, setExpandedId] = useState<number | null>(null)
+  const [runDetails, setRunDetails] = useState<Record<number, TaskRun>>({})
+  const [runDetailsLoading, setRunDetailsLoading] = useState<Record<number, boolean>>({})
   const [taskNames, setTaskNames] = useState<Record<number, string>>({})
-  const { data: runs, error, isLoading } = usePolling(() => api.runs.list(30, { includeResult: true }), 5000)
+  const { data: runs, error, isLoading, refresh } = usePolling(() => api.runs.list(30, { includeResult: false }), 30000)
+  const runsEvent = useWebSocket('runs')
+
+  useEffect(() => {
+    if (runsEvent) refresh()
+  }, [refresh, runsEvent])
 
   useEffect(() => {
     api.tasks.list().then((tasks: Task[]) => {
@@ -150,6 +178,36 @@ export function ResultsPanel({ roomId, autonomyMode }: ResultsPanelProps): React
       setTaskNames(map)
     })
   }, [])
+
+  async function ensureRunDetail(runId: number): Promise<void> {
+    if (runDetails[runId] || runDetailsLoading[runId]) return
+    setRunDetailsLoading(prev => ({ ...prev, [runId]: true }))
+    try {
+      const detail = await api.runs.get(runId)
+      setRunDetails(prev => ({ ...prev, [runId]: detail }))
+    } catch {
+      // ignore; summary row still renders
+    } finally {
+      setRunDetailsLoading(prev => {
+        const next = { ...prev }
+        delete next[runId]
+        return next
+      })
+    }
+  }
+
+  useEffect(() => {
+    if (expandedId == null) return
+    void ensureRunDetail(expandedId)
+  }, [expandedId])
+
+  useEffect(() => {
+    if (!wide || !runs || runs.length === 0) return
+    const prefetched = runs.slice(0, 2)
+    for (const run of prefetched) {
+      void ensureRunDetail(run.id)
+    }
+  }, [runs, wide])
 
   if (isLoading && !runs) {
     return <div className="p-4 text-sm text-text-muted">Loading...</div>
@@ -160,11 +218,19 @@ export function ResultsPanel({ roomId, autonomyMode }: ResultsPanelProps): React
 
   function renderRun(run: TaskRun, index: number): React.JSX.Element {
     const wideAutoExpand = wide && index < 2
+    const detail = runDetails[run.id] ?? run
+    const detailLoading = runDetailsLoading[run.id] === true
     return (
       <div key={run.id} className="border border-border-primary rounded-lg overflow-hidden bg-surface-secondary">
         <div
           className="px-3 py-2 hover:bg-surface-hover cursor-pointer"
-          onClick={() => setExpandedId(expandedId === run.id ? null : run.id)}
+          onClick={() => {
+            const next = expandedId === run.id ? null : run.id
+            setExpandedId(next)
+            if (next !== null) {
+              void ensureRunDetail(next)
+            }
+          }}
         >
           <div className="flex items-center justify-between mb-0.5">
             <span className="text-sm font-medium text-text-primary truncate">
@@ -182,13 +248,16 @@ export function ResultsPanel({ roomId, autonomyMode }: ResultsPanelProps): React
 
         {(wideAutoExpand || expandedId === run.id) && (
           <div className="px-3 pb-2 bg-surface-secondary">
-            {run.errorMessage && (
-              <div className="text-sm text-status-error mb-1 p-1.5 bg-status-error-bg rounded-lg selectable">{run.errorMessage}</div>
+            {detailLoading && (
+              <div className="text-sm text-text-muted py-1">Loading details...</div>
             )}
-            {run.result && (
-              <div className="text-sm text-text-secondary p-1.5 bg-surface-primary rounded-lg max-h-40 overflow-y-auto selectable whitespace-pre-wrap">{run.result}</div>
+            {detail.errorMessage && (
+              <div className="text-sm text-status-error mb-1 p-1.5 bg-status-error-bg rounded-lg selectable">{detail.errorMessage}</div>
             )}
-            {!run.result && !run.errorMessage && (
+            {detail.result && (
+              <div className="text-sm text-text-secondary p-1.5 bg-surface-primary rounded-lg max-h-40 overflow-y-auto selectable whitespace-pre-wrap">{detail.result}</div>
+            )}
+            {!detail.result && !detail.errorMessage && !detailLoading && (
               <div className="text-sm text-text-muted py-1">No output</div>
             )}
             <ConsoleLogHistory runId={run.id} />
@@ -210,7 +279,8 @@ export function ResultsPanel({ roomId, autonomyMode }: ResultsPanelProps): React
           {runs.map((run: TaskRun, i: number) => renderRun(run, i))}
         </div>
       )}
-      <SelfModSection roomId={roomId ?? null} semi={semi} />
+      <SelfModSection roomId={roomId ?? null} semi={semi} onLockedControl={requestSemiMode} />
+      <AutoModeLockModal open={showLockModal} onClose={closeLockModal} />
     </div>
   )
 }

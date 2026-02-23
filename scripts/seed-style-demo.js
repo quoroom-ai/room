@@ -3,13 +3,30 @@
 const { existsSync } = require('fs')
 const { homedir } = require('os')
 const { join } = require('path')
+const { createHash } = require('crypto')
 const Database = require('better-sqlite3')
 
 const PREFIX = 'STYLE_DEMO'
+const ISOLATED_DIR_NAME = '.quoroom-dev'
+
+function expandTilde(p) {
+  if (p === '~' || p.startsWith('~/')) return p.replace('~', homedir())
+  return p
+}
+
+function normalizePath(p) {
+  return expandTilde(p).replace(/\\/g, '/')
+}
+
+function isIsolatedPath(p) {
+  const normalized = normalizePath(p).toLowerCase()
+  const isolatedToken = `/${ISOLATED_DIR_NAME.toLowerCase()}`
+  return normalized.includes(`${isolatedToken}/`) || normalized.endsWith(isolatedToken)
+}
 
 function resolveDbPath() {
-  if (process.env.QUOROOM_DB_PATH) return process.env.QUOROOM_DB_PATH
-  const dataDir = process.env.QUOROOM_DATA_DIR || join(homedir(), '.quoroom')
+  if (process.env.QUOROOM_DB_PATH) return normalizePath(process.env.QUOROOM_DB_PATH)
+  const dataDir = normalizePath(process.env.QUOROOM_DATA_DIR || join(homedir(), ISOLATED_DIR_NAME))
   return join(dataDir, 'data.db')
 }
 
@@ -17,15 +34,46 @@ function isoMinutesAgo(minutes) {
   return new Date(Date.now() - minutes * 60_000).toISOString()
 }
 
+function hashText(text) {
+  return createHash('sha256').update(text).digest('hex')
+}
+
+function createSeedVectorBlob(text, dimensions = 384) {
+  const vec = new Float32Array(dimensions)
+  const normalized = String(text || '').toLowerCase()
+  for (let i = 0; i < normalized.length; i += 1) {
+    const code = normalized.charCodeAt(i)
+    const idx = (code + i * 17) % dimensions
+    vec[idx] += ((code % 31) + 1) / 31
+  }
+
+  let norm = 0
+  for (let i = 0; i < vec.length; i += 1) norm += vec[i] * vec[i]
+  norm = Math.sqrt(norm) || 1
+  for (let i = 0; i < vec.length; i += 1) vec[i] /= norm
+
+  return Buffer.from(vec.buffer)
+}
+
 const dbPath = resolveDbPath()
+if (!isIsolatedPath(dbPath)) {
+  console.error(`Refusing to seed non-isolated DB: ${dbPath}`)
+  console.error(`Set QUOROOM_DATA_DIR to a path under ~/${ISOLATED_DIR_NAME} (or use npm run seed:style-demo).`)
+  process.exit(1)
+}
 if (!existsSync(dbPath)) {
   console.error(`Database not found at ${dbPath}`)
-  console.error('Start Quoroom once so migrations create the DB, then run this script again.')
+  console.error('Start isolated dev once (`npm run dev` or `npm run dev:room:isolated`) so migrations create the DB, then run this script again.')
   process.exit(1)
 }
 
 const db = new Database(dbPath)
 db.pragma('foreign_keys = ON')
+
+const roomCols = db.pragma('table_info(rooms)')
+if (!roomCols.some((c) => c.name === 'referred_by_code')) {
+  db.exec('ALTER TABLE rooms ADD COLUMN referred_by_code TEXT')
+}
 
 db.transaction(() => {
   const nowIso = new Date().toISOString()
@@ -35,6 +83,11 @@ db.transaction(() => {
     `INSERT INTO settings (key, value, updated_at) VALUES ('advanced_mode', 'true', ?)
      ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at`
   ).run(nowIso)
+  const keeperReferralCode = 'styledemo-keeper'
+  db.prepare(
+    `INSERT INTO settings (key, value, updated_at) VALUES ('keeper_referral_code', ?, ?)
+     ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at`
+  ).run(keeperReferralCode, nowIso)
 
   // Clean up previous style-demo rooms and their non-cascading children.
   const existingRooms = db.prepare('SELECT id FROM rooms WHERE name LIKE ?').all(`${PREFIX} %`)
@@ -73,8 +126,8 @@ db.transaction(() => {
   const insertRoom = db.prepare(`
     INSERT INTO rooms
       (name, goal, status, visibility, autonomy_mode, max_concurrent_tasks, worker_model,
-       queen_cycle_gap_ms, queen_max_turns, created_at, updated_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+       queen_cycle_gap_ms, queen_max_turns, created_at, updated_at, referred_by_code)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `)
 
   const roomMainId = Number(insertRoom.run(
@@ -88,7 +141,8 @@ db.transaction(() => {
     900000,
     5,
     isoMinutesAgo(2),
-    isoMinutesAgo(1)
+    isoMinutesAgo(1),
+    null
   ).lastInsertRowid)
 
   const roomBetaId = Number(insertRoom.run(
@@ -102,7 +156,8 @@ db.transaction(() => {
     1800000,
     3,
     isoMinutesAgo(20),
-    isoMinutesAgo(12)
+    isoMinutesAgo(12),
+    null
   ).lastInsertRowid)
 
   const roomGammaId = Number(insertRoom.run(
@@ -116,8 +171,56 @@ db.transaction(() => {
     3600000,
     2,
     isoMinutesAgo(40),
-    isoMinutesAgo(30)
+    isoMinutesAgo(30),
+    null
   ).lastInsertRowid)
+
+  // Invite-linked rooms for Swarm network previews.
+  // Keep them stopped so they render as referred rooms, not primary rooms.
+  const inviteVariants = [
+    // Alpha referrals (7)
+    { code: keeperReferralCode, name: 'Alpha North', goal: 'Partner room for alpha expansion', visibility: 'public', mode: 'semi', model: 'claude', gapMs: 1800000, maxTurns: 2, createdAgo: 90, updatedAgo: 74 },
+    { code: keeperReferralCode, name: 'Alpha Labs', goal: 'R&D room testing alpha pricing variants', visibility: 'public', mode: 'semi', model: 'codex', gapMs: 1800000, maxTurns: 2, createdAgo: 89, updatedAgo: 73 },
+    { code: keeperReferralCode, name: 'Alpha West', goal: 'Regional room validating west-coast lead quality', visibility: 'public', mode: 'auto', model: 'claude', gapMs: 1800000, maxTurns: 2, createdAgo: 88, updatedAgo: 72 },
+    { code: keeperReferralCode, name: 'Alpha East', goal: 'Regional room running outbound partner tests', visibility: 'public', mode: 'semi', model: 'claude', gapMs: 1800000, maxTurns: 2, createdAgo: 87, updatedAgo: 71 },
+    { code: keeperReferralCode, name: 'Alpha Ops', goal: 'Operations room monitoring onboarding bottlenecks', visibility: 'private', mode: 'semi', model: 'claude', gapMs: 1800000, maxTurns: 2, createdAgo: 86, updatedAgo: 70 },
+    { code: keeperReferralCode, name: 'Alpha Content', goal: 'Content room producing conversion-first docs', visibility: 'public', mode: 'auto', model: 'codex', gapMs: 1800000, maxTurns: 2, createdAgo: 85, updatedAgo: 69 },
+    { code: keeperReferralCode, name: 'Alpha Edge', goal: 'Experiment room validating edge ICP opportunities', visibility: 'public', mode: 'semi', model: 'claude', gapMs: 1800000, maxTurns: 2, createdAgo: 84, updatedAgo: 68 },
+
+    // Beta referrals (7)
+    { code: keeperReferralCode, name: 'Beta Loop', goal: 'Referred growth room running paid loops', visibility: 'public', mode: 'auto', model: 'claude', gapMs: 1800000, maxTurns: 2, createdAgo: 83, updatedAgo: 67 },
+    { code: keeperReferralCode, name: 'Beta Relay', goal: 'Referred partner room relaying campaign insights', visibility: 'private', mode: 'semi', model: 'claude', gapMs: 1800000, maxTurns: 2, createdAgo: 82, updatedAgo: 66 },
+    { code: keeperReferralCode, name: 'Beta Studio', goal: 'Creative studio room testing ad variants', visibility: 'public', mode: 'semi', model: 'codex', gapMs: 1800000, maxTurns: 2, createdAgo: 81, updatedAgo: 65 },
+    { code: keeperReferralCode, name: 'Beta Search', goal: 'SEO room scaling long-tail acquisition', visibility: 'public', mode: 'semi', model: 'claude', gapMs: 1800000, maxTurns: 2, createdAgo: 80, updatedAgo: 64 },
+    { code: keeperReferralCode, name: 'Beta Pulse', goal: 'Analytics room tracking channel pulse weekly', visibility: 'public', mode: 'auto', model: 'claude', gapMs: 1800000, maxTurns: 2, createdAgo: 79, updatedAgo: 63 },
+    { code: keeperReferralCode, name: 'Beta Partner', goal: 'Partner success room coordinating joint launches', visibility: 'public', mode: 'semi', model: 'claude', gapMs: 1800000, maxTurns: 2, createdAgo: 78, updatedAgo: 62 },
+    { code: keeperReferralCode, name: 'Beta Sprint', goal: 'Sprint room shipping rapid messaging iterations', visibility: 'public', mode: 'semi', model: 'codex', gapMs: 1800000, maxTurns: 2, createdAgo: 77, updatedAgo: 61 },
+
+    // Gamma referrals (6)
+    { code: keeperReferralCode, name: 'Gamma Vault', goal: 'Referred treasury room focused on risk controls', visibility: 'public', mode: 'semi', model: 'claude', gapMs: 3600000, maxTurns: 2, createdAgo: 76, updatedAgo: 60 },
+    { code: keeperReferralCode, name: 'Gamma Risk', goal: 'Risk room monitoring counterparty exposure', visibility: 'public', mode: 'semi', model: 'claude', gapMs: 3600000, maxTurns: 2, createdAgo: 75, updatedAgo: 59 },
+    { code: keeperReferralCode, name: 'Gamma Ledger', goal: 'Ledger room reconciling inflow/outflow anomalies', visibility: 'public', mode: 'semi', model: 'codex', gapMs: 3600000, maxTurns: 2, createdAgo: 74, updatedAgo: 58 },
+    { code: keeperReferralCode, name: 'Gamma Guard', goal: 'Control room validating treasury policy changes', visibility: 'private', mode: 'semi', model: 'claude', gapMs: 3600000, maxTurns: 2, createdAgo: 73, updatedAgo: 57 },
+    { code: keeperReferralCode, name: 'Gamma Reserve', goal: 'Reserve room stress-testing downside scenarios', visibility: 'public', mode: 'semi', model: 'claude', gapMs: 3600000, maxTurns: 2, createdAgo: 72, updatedAgo: 56 },
+    { code: keeperReferralCode, name: 'Gamma Audit', goal: 'Audit room reviewing wallet integrity checkpoints', visibility: 'public', mode: 'semi', model: 'codex', gapMs: 3600000, maxTurns: 2, createdAgo: 71, updatedAgo: 55 },
+  ]
+
+  for (const entry of inviteVariants) {
+    insertRoom.run(
+      `${PREFIX} Invite ${entry.name}`,
+      `${PREFIX} ${entry.goal}`,
+      'stopped',
+      entry.visibility,
+      entry.mode,
+      2,
+      entry.model,
+      entry.gapMs,
+      entry.maxTurns,
+      isoMinutesAgo(entry.createdAgo),
+      isoMinutesAgo(entry.updatedAgo),
+      entry.code
+    )
+  }
 
   // Workers ---------------------------------------------------------------
   const insertWorker = db.prepare(`
@@ -467,6 +570,24 @@ db.transaction(() => {
   const insertEntity = db.prepare(
     'INSERT INTO entities (name, type, category, room_id, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)'
   )
+  const insertEmbedding = db.prepare(`
+    INSERT INTO embeddings (entity_id, source_type, source_id, text_hash, vector, model, dimensions, created_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    ON CONFLICT(source_type, source_id, model) DO UPDATE SET
+      text_hash = excluded.text_hash,
+      vector = excluded.vector,
+      dimensions = excluded.dimensions
+  `)
+  const markEntityEmbedded = db.prepare('UPDATE entities SET embedded_at = ? WHERE id = ?')
+
+  function seedEntityEmbedding(entityId, content, createdAt) {
+    const model = 'all-MiniLM-L6-v2'
+    const dimensions = 384
+    const textHash = hashText(content)
+    const vector = createSeedVectorBlob(content, dimensions)
+    insertEmbedding.run(entityId, 'entity', entityId, textHash, vector, model, dimensions, createdAt)
+    markEntityEmbedded.run(createdAt, entityId)
+  }
 
   const entityOfferId = Number(insertEntity.run(`${PREFIX} Offer: AI Audit`, 'opportunity', 'revenue', roomMainId, isoMinutesAgo(77), isoMinutesAgo(8)).lastInsertRowid)
   const entitySegmentId = Number(insertEntity.run(`${PREFIX} Segment: Indie SaaS`, 'market', 'targeting', roomMainId, isoMinutesAgo(76), isoMinutesAgo(9)).lastInsertRowid)
@@ -480,6 +601,12 @@ db.transaction(() => {
   insertObs.run(entityCompetitorId, 'AcmeOps introduced annual discount and reduced trial to 7 days.', 'style-seed', isoMinutesAgo(10))
   insertObs.run(entityChannelId, 'X Ads delivered CTR 2.8% with moderate CPA drift.', 'style-seed', isoMinutesAgo(7))
   insertObs.run(entityRiskId, 'One provider started returning 429 around 18:00 UTC.', 'style-seed', isoMinutesAgo(3))
+
+  seedEntityEmbedding(entityOfferId, `${PREFIX} Offer: AI Audit Average deal size increased from $89 to $129 after adding onboarding template.`, isoMinutesAgo(8))
+  seedEntityEmbedding(entitySegmentId, `${PREFIX} Segment: Indie SaaS Indie SaaS cohort shows best trial-to-paid conversion this week.`, isoMinutesAgo(9))
+  seedEntityEmbedding(entityCompetitorId, `${PREFIX} Competitor: AcmeOps AcmeOps introduced annual discount and reduced trial to 7 days.`, isoMinutesAgo(10))
+  seedEntityEmbedding(entityChannelId, `${PREFIX} Channel: X Ads X Ads delivered CTR 2.8% with moderate CPA drift.`, isoMinutesAgo(7))
+  seedEntityEmbedding(entityRiskId, `${PREFIX} Risk: API Quota One provider started returning 429 around 18:00 UTC.`, isoMinutesAgo(3))
 
   const insertRelation = db.prepare('INSERT INTO relations (from_entity, to_entity, relation_type, created_at) VALUES (?, ?, ?, ?)')
   insertRelation.run(entityOfferId, entitySegmentId, 'targets', isoMinutesAgo(8))
@@ -670,6 +797,8 @@ db.transaction(() => {
     const roomMarketEntityId = Number(insertEntity.run(`${roomPrefix} Segment SMB`, 'market', 'revenue', roomId, isoMinutesAgo(20), isoMinutesAgo(6)).lastInsertRowid)
     insertObs.run(roomEntityId, `${roomPrefix} Pipeline stable with one pending blocker.`, 'style-seed', isoMinutesAgo(4))
     insertObs.run(roomMarketEntityId, `${roomPrefix} SMB segment yields better conversion this week.`, 'style-seed', isoMinutesAgo(6))
+    seedEntityEmbedding(roomEntityId, `${roomPrefix} Entity Pipeline ${roomPrefix} Pipeline stable with one pending blocker.`, isoMinutesAgo(4))
+    seedEntityEmbedding(roomMarketEntityId, `${roomPrefix} Segment SMB ${roomPrefix} SMB segment yields better conversion this week.`, isoMinutesAgo(6))
     insertRelation.run(roomEntityId, roomMarketEntityId, 'supports', isoMinutesAgo(5))
 
     const roomTaskId = Number(insertTask.run(
@@ -784,5 +913,6 @@ db.close()
 
 console.log(`Seed complete: ${dbPath}`)
 console.log('Created rooms: STYLE_DEMO Room Alpha, STYLE_DEMO Room Beta, STYLE_DEMO Room Gamma')
+console.log('Created invite-linked referred rooms: 20 STYLE_DEMO Invite Alpha/Beta/Gamma variants')
 console.log('Also injected STYLE_DEMO data into all existing non-stopped rooms (including your current room).')
 console.log('Note: Stations/Billing cloud subscription history is served by cloud API data, not local room.db.')

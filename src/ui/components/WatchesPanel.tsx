@@ -1,8 +1,10 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import type { Watch } from '@shared/types'
 import { usePolling } from '../hooks/usePolling'
+import { useWebSocket } from '../hooks/useWebSocket'
 import { formatRelativeTime } from '../utils/time'
 import { api } from '../lib/client'
+import { AutoModeLockModal, AUTO_MODE_LOCKED_BUTTON_CLASS, modeAwareButtonClass, useAutonomyControlGate } from './AutonomyControlGate'
 
 interface WatchesPanelProps {
   roomId?: number | null
@@ -10,14 +12,19 @@ interface WatchesPanelProps {
 }
 
 export function WatchesPanel({ roomId, autonomyMode }: WatchesPanelProps): React.JSX.Element {
-  const semi = autonomyMode === 'semi'
-  const { data: watches, error, isLoading, refresh } = usePolling(() => api.watches.list(roomId ?? undefined), 5000)
+  const { semi, guard, showLockModal, closeLockModal } = useAutonomyControlGate(autonomyMode)
+  const { data: watches, error, isLoading, refresh } = usePolling(() => api.watches.list(roomId ?? undefined), 30000)
+  const watchEvent = useWebSocket('watches')
   const [showCreateForm, setShowCreateForm] = useState(false)
   const [path, setPath] = useState('')
   const [description, setDescription] = useState('')
   const [actionPrompt, setActionPrompt] = useState('')
   const [createError, setCreateError] = useState<string | null>(null)
   const [confirmDeleteId, setConfirmDeleteId] = useState<number | null>(null)
+
+  useEffect(() => {
+    if (watchEvent) refresh()
+  }, [refresh, watchEvent])
 
   function validatePath(p: string): string | null {
     const trimmed = p.trim()
@@ -85,14 +92,12 @@ export function WatchesPanel({ roomId, autonomyMode }: WatchesPanelProps): React
       <div className="px-4 py-2 border-b border-border-primary flex items-center gap-2 flex-wrap">
         <h2 className="text-base font-semibold text-text-primary">Watches</h2>
         <span className="text-xs text-text-muted">{watches.length} total</span>
-        {semi && (
-          <button
-            onClick={() => setShowCreateForm(!showCreateForm)}
-            className="text-xs px-2.5 py-1.5 rounded-lg bg-interactive text-text-invert hover:bg-interactive-hover"
-          >
-            {showCreateForm ? 'Cancel' : '+ New Watch'}
-          </button>
-        )}
+        <button
+          onClick={() => guard(() => setShowCreateForm(!showCreateForm))}
+          className={`text-xs px-2.5 py-1.5 rounded-lg ${modeAwareButtonClass(semi, 'bg-interactive text-text-invert hover:bg-interactive-hover')}`}
+        >
+          {showCreateForm ? 'Cancel' : '+ New Watch'}
+        </button>
       </div>
 
       {semi && showCreateForm && (
@@ -148,8 +153,8 @@ export function WatchesPanel({ roomId, autonomyMode }: WatchesPanelProps): React
           <div className="grid gap-2 md:grid-cols-2">
             {watches.map((watch: Watch) => (
               <div key={watch.id} className={`bg-surface-secondary border border-border-primary rounded-lg p-3 ${watch.status === 'paused' ? 'opacity-60' : ''}`}>
-                <div className={semi ? 'flex items-center justify-between gap-2' : ''}>
-                  <div className={`min-w-0${semi ? ' flex-1' : ''}`}>
+                <div className="flex items-center justify-between gap-2">
+                  <div className="min-w-0 flex-1">
                     <div className="text-sm font-medium text-text-primary truncate">
                       {watch.path}
                       {watch.status === 'paused' && (
@@ -158,20 +163,24 @@ export function WatchesPanel({ roomId, autonomyMode }: WatchesPanelProps): React
                     </div>
                     <div className="text-sm text-text-muted">{watch.description ?? 'No description'}</div>
                   </div>
-                  {semi && (
-                    <div className="flex items-center gap-2 shrink-0">
-                      <button onClick={() => togglePause(watch)} className="text-sm text-status-warning hover:text-yellow-800">
-                        {watch.status === 'paused' ? 'Resume' : 'Pause'}
-                      </button>
-                      <button
-                        onClick={() => deleteWatch(watch.id)}
-                        onBlur={() => setConfirmDeleteId(null)}
-                        className={`text-sm ${confirmDeleteId === watch.id ? 'text-red-600 font-medium' : 'text-status-error hover:text-red-600'}`}
-                      >
-                        {confirmDeleteId === watch.id ? 'Confirm?' : 'Delete'}
-                      </button>
-                    </div>
-                  )}
+                  <div className="flex items-center gap-2 shrink-0">
+                    <button
+                      onClick={() => guard(() => { void togglePause(watch) })}
+                      className={`text-sm px-2.5 py-1.5 rounded-lg ${modeAwareButtonClass(semi, 'text-status-warning hover:text-yellow-800')}`}
+                    >
+                      {watch.status === 'paused' ? 'Resume' : 'Pause'}
+                    </button>
+                    <button
+                      onClick={() => guard(() => { void deleteWatch(watch.id) })}
+                      onBlur={() => setConfirmDeleteId(null)}
+                      className={`text-sm px-2.5 py-1.5 rounded-lg ${semi
+                        ? (confirmDeleteId === watch.id ? 'text-red-600 font-medium' : 'text-status-error hover:text-red-600')
+                        : AUTO_MODE_LOCKED_BUTTON_CLASS
+                      }`}
+                    >
+                      {confirmDeleteId === watch.id ? 'Confirm?' : 'Delete'}
+                    </button>
+                  </div>
                 </div>
                 <div className="mt-1 text-sm text-text-muted">
                   Triggered {watch.triggerCount} time(s)
@@ -182,6 +191,7 @@ export function WatchesPanel({ roomId, autonomyMode }: WatchesPanelProps): React
           </div>
         )}
       </div>
+      <AutoModeLockModal open={showLockModal} onClose={closeLockModal} />
     </div>
   )
 }

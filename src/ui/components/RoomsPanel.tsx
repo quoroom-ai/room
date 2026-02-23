@@ -1,7 +1,9 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { usePolling } from '../hooks/usePolling'
 import { useContainerWidth } from '../hooks/useContainerWidth'
 import { api } from '../lib/client'
+import { ROOMS_QUEEN_STATE_EVENT, ROOMS_UPDATE_EVENT } from '../lib/room-events'
+import { wsClient, type WsMessage } from '../lib/ws'
 import { formatRelativeTime } from '../utils/time'
 import { Select } from './Select'
 import type { Room, Wallet } from '@shared/types'
@@ -20,8 +22,8 @@ interface RoomsPanelProps {
 }
 
 export function RoomsPanel({ selectedRoomId, onSelectRoom }: RoomsPanelProps): React.JSX.Element {
-  const { data: rooms, refresh } = usePolling<Room[]>(() => api.rooms.list(), 10000)
-  const { data: wallets } = usePolling<Record<number, Wallet>>(async () => {
+  const { data: rooms, refresh } = usePolling<Room[]>(() => api.rooms.list(), 60000)
+  const { data: wallets, refresh: refreshWallets } = usePolling<Record<number, Wallet>>(async () => {
     if (!rooms || rooms.length === 0) return {}
     const entries = await Promise.all(
       rooms.map(async r => {
@@ -30,19 +32,31 @@ export function RoomsPanel({ selectedRoomId, onSelectRoom }: RoomsPanelProps): R
       })
     )
     return Object.fromEntries(entries.filter(([, w]) => w !== null))
-  }, 30000)
+  }, 120000)
   const [queenRunning, setQueenRunning] = useState<Record<number, boolean>>({})
-  usePolling(async () => {
-    if (!rooms || rooms.length === 0) return {}
-    const entries = await Promise.all(
-      rooms.map(async r => {
-        const q = await api.rooms.queenStatus(r.id).catch(() => null)
-        return [r.id, q?.running ?? false] as const
-      })
-    )
-    setQueenRunning(Object.fromEntries(entries))
-    return {}
-  }, 5000)
+  const { refresh: refreshQueenRunning } = usePolling(async () => {
+    const states = await api.rooms.queenStates().catch(() => ({}))
+    setQueenRunning(states)
+    return states
+  }, 60000)
+
+  useEffect(() => {
+    const unsubscribe = wsClient.subscribe('rooms', (event: WsMessage) => {
+      if (event.type === ROOMS_QUEEN_STATE_EVENT) {
+        const payload = event.data as { roomId?: number; running?: boolean }
+        if (typeof payload.roomId === 'number' && typeof payload.running === 'boolean') {
+          setQueenRunning(prev => ({ ...prev, [payload.roomId]: payload.running }))
+          return
+        }
+      }
+      if (event.type === ROOMS_UPDATE_EVENT) {
+        void refresh()
+        void refreshWallets()
+        void refreshQueenRunning()
+      }
+    })
+    return unsubscribe
+  }, [refresh, refreshQueenRunning, refreshWallets])
   const [containerRef, containerWidth] = useContainerWidth<HTMLDivElement>()
   const isWide = containerWidth > 500
 

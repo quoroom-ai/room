@@ -1,6 +1,6 @@
 import os from 'node:os'
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
-import { isOllamaAvailable, listOllamaModels } from '../../shared/agent-executor'
+import { isOllamaAvailable, listOllamaModels } from '../../shared/ollama-ensure'
 import { getMcpDatabase } from '../db'
 import * as queries from '../../shared/db-queries'
 

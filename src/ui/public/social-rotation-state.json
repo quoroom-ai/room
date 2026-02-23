@@ -1,9 +1,9 @@
 {
-  "index": 1,
-  "file": "social-v2-money.png",
+  "index": 0,
+  "file": "social-v1-research.png",
   "sourceDir": "src/ui/public/social-variants-upgraded",
   "target": "src/ui/public/social.png",
   "total": 3,
-  "rotatedAt": "2026-02-22T18:53:36.600Z",
-  "mode": "index"
+  "rotatedAt": "2026-02-22T20:35:14.527Z",
+  "mode": "next"
 }

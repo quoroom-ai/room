@@ -1,7 +1,8 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { usePolling } from '../hooks/usePolling'
-import { useWebSocket } from '../hooks/useWebSocket'
 import { api } from '../lib/client'
+import { ROOM_CREDENTIAL_EVENT_TYPES } from '../lib/room-events'
+import { wsClient, type WsMessage } from '../lib/ws'
 import { formatRelativeTime } from '../utils/time'
 import { Select } from './Select'
 import type { Credential } from '@shared/types'
@@ -27,11 +28,17 @@ export function CredentialsPanel({ roomId }: CredentialsPanelProps): React.JSX.E
 
   const { data: credentials, refresh } = usePolling<Credential[]>(
     () => roomId ? api.credentials.list(roomId) : Promise.resolve([]),
-    10000
+    30000
   )
 
-  const wsEvent = useWebSocket(roomId ? `room:${roomId}` : '')
-  if (wsEvent) refresh()
+  useEffect(() => {
+    if (!roomId) return
+    return wsClient.subscribe(`room:${roomId}`, (event: WsMessage) => {
+      if (ROOM_CREDENTIAL_EVENT_TYPES.has(event.type)) {
+        void refresh()
+      }
+    })
+  }, [refresh, roomId])
 
   async function handleCreate(): Promise<void> {
     if (!roomId || !name.trim() || !value.trim()) return

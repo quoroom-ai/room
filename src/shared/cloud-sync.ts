@@ -82,7 +82,8 @@ export interface CloudRegistration {
   name: string
   goal: string | null
   visibility?: 'public' | 'private'
-  inviteCode?: string | null
+  referredByCode?: string | null
+  keeperReferralCode?: string | null
 }
 
 export interface CloudHeartbeat {
@@ -95,9 +96,11 @@ export interface CloudHeartbeat {
   earnings: string
   version: string
   queenModel: string | null
-  workers: Array<{ name: string; state: string }>
+  workers: Array<{ name: string; state: string; model?: string }>
   stations: Array<{ name: string; status: string; tier: string }>
-  inviteCode?: string | null
+  visibility?: 'public' | 'private'
+  referredByCode?: string | null
+  keeperReferralCode?: string | null
 }
 
 export async function ensureCloudRoomToken(data: CloudRegistration): Promise<boolean> {
@@ -111,16 +114,21 @@ export async function ensureCloudRoomToken(data: CloudRegistration): Promise<boo
  */
 export async function registerWithCloud(data: CloudRegistration): Promise<void> {
   try {
+    const payload = {
+      ...data,
+      inviteCode: data.referredByCode ?? null,
+      keeperReferralCode: data.keeperReferralCode ?? null,
+    }
     const res = await fetch(`${getCloudApi()}/rooms/register`, {
       method: 'POST',
       headers: cloudHeaders(data.roomId, { 'Content-Type': 'application/json' }),
-      body: JSON.stringify(data),
+      body: JSON.stringify(payload),
       signal: AbortSignal.timeout(10000)
     })
     if (!res.ok) return
-    const payload = await res.json().catch(() => ({})) as { roomToken?: string }
-    if (typeof payload.roomToken === 'string' && payload.roomToken.length > 0) {
-      setRoomToken(data.roomId, payload.roomToken)
+    const result = await res.json().catch(() => ({})) as { roomToken?: string }
+    if (typeof result.roomToken === 'string' && result.roomToken.length > 0) {
+      setRoomToken(data.roomId, result.roomToken)
     }
   } catch {
     // Fail silently — cloud unavailability must never affect local operation
@@ -132,20 +140,32 @@ export async function registerWithCloud(data: CloudRegistration): Promise<void> 
  */
 export async function sendCloudHeartbeat(data: CloudHeartbeat): Promise<void> {
   try {
+    const payload = {
+      ...data,
+      inviteCode: data.referredByCode ?? null,
+      keeperReferralCode: data.keeperReferralCode ?? null,
+    }
     const res = await fetch(`${getCloudApi()}/rooms/${encodeURIComponent(data.roomId)}/heartbeat`, {
       method: 'POST',
       headers: cloudHeaders(data.roomId, { 'Content-Type': 'application/json' }),
-      body: JSON.stringify(data),
+      body: JSON.stringify(payload),
       signal: AbortSignal.timeout(10000)
     })
     if (res.status === 401) {
       clearRoomToken(data.roomId)
-      await registerWithCloud({ roomId: data.roomId, name: data.name, goal: data.goal, visibility: 'public', inviteCode: data.inviteCode })
+      await registerWithCloud({
+        roomId: data.roomId,
+        name: data.name,
+        goal: data.goal,
+        visibility: data.visibility ?? 'public',
+        referredByCode: data.referredByCode,
+        keeperReferralCode: data.keeperReferralCode,
+      })
       if (!getRoomToken(data.roomId)) return
       await fetch(`${getCloudApi()}/rooms/${encodeURIComponent(data.roomId)}/heartbeat`, {
         method: 'POST',
         headers: cloudHeaders(data.roomId, { 'Content-Type': 'application/json' }),
-        body: JSON.stringify(data),
+        body: JSON.stringify(payload),
         signal: AbortSignal.timeout(10000)
       })
     }
@@ -180,7 +200,7 @@ export async function pushActivityToCloud(
 let heartbeatInterval: ReturnType<typeof setInterval> | null = null
 
 export interface CloudSyncOptions {
-  getHeartbeatDataForPublicRooms: () => CloudHeartbeat[]
+  getHeartbeatData: () => CloudHeartbeat[]
 }
 
 /**
@@ -190,16 +210,23 @@ export interface CloudSyncOptions {
 export function startCloudSync(opts: CloudSyncOptions): void {
   stopCloudSync()
 
-  const allData = opts.getHeartbeatDataForPublicRooms()
+  const allData = opts.getHeartbeatData()
   for (const data of allData) {
     void (async () => {
-      await registerWithCloud({ roomId: data.roomId, name: data.name, goal: data.goal, visibility: 'public', inviteCode: data.inviteCode })
+      await registerWithCloud({
+        roomId: data.roomId,
+        name: data.name,
+        goal: data.goal,
+        visibility: data.visibility ?? 'public',
+        referredByCode: data.referredByCode,
+        keeperReferralCode: data.keeperReferralCode,
+      })
       await sendCloudHeartbeat(data)
     })()
   }
 
   heartbeatInterval = setInterval(() => {
-    const rooms = opts.getHeartbeatDataForPublicRooms()
+    const rooms = opts.getHeartbeatData()
     for (const data of rooms) {
       void sendCloudHeartbeat(data)
     }
@@ -252,11 +279,38 @@ export interface CloudStation {
   updatedAt: string
 }
 
+const CLOUD_STATIONS_CACHE_MS = 10_000
+const cloudStationsCache = new Map<string, { value: CloudStation[]; expiresAt: number }>()
+
+function getCachedCloudStations(cloudRoomId: string): CloudStation[] | null {
+  const cached = cloudStationsCache.get(cloudRoomId)
+  if (!cached) return null
+  if (Date.now() >= cached.expiresAt) {
+    cloudStationsCache.delete(cloudRoomId)
+    return null
+  }
+  return cached.value
+}
+
+function setCachedCloudStations(cloudRoomId: string, stations: CloudStation[]): void {
+  cloudStationsCache.set(cloudRoomId, {
+    value: stations,
+    expiresAt: Date.now() + CLOUD_STATIONS_CACHE_MS
+  })
+}
+
+function invalidateCloudStationsCache(cloudRoomId: string): void {
+  cloudStationsCache.delete(cloudRoomId)
+}
+
 /**
  * List active stations for a room from the cloud API.
  * Returns empty array on failure (fail silently).
  */
 export async function listCloudStations(cloudRoomId: string): Promise<CloudStation[]> {
+  const cached = getCachedCloudStations(cloudRoomId)
+  if (cached) return cached
+
   try {
     const res = await fetch(`${getCloudApi()}/rooms/${encodeURIComponent(cloudRoomId)}/stations`, {
       headers: cloudHeaders(cloudRoomId),
@@ -264,7 +318,9 @@ export async function listCloudStations(cloudRoomId: string): Promise<CloudStati
     })
     if (!res.ok) return []
     const data = await res.json() as { stations: CloudStation[] }
-    return data.stations ?? []
+    const stations = data.stations ?? []
+    setCachedCloudStations(cloudRoomId, stations)
+    return stations
   } catch {
     return []
   }
@@ -368,6 +424,8 @@ export async function startCloudStation(cloudRoomId: string, subId: number): Pro
     )
   } catch {
     // Fail silently
+  } finally {
+    invalidateCloudStationsCache(cloudRoomId)
   }
 }
 
@@ -386,6 +444,8 @@ export async function stopCloudStation(cloudRoomId: string, subId: number): Prom
     )
   } catch {
     // Fail silently
+  } finally {
+    invalidateCloudStationsCache(cloudRoomId)
   }
 }
 
@@ -404,6 +464,8 @@ export async function deleteCloudStation(cloudRoomId: string, subId: number): Pr
     )
   } catch {
     // Fail silently
+  } finally {
+    invalidateCloudStationsCache(cloudRoomId)
   }
 }
 
@@ -422,6 +484,8 @@ export async function cancelCloudStation(cloudRoomId: string, subId: number): Pr
     )
   } catch {
     // Fail silently
+  } finally {
+    invalidateCloudStationsCache(cloudRoomId)
   }
 }
 
@@ -499,6 +563,8 @@ export async function cryptoCheckoutStation(
     return res.json() as Promise<{ ok: boolean; subscriptionId?: number; status?: string; currentPeriodEnd?: string; error?: string }>
   } catch (err) {
     return { ok: false, error: err instanceof Error ? err.message : String(err) }
+  } finally {
+    invalidateCloudStationsCache(cloudRoomId)
   }
 }
 
@@ -524,6 +590,8 @@ export async function cryptoRenewStation(
     return res.json() as Promise<{ ok: boolean; currentPeriodEnd?: string; error?: string }>
   } catch (err) {
     return { ok: false, error: err instanceof Error ? err.message : String(err) }
+  } finally {
+    invalidateCloudStationsCache(cloudRoomId)
   }
 }
 
@@ -591,18 +659,30 @@ export interface PublicRoom {
   earnings: string
 }
 
+const PUBLIC_ROOMS_CACHE_MS = 30_000
+let cachedPublicRooms: { value: PublicRoom[]; expiresAt: number } | null = null
+
 /**
  * Fetch list of public rooms from cloud API.
  * Returns empty array on failure (fail silently).
  */
 export async function fetchPublicRooms(): Promise<PublicRoom[]> {
+  if (cachedPublicRooms && Date.now() < cachedPublicRooms.expiresAt) {
+    return cachedPublicRooms.value
+  }
+
   try {
     const res = await fetch(`${getCloudApi()}/rooms/public`, {
       signal: AbortSignal.timeout(10000)
     })
     if (!res.ok) return []
     const data = await res.json() as { rooms: PublicRoom[] }
-    return data.rooms ?? []
+    const rooms = data.rooms ?? []
+    cachedPublicRooms = {
+      value: rooms,
+      expiresAt: Date.now() + PUBLIC_ROOMS_CACHE_MS
+    }
+    return rooms
   } catch {
     return []
   }

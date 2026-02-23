@@ -1,8 +1,11 @@
 import { useState, useEffect } from 'react'
 import { usePolling } from '../hooks/usePolling'
 import { api } from '../lib/client'
+import { ROOM_GOAL_EVENT_TYPES } from '../lib/room-events'
+import { wsClient, type WsMessage } from '../lib/ws'
 import { formatRelativeTime } from '../utils/time'
 import { Select } from './Select'
+import { AutoModeLockModal, AUTO_MODE_LOCKED_BUTTON_CLASS, modeAwareButtonClass, useAutonomyControlGate } from './AutonomyControlGate'
 import type { Goal, GoalUpdate, Worker } from '@shared/types'
 
 const STATUS_COLORS: Record<string, string> = {
@@ -43,13 +46,13 @@ interface GoalsPanelProps {
 }
 
 export function GoalsPanel({ roomId, autonomyMode }: GoalsPanelProps): React.JSX.Element {
-  const semi = autonomyMode === 'semi'
+  const { semi, guard, requestSemiMode, showLockModal, closeLockModal } = useAutonomyControlGate(autonomyMode)
 
   const { data: goals, refresh } = usePolling<Goal[]>(
     () => roomId ? api.goals.list(roomId) : Promise.resolve([]),
-    5000
+    30000
   )
-  const { data: workers } = usePolling<Worker[]>(() => api.workers.list(), 30000)
+  const { data: workers } = usePolling<Worker[]>(() => api.workers.list(), 60000)
 
   const [expandedId, setExpandedId] = useState<number | null>(null)
   const [updatesCache, setUpdatesCache] = useState<Record<number, GoalUpdate[]>>({})
@@ -68,6 +71,15 @@ export function GoalsPanel({ roomId, autonomyMode }: GoalsPanelProps): React.JSX
   useEffect(() => {
     refresh()
   }, [roomId, refresh])
+
+  useEffect(() => {
+    if (!roomId) return
+    return wsClient.subscribe(`room:${roomId}`, (event: WsMessage) => {
+      if (ROOM_GOAL_EVENT_TYPES.has(event.type)) {
+        void refresh()
+      }
+    })
+  }, [refresh, roomId])
 
   async function handleCreate(): Promise<void> {
     if (!createDesc.trim() || roomId === null) return
@@ -139,14 +151,12 @@ export function GoalsPanel({ roomId, autonomyMode }: GoalsPanelProps): React.JSX
         {!roomId && (
           <span className="text-xs text-text-muted">Select a room</span>
         )}
-        {semi && (
-          <button
-            onClick={() => setShowCreate(!showCreate)}
-            className="text-xs px-2.5 py-1.5 rounded-lg bg-interactive text-text-invert hover:bg-interactive-hover"
-          >
-            {showCreate ? 'Cancel' : '+ New Goal'}
-          </button>
-        )}
+        <button
+          onClick={() => guard(() => setShowCreate(!showCreate))}
+          className={`text-xs px-2.5 py-1.5 rounded-lg ${modeAwareButtonClass(semi, 'bg-interactive text-text-invert hover:bg-interactive-hover')}`}
+        >
+          {showCreate ? 'Cancel' : '+ New Goal'}
+        </button>
       </div>
 
       {semi && showCreate && (
@@ -234,40 +244,50 @@ export function GoalsPanel({ roomId, autonomyMode }: GoalsPanelProps): React.JSX
                   {expandedId === goal.id && (
                     <div className="px-3 pb-3 pt-2 border-t border-border-primary bg-surface-secondary space-y-2">
                       {/* Status actions */}
-                      {semi && (
-                        <div className="flex gap-2 flex-wrap">
-                          {goal.status !== 'completed' && (
-                            <button onClick={() => handleStatusChange(goal.id, 'completed')} className="text-xs px-3 py-2 md:px-2.5 md:py-1.5 rounded-lg border border-emerald-200 text-status-success hover:bg-emerald-50">
-                              Complete
-                            </button>
-                          )}
-                          {goal.status !== 'in_progress' && goal.status !== 'completed' && (
-                            <button onClick={() => handleStatusChange(goal.id, 'in_progress')} className="text-xs px-3 py-2 md:px-2.5 md:py-1.5 rounded-lg border border-interactive text-interactive hover:bg-interactive-bg">
-                              Start
-                            </button>
-                          )}
-                          {goal.status !== 'blocked' && goal.status !== 'completed' && (
-                            <button onClick={() => handleStatusChange(goal.id, 'blocked')} className="text-xs px-3 py-2 md:px-2.5 md:py-1.5 rounded-lg border border-red-200 text-status-error hover:bg-red-50">
-                              Block
-                            </button>
-                          )}
-                          {goal.status !== 'abandoned' && (
-                            <button onClick={() => handleStatusChange(goal.id, 'abandoned')} className="text-xs px-3 py-2 md:px-2.5 md:py-1.5 rounded-lg border border-border-primary text-text-muted hover:bg-surface-hover">
-                              Abandon
-                            </button>
-                          )}
+                      <div className="flex gap-2 flex-wrap">
+                        {goal.status !== 'completed' && (
                           <button
-                            onClick={() => handleDelete(goal.id)}
-                            onBlur={() => setConfirmDeleteId(null)}
-                            className="text-xs px-3 py-2 md:px-2.5 md:py-1.5 rounded-lg border border-red-200 text-status-error hover:text-red-600"
+                            onClick={() => guard(() => { void handleStatusChange(goal.id, 'completed') })}
+                            className={`text-xs px-3 py-2 md:px-2.5 md:py-1.5 rounded-lg border ${modeAwareButtonClass(semi, 'border-emerald-200 text-status-success hover:bg-emerald-50')}`}
                           >
-                            {confirmDeleteId === goal.id ? 'Confirm?' : 'Delete'}
+                            Complete
                           </button>
-                        </div>
-                      )}
+                        )}
+                        {goal.status !== 'in_progress' && goal.status !== 'completed' && (
+                          <button
+                            onClick={() => guard(() => { void handleStatusChange(goal.id, 'in_progress') })}
+                            className={`text-xs px-3 py-2 md:px-2.5 md:py-1.5 rounded-lg border ${modeAwareButtonClass(semi, 'border-interactive text-interactive hover:bg-interactive-bg')}`}
+                          >
+                            Start
+                          </button>
+                        )}
+                        {goal.status !== 'blocked' && goal.status !== 'completed' && (
+                          <button
+                            onClick={() => guard(() => { void handleStatusChange(goal.id, 'blocked') })}
+                            className={`text-xs px-3 py-2 md:px-2.5 md:py-1.5 rounded-lg border ${modeAwareButtonClass(semi, 'border-red-200 text-status-error hover:bg-red-50')}`}
+                          >
+                            Block
+                          </button>
+                        )}
+                        {goal.status !== 'abandoned' && (
+                          <button
+                            onClick={() => guard(() => { void handleStatusChange(goal.id, 'abandoned') })}
+                            className={`text-xs px-3 py-2 md:px-2.5 md:py-1.5 rounded-lg border ${modeAwareButtonClass(semi, 'border-border-primary text-text-muted hover:bg-surface-hover')}`}
+                          >
+                            Abandon
+                          </button>
+                        )}
+                        <button
+                          onClick={() => guard(() => { void handleDelete(goal.id) })}
+                          onBlur={() => setConfirmDeleteId(null)}
+                          className={`text-xs px-3 py-2 md:px-2.5 md:py-1.5 rounded-lg border ${modeAwareButtonClass(semi, 'border-red-200 text-status-error hover:text-red-600')}`}
+                        >
+                          {confirmDeleteId === goal.id ? 'Confirm?' : 'Delete'}
+                        </button>
+                      </div>
 
                       {/* Add update */}
-                      {semi && (
+                      {semi ? (
                         <div className="flex gap-2">
                           <input
                             value={updateObs}
@@ -287,6 +307,15 @@ export function GoalsPanel({ roomId, autonomyMode }: GoalsPanelProps): React.JSX
                             className="text-sm bg-interactive text-text-invert px-2.5 py-1.5 rounded-lg hover:bg-interactive-hover disabled:opacity-50"
                           >
                             Log
+                          </button>
+                        </div>
+                      ) : (
+                        <div>
+                          <button
+                            onClick={requestSemiMode}
+                            className={`text-sm px-2.5 py-1.5 rounded-lg ${AUTO_MODE_LOCKED_BUTTON_CLASS}`}
+                          >
+                            Log Update
                           </button>
                         </div>
                       )}
@@ -316,6 +345,7 @@ export function GoalsPanel({ roomId, autonomyMode }: GoalsPanelProps): React.JSX
           </div>
         )}
       </div>
+      <AutoModeLockModal open={showLockModal} onClose={closeLockModal} />
     </div>
   )
 }

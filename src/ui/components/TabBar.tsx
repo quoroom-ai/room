@@ -123,9 +123,10 @@ export const tabIcons: Record<Tab, React.JSX.Element> = {
 interface TabBarProps {
   active: Tab
   onChange: (tab: Tab) => void
+  onInvite?: () => void
 }
 
-export function TabBar({ active, onChange }: TabBarProps): React.JSX.Element {
+export function TabBar({ active, onChange, onInvite }: TabBarProps): React.JSX.Element {
   const btnClass = (id: Tab) =>
     `flex items-center gap-2 px-3 py-2 text-sm font-medium transition-colors text-left rounded-lg ${
       active === id
@@ -135,6 +136,17 @@ export function TabBar({ active, onChange }: TabBarProps): React.JSX.Element {
 
   return (
     <div className="flex flex-col gap-0.5 border-t border-border-primary pt-2 mt-2">
+      {onInvite && (
+        <button
+          onClick={onInvite}
+          className="flex items-center gap-2 px-3 py-2 text-sm font-medium rounded-lg bg-[#1a2038] border border-[#313a5a] text-[#c6cce0] hover:bg-[#20284a] transition-colors text-left"
+        >
+          <svg width={S} height={S} viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth={sw} strokeLinecap="round" strokeLinejoin="round">
+            <path d="M8 2v12M2 8h12" />
+          </svg>
+          Invite
+        </button>
+      )}
       {bottomTabs.map((tab) => (
         <button key={tab.id} onClick={() => onChange(tab.id)} className={btnClass(tab.id)}>
           {tabIcons[tab.id]}

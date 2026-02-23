@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react'
 import { storageSet } from '../lib/storage'
+import { API_BASE } from '../lib/auth'
 import {
   detectPlatform,
   pickLatestStableRelease,
@@ -61,6 +62,8 @@ function useReleaseAssets(): { assets: ReleaseAssets; releaseUrl: string } {
 export function ConnectPage({ port, onRetry }: ConnectPageProps): React.JSX.Element {
   const [editPort, setEditPort] = useState(port)
   const [retrying, setRetrying] = useState(false)
+  const [restarting, setRestarting] = useState(false)
+  const [restartError, setRestartError] = useState<string | null>(null)
   const [showDev, setShowDev] = useState(false)
   const platform = detectPlatform()
   const info = PLATFORM_INFO[platform]
@@ -68,8 +71,29 @@ export function ConnectPage({ port, onRetry }: ConnectPageProps): React.JSX.Elem
 
   function handleRetry(): void {
     storageSet('quoroom_port', editPort)
+    setRestartError(null)
     setRetrying(true)
     onRetry()
+  }
+
+  async function handleRestart(): Promise<void> {
+    storageSet('quoroom_port', editPort)
+    setRestartError(null)
+    setRestarting(true)
+    try {
+      const res = await fetch(`${API_BASE}/api/server/restart`, {
+        method: 'POST',
+        cache: 'no-store',
+      })
+      if (!res.ok) throw new Error(`HTTP ${res.status}`)
+      setTimeout(() => {
+        setRestarting(false)
+        handleRetry()
+      }, 1800)
+    } catch {
+      setRestarting(false)
+      setRestartError('Restart could not be triggered. Start server manually with "quoroom serve".')
+    }
   }
 
   return (
@@ -165,7 +189,8 @@ export function ConnectPage({ port, onRetry }: ConnectPageProps): React.JSX.Elem
         </div>
 
         {/* Port + Retry */}
-        <div className="flex items-center justify-center gap-2">
+        <div className="space-y-1.5">
+          <div className="flex items-center justify-center gap-2">
           <span className="text-xs text-text-muted">Port:</span>
           <input
             type="number"
@@ -176,11 +201,25 @@ export function ConnectPage({ port, onRetry }: ConnectPageProps): React.JSX.Elem
           />
           <button
             onClick={handleRetry}
-            disabled={retrying}
+            disabled={retrying || restarting}
             className="text-sm px-4 py-1.5 text-text-secondary hover:text-text-primary border border-border-primary hover:border-interactive rounded-lg transition-colors disabled:opacity-40"
           >
             {retrying ? 'Connecting...' : 'Retry'}
           </button>
+          <button
+            onClick={() => void handleRestart()}
+            disabled={retrying || restarting}
+            className="text-sm px-4 py-1.5 rounded-lg bg-interactive text-text-invert hover:bg-interactive-hover transition-colors disabled:opacity-40"
+          >
+            {restarting ? 'Restarting...' : 'Restart'}
+          </button>
+          </div>
+          <p className="text-[11px] text-text-muted text-center">
+            Retry checks connection only. Restart relaunches local server, then retries.
+          </p>
+          {restartError && (
+            <p className="text-[11px] text-status-error text-center">{restartError}</p>
+          )}
         </div>
 
         {/* Links */}
@@ -190,6 +229,8 @@ export function ConnectPage({ port, onRetry }: ConnectPageProps): React.JSX.Elem
           <a href="https://github.com/quoroom-ai/room/releases" target="_blank" rel="noopener noreferrer" className="text-xs text-text-muted hover:text-text-secondary">All releases</a>
           <span className="text-border-primary">|</span>
           <a href="https://github.com/quoroom-ai/room/issues/new" target="_blank" rel="noopener noreferrer" className="text-xs text-text-muted hover:text-text-secondary">Report Bug</a>
+          <span className="text-border-primary">|</span>
+          <a href="https://x.com/VTrofimchuk" target="_blank" rel="noopener noreferrer" className="text-xs text-text-muted hover:text-text-secondary">Developer</a>
         </div>
 
         {/* Privacy */}

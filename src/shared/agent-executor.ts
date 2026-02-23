@@ -1,9 +1,10 @@
-import http from 'http'
 import { spawn } from 'child_process'
 import { homedir } from 'os'
 import { executeClaudeCode } from './claude-code'
 import type { ExecutionOptions, ExecutionResult, ConsoleLogCallback, ProgressCallback } from './claude-code'
 import { execOnCloudStation } from './cloud-sync'
+import { ensureOllamaModel, ollamaRequest, isOllamaAvailable, listOllamaModels } from './ollama-ensure'
+import type { OllamaToolDef } from './queen-tools'
 
 export interface AgentExecutionOptions {
   model: string // 'claude' | 'codex' | 'openai:gpt-4o-mini' | 'anthropic:claude-3-5-sonnet-latest' | 'ollama:llama3'
@@ -17,6 +18,9 @@ export interface AgentExecutionOptions {
   onConsoleLog?: ConsoleLogCallback
   allowedTools?: string
   disallowedTools?: string
+  // Ollama tool-calling support
+  toolDefs?: OllamaToolDef[]
+  onToolCall?: (name: string, args: Record<string, unknown>) => Promise<string>
 }
 
 export interface AgentExecutionResult {
@@ -32,15 +36,24 @@ const DEFAULT_HTTP_TIMEOUT_MS = 60_000
 export async function executeAgent(options: AgentExecutionOptions): Promise<AgentExecutionResult> {
   const model = options.model.trim()
   if (model.startsWith('ollama:')) {
+    if (options.toolDefs && options.toolDefs.length > 0 && options.onToolCall) {
+      return executeOllamaWithTools(options)
+    }
     return executeOllama(options)
   }
   if (model === 'codex' || model.startsWith('codex:')) {
     return executeCodex(options)
   }
   if (model === 'openai' || model.startsWith('openai:')) {
+    if (options.toolDefs && options.toolDefs.length > 0 && options.onToolCall) {
+      return executeOpenAiWithTools(options)
+    }
     return executeOpenAiApi(options)
   }
   if (model === 'anthropic' || model.startsWith('anthropic:') || model.startsWith('claude-api:')) {
+    if (options.toolDefs && options.toolDefs.length > 0 && options.onToolCall) {
+      return executeAnthropicWithTools(options)
+    }
     return executeAnthropicApi(options)
   }
   // Default: Claude Code CLI
@@ -183,6 +196,312 @@ async function executeCodex(options: AgentExecutionOptions): Promise<AgentExecut
   })
 }
 
+// ─── Ollama multi-turn tool-call loop ──────────────────────────────────────
+
+interface OllamaToolCall {
+  function: {
+    name: string
+    arguments: Record<string, unknown> | string
+  }
+}
+
+interface OllamaMessage {
+  role: 'system' | 'user' | 'assistant' | 'tool'
+  content: string
+  tool_calls?: OllamaToolCall[]
+}
+
+async function executeOllamaWithTools(options: AgentExecutionOptions): Promise<AgentExecutionResult> {
+  const modelName = options.model.replace(/^ollama:/, '')
+  const startTime = Date.now()
+
+  try {
+    await ensureOllamaModel(modelName)
+  } catch (err) {
+    return {
+      output: `Error: ${err instanceof Error ? err.message : String(err)}`,
+      exitCode: 1,
+      durationMs: Date.now() - startTime,
+      sessionId: null,
+      timedOut: false
+    }
+  }
+
+  const messages: OllamaMessage[] = []
+  if (options.systemPrompt) {
+    messages.push({ role: 'system', content: options.systemPrompt })
+  }
+  messages.push({ role: 'user', content: options.prompt })
+
+  const timeoutMs = options.timeoutMs ?? 5 * 60 * 1000
+  const maxTurns = options.maxTurns ?? 10
+  let finalOutput = ''
+
+  for (let turn = 0; turn < maxTurns; turn++) {
+    const body = JSON.stringify({
+      model: modelName,
+      messages,
+      tools: options.toolDefs,
+      stream: false
+    })
+
+    let raw: string
+    try {
+      raw = await ollamaRequest('/api/chat', body, timeoutMs)
+    } catch (err) {
+      const error = err as Error
+      const isTimeout = error.message.includes('timeout') || error.message.includes('aborted')
+      return {
+        output: `Error: ${error.message}`,
+        exitCode: 1,
+        durationMs: Date.now() - startTime,
+        sessionId: null,
+        timedOut: isTimeout
+      }
+    }
+
+    let parsed: { message: OllamaMessage }
+    try {
+      parsed = JSON.parse(raw) as { message: OllamaMessage }
+    } catch {
+      return {
+        output: raw,
+        exitCode: 0,
+        durationMs: Date.now() - startTime,
+        sessionId: null,
+        timedOut: false
+      }
+    }
+
+    const msg = parsed.message
+    const toolCalls = msg.tool_calls ?? []
+
+    if (toolCalls.length === 0) {
+      // No tool calls — this is the final text response
+      finalOutput = msg.content ?? ''
+      break
+    }
+
+    // Has tool calls: add assistant message, then execute each tool
+    messages.push({ role: 'assistant', content: msg.content ?? '', tool_calls: toolCalls })
+
+    for (const tc of toolCalls) {
+      const name = tc.function.name
+      const rawArgs = tc.function.arguments
+      const args: Record<string, unknown> =
+        typeof rawArgs === 'string'
+          ? (() => { try { return JSON.parse(rawArgs) as Record<string, unknown> } catch { return {} } })()
+          : rawArgs
+
+      let toolResult = `Tool ${name} unavailable`
+      if (options.onToolCall) {
+        try {
+          toolResult = await options.onToolCall(name, args)
+        } catch (err) {
+          toolResult = `Error: ${err instanceof Error ? err.message : String(err)}`
+        }
+      }
+
+      messages.push({ role: 'tool', content: toolResult })
+    }
+  }
+
+  return {
+    output: finalOutput || 'Actions completed.',
+    exitCode: 0,
+    durationMs: Date.now() - startTime,
+    sessionId: null,
+    timedOut: false
+  }
+}
+
+// ─── OpenAI multi-turn tool-call loop ──────────────────────────────────────
+
+interface OpenAiMessage {
+  role: 'system' | 'user' | 'assistant' | 'tool'
+  content?: string | null
+  tool_calls?: Array<{
+    id: string
+    type: 'function'
+    function: { name: string; arguments: string }
+  }>
+  tool_call_id?: string
+  name?: string
+}
+
+async function executeOpenAiWithTools(options: AgentExecutionOptions): Promise<AgentExecutionResult> {
+  const apiKey = options.apiKey?.trim() || (process.env.OPENAI_API_KEY || '').trim()
+  if (!apiKey) return immediateError('Missing OpenAI API key.')
+
+  const modelName = parseModelSuffix(options.model, 'openai') || 'gpt-4o-mini'
+  const startTime = Date.now()
+  const maxTurns = options.maxTurns ?? 10
+
+  const messages: OpenAiMessage[] = []
+  if (options.systemPrompt) messages.push({ role: 'system', content: options.systemPrompt })
+  messages.push({ role: 'user', content: options.prompt })
+
+  let finalOutput = ''
+
+  for (let turn = 0; turn < maxTurns; turn++) {
+    const controller = new AbortController()
+    const timeoutMs = options.timeoutMs ?? 5 * 60 * 1000
+    const timer = setTimeout(() => controller.abort(), timeoutMs)
+
+    let json: Record<string, unknown>
+    try {
+      const response = await fetch('https://api.openai.com/v1/chat/completions', {
+        method: 'POST',
+        headers: { 'Authorization': `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ model: modelName, messages, tools: options.toolDefs }),
+        signal: controller.signal
+      })
+      json = await response.json() as Record<string, unknown>
+      if (!response.ok) {
+        return { output: `OpenAI API ${response.status}: ${extractApiError(json)}`, exitCode: 1, durationMs: Date.now() - startTime, sessionId: null, timedOut: false }
+      }
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err)
+      const timedOut = msg.toLowerCase().includes('aborted') || msg.toLowerCase().includes('timeout')
+      return { output: `Error: ${msg}`, exitCode: 1, durationMs: Date.now() - startTime, sessionId: null, timedOut }
+    } finally {
+      clearTimeout(timer)
+    }
+
+    const choices = json.choices as Array<Record<string, unknown>> | undefined
+    const choice = choices?.[0] as Record<string, unknown> | undefined
+    const msg = choice?.message as OpenAiMessage | undefined
+    if (!msg) break
+
+    const toolCalls = msg.tool_calls ?? []
+    if (toolCalls.length === 0) {
+      finalOutput = (typeof msg.content === 'string' ? msg.content : '') ?? ''
+      break
+    }
+
+    messages.push({ role: 'assistant', content: msg.content ?? null, tool_calls: toolCalls })
+
+    for (const tc of toolCalls) {
+      const name = tc.function.name
+      let args: Record<string, unknown> = {}
+      try { args = JSON.parse(tc.function.arguments) as Record<string, unknown> } catch { /* ignore */ }
+
+      let toolResult = `Tool ${name} unavailable`
+      if (options.onToolCall) {
+        try { toolResult = await options.onToolCall(name, args) } catch (err) {
+          toolResult = `Error: ${err instanceof Error ? err.message : String(err)}`
+        }
+      }
+      messages.push({ role: 'tool', tool_call_id: tc.id, content: toolResult })
+    }
+  }
+
+  return { output: finalOutput || 'Actions completed.', exitCode: 0, durationMs: Date.now() - startTime, sessionId: null, timedOut: false }
+}
+
+// ─── Anthropic multi-turn tool-call loop ────────────────────────────────────
+
+interface AnthropicContentBlock {
+  type: string
+  text?: string
+  id?: string
+  name?: string
+  input?: Record<string, unknown>
+}
+
+interface AnthropicMessage {
+  role: 'user' | 'assistant'
+  content: string | AnthropicContentBlock[]
+}
+
+function ollamaToolDefsToAnthropic(defs: import('./queen-tools').OllamaToolDef[]): Array<{ name: string; description: string; input_schema: Record<string, unknown> }> {
+  return defs.map(d => ({
+    name: d.function.name,
+    description: d.function.description,
+    input_schema: d.function.parameters as Record<string, unknown>
+  }))
+}
+
+async function executeAnthropicWithTools(options: AgentExecutionOptions): Promise<AgentExecutionResult> {
+  const apiKey = options.apiKey?.trim() || (process.env.ANTHROPIC_API_KEY || '').trim()
+  if (!apiKey) return immediateError('Missing Anthropic API key.')
+
+  const modelName = parseAnthropicModel(options.model)
+  const startTime = Date.now()
+  const maxTurns = options.maxTurns ?? 10
+  const anthropicTools = options.toolDefs ? ollamaToolDefsToAnthropic(options.toolDefs) : []
+
+  const messages: AnthropicMessage[] = [{ role: 'user', content: options.prompt }]
+  let finalOutput = ''
+
+  for (let turn = 0; turn < maxTurns; turn++) {
+    const controller = new AbortController()
+    const timeoutMs = options.timeoutMs ?? 5 * 60 * 1000
+    const timer = setTimeout(() => controller.abort(), timeoutMs)
+
+    let json: Record<string, unknown>
+    try {
+      const response = await fetch('https://api.anthropic.com/v1/messages', {
+        method: 'POST',
+        headers: {
+          'x-api-key': apiKey,
+          'anthropic-version': '2023-06-01',
+          'content-type': 'application/json'
+        },
+        body: JSON.stringify({
+          model: modelName,
+          max_tokens: 4096,
+          system: options.systemPrompt,
+          tools: anthropicTools,
+          messages
+        }),
+        signal: controller.signal
+      })
+      json = await response.json() as Record<string, unknown>
+      if (!response.ok) {
+        return { output: `Anthropic API ${response.status}: ${extractApiError(json)}`, exitCode: 1, durationMs: Date.now() - startTime, sessionId: null, timedOut: false }
+      }
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err)
+      const timedOut = msg.toLowerCase().includes('aborted') || msg.toLowerCase().includes('timeout')
+      return { output: `Error: ${msg}`, exitCode: 1, durationMs: Date.now() - startTime, sessionId: null, timedOut }
+    } finally {
+      clearTimeout(timer)
+    }
+
+    const stopReason = json.stop_reason as string | undefined
+    const content = json.content as AnthropicContentBlock[] | undefined
+
+    const toolUseBlocks = (content ?? []).filter(b => b.type === 'tool_use')
+    const textBlocks = (content ?? []).filter(b => b.type === 'text')
+
+    if (toolUseBlocks.length === 0 || stopReason !== 'tool_use') {
+      finalOutput = textBlocks.map(b => b.text ?? '').join('\n').trim()
+      break
+    }
+
+    // Add assistant message with tool_use blocks
+    messages.push({ role: 'assistant', content: content ?? [] })
+
+    // Execute tools and build tool_result message
+    const resultBlocks: AnthropicContentBlock[] = []
+    for (const block of toolUseBlocks) {
+      const name = block.name ?? ''
+      const args = (block.input ?? {}) as Record<string, unknown>
+      let toolResult = `Tool ${name} unavailable`
+      if (options.onToolCall) {
+        try { toolResult = await options.onToolCall(name, args) } catch (err) {
+          toolResult = `Error: ${err instanceof Error ? err.message : String(err)}`
+        }
+      }
+      resultBlocks.push({ type: 'tool_result', id: block.id, content: toolResult } as unknown as AnthropicContentBlock)
+    }
+    messages.push({ role: 'user', content: resultBlocks })
+  }
+
+  return { output: finalOutput || 'Actions completed.', exitCode: 0, durationMs: Date.now() - startTime, sessionId: null, timedOut: false }
+}
+
 async function executeOpenAiApi(options: AgentExecutionOptions): Promise<AgentExecutionResult> {
   const apiKey = options.apiKey?.trim() || (process.env.OPENAI_API_KEY || '').trim()
   if (!apiKey) {
@@ -308,6 +627,19 @@ async function executeOllama(options: AgentExecutionOptions): Promise<AgentExecu
   const modelName = options.model.replace(/^ollama:/, '')
   const startTime = Date.now()
 
+  // Auto-start Ollama and pull model if needed
+  try {
+    await ensureOllamaModel(modelName)
+  } catch (err) {
+    return {
+      output: `Error: ${err instanceof Error ? err.message : String(err)}`,
+      exitCode: 1,
+      durationMs: Date.now() - startTime,
+      sessionId: null,
+      timedOut: false
+    }
+  }
+
   const messages: Array<{ role: string; content: string }> = []
   if (options.systemPrompt) {
     messages.push({ role: 'system', content: options.systemPrompt })
@@ -321,7 +653,7 @@ async function executeOllama(options: AgentExecutionOptions): Promise<AgentExecu
   })
 
   try {
-    const response = await ollamaRequest('/api/chat', body, options.timeoutMs)
+    const response = await ollamaRequest('/api/chat', body, options.timeoutMs ?? 5 * 60 * 1000)
     const parsed = JSON.parse(response)
     const output = parsed?.message?.content ?? ''
     return {
@@ -522,55 +854,87 @@ export async function executeOllamaOnStation(
   }
 }
 
-export async function isOllamaAvailable(): Promise<boolean> {
-  try {
-    await ollamaRequest('/api/tags', undefined, 5000)
-    return true
-  } catch {
-    return false
+/**
+ * Execute an API-key model (openai:* or anthropic:*) on a cloud station via curl.
+ */
+export async function executeApiOnStation(
+  cloudRoomId: string,
+  stationId: number,
+  options: AgentExecutionOptions
+): Promise<AgentExecutionResult> {
+  const startTime = Date.now()
+  const apiKey = options.apiKey
+  if (!apiKey) {
+    return immediateError('Missing API key for station execution.')
   }
-}
 
-export async function listOllamaModels(): Promise<Array<{ name: string; size: number }>> {
-  try {
-    const response = await ollamaRequest('/api/tags', undefined, 5000)
-    const parsed = JSON.parse(response) as { models?: Array<{ name: string; size: number }> }
-    return (parsed.models ?? []).map(m => ({ name: m.name, size: m.size }))
-  } catch {
-    return []
+  const isOpenAi = options.model.startsWith('openai:')
+  const messages: Array<{ role: string; content: string }> = []
+  if (options.systemPrompt) messages.push({ role: 'system', content: options.systemPrompt })
+  messages.push({ role: 'user', content: options.prompt })
+
+  let url: string
+  let headers: Record<string, string>
+  let body: string
+
+  if (isOpenAi) {
+    const modelName = parseModelSuffix(options.model, 'openai') || 'gpt-4o-mini'
+    url = 'https://api.openai.com/v1/chat/completions'
+    headers = { 'Authorization': `Bearer ${apiKey}`, 'Content-Type': 'application/json' }
+    body = JSON.stringify({ model: modelName, messages })
+  } else {
+    const modelName = parseAnthropicModel(options.model)
+    url = 'https://api.anthropic.com/v1/messages'
+    headers = { 'x-api-key': apiKey, 'anthropic-version': '2023-06-01', 'content-type': 'application/json' }
+    body = JSON.stringify({
+      model: modelName,
+      max_tokens: 2048,
+      system: options.systemPrompt,
+      messages: [{ role: 'user', content: options.prompt }]
+    })
   }
-}
 
-function ollamaRequest(path: string, body?: string, timeoutMs: number = 30000): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const options: http.RequestOptions = {
-      hostname: '127.0.0.1',
-      port: 11434,
-      path,
-      method: body ? 'POST' : 'GET',
-      headers: body ? { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(body) } : undefined,
-      timeout: timeoutMs
+  // Build curl command with headers
+  const headerFlags = Object.entries(headers).map(([k, v]) => `-H '${k}: ${v}'`).join(' ')
+  const b64 = Buffer.from(body).toString('base64')
+  const command = `echo '${b64}' | base64 -d | curl -s --max-time 300 ${headerFlags} -d @- '${url}'`
+
+  const result = await execOnCloudStation(cloudRoomId, stationId, command, 360000)
+
+  if (!result) {
+    return {
+      output: 'Error: station execution failed (station unreachable)',
+      exitCode: 1,
+      durationMs: Date.now() - startTime,
+      sessionId: null,
+      timedOut: false
     }
+  }
 
-    const req = http.request(options, (res) => {
-      let data = ''
-      res.on('data', chunk => { data += chunk })
-      res.on('end', () => {
-        if (res.statusCode && res.statusCode >= 200 && res.statusCode < 300) {
-          resolve(data)
-        } else {
-          reject(new Error(`Ollama HTTP ${res.statusCode}: ${data}`))
-        }
-      })
-    })
+  if (result.exitCode !== 0) {
+    return {
+      output: result.stderr || result.stdout || `Station exec failed with exit code ${result.exitCode}`,
+      exitCode: result.exitCode,
+      durationMs: Date.now() - startTime,
+      sessionId: null,
+      timedOut: false
+    }
+  }
 
-    req.on('error', reject)
-    req.on('timeout', () => {
-      req.destroy()
-      reject(new Error('Ollama request timeout'))
-    })
-
-    if (body) req.write(body)
-    req.end()
-  })
+  try {
+    const parsed = JSON.parse(result.stdout) as Record<string, unknown>
+    const output = isOpenAi ? extractOpenAiText(parsed) : extractAnthropicText(parsed)
+    return { output, exitCode: 0, durationMs: Date.now() - startTime, sessionId: null, timedOut: false }
+  } catch {
+    return {
+      output: result.stdout || '(no output from API)',
+      exitCode: 1,
+      durationMs: Date.now() - startTime,
+      sessionId: null,
+      timedOut: false
+    }
+  }
 }
+
+// isOllamaAvailable, listOllamaModels, ollamaRequest — re-exported from ollama-ensure.ts
+export { isOllamaAvailable, listOllamaModels }

@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { getToken, clearToken, API_BASE, APP_MODE } from './lib/auth'
 import { TabBar, mainTabs, tabIcons, type Tab } from './components/TabBar'
 import { StatusPanel } from './components/StatusPanel'
@@ -23,12 +23,19 @@ import { ConnectPage } from './components/ConnectPage'
 import { WalkthroughModal } from './components/WalkthroughModal'
 import { UpdateModal } from './components/UpdateModal'
 import { CreateRoomModal } from './components/CreateRoomModal'
+import { KeepInDockModal } from './components/KeepInDockModal'
 import { useNotifications } from './hooks/useNotifications'
 import { semverGt } from './lib/releases'
-import { useInstallPrompt, type InstallPrompt } from './hooks/useInstallPrompt'
+import { useInstallPrompt } from './hooks/useInstallPrompt'
 import { api } from './lib/client'
+import { wsClient, type WsMessage } from './lib/ws'
+import {
+  ROOM_BADGE_EVENT_TYPES,
+  ROOM_BALANCE_EVENT_TYPES,
+  ROOMS_QUEEN_STATE_EVENT,
+} from './lib/room-events'
 import { storageGet, storageSet, storageRemove } from './lib/storage'
-import type { Room, Escalation, RoomMessage, QuorumDecision } from '@shared/types'
+import type { Room } from '@shared/types'
 
 const ADVANCED_TABS = new Set<Tab>(
   mainTabs.filter((tab) => tab.advanced).map((tab) => tab.id)
@@ -37,6 +44,8 @@ const ADVANCED_TABS = new Set<Tab>(
 const ALL_TAB_IDS: Tab[] = ['swarm', 'status', 'chat', 'goals', 'votes', 'messages', 'workers', 'tasks', 'skills', 'credentials', 'transactions', 'stations', 'room-settings', 'memory', 'watches', 'results', 'settings', 'help']
 
 const DEFAULT_PORT = '3700'
+const KEEP_IN_DOCK_TIP_PENDING_KEY = 'quoroom_keep_in_dock_tip_pending'
+const KEEP_IN_DOCK_TIP_SEEN_KEY = 'quoroom_keep_in_dock_tip_seen'
 const isRemoteOrigin = location.hostname !== 'localhost' && location.hostname !== '127.0.0.1'
 const shouldProbeLocalServer = APP_MODE === 'local' && isRemoteOrigin
 
@@ -58,6 +67,28 @@ function parseCreatedRoomId(payload: unknown): number | null {
 function isDevDbPath(dbPath: string | undefined): boolean {
   if (!dbPath) return false
   return dbPath.replace(/\\/g, '/').toLowerCase().includes('/.quoroom-dev/')
+}
+
+function formatUsd(value: number): string {
+  return `$${value.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+}
+
+function formatRoomModel(model: string | null | undefined): string {
+  if (!model) return 'unknown'
+  if (model === 'claude') return 'Claude'
+  if (model === 'codex') return 'Codex'
+  const idx = model.indexOf(':')
+  if (idx === -1) return model
+  const provider = model.slice(0, idx)
+  const modelName = model.slice(idx + 1)
+  const providerLabel = provider === 'openai'
+    ? 'OpenAI'
+    : provider === 'anthropic'
+      ? 'Anthropic'
+      : provider === 'ollama'
+        ? 'Ollama'
+        : provider
+  return `${providerLabel}/${modelName}`
 }
 
 async function probeLocalServer(port: string): Promise<boolean> {
@@ -86,6 +117,7 @@ function App(): React.JSX.Element {
   const [autonomyMode, setAutonomyMode] = useState<'auto' | 'semi'>('auto')
   const [ready, setReady] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [restartingServer, setRestartingServer] = useState(false)
 
   // Global room selection
   const [selectedRoomId, setSelectedRoomId] = useState<number | null>(() => {
@@ -97,16 +129,21 @@ function App(): React.JSX.Element {
     return saved ? Number(saved) : null
   })
   const [rooms, setRooms] = useState<Room[]>([])
+  const [roomsLoaded, setRoomsLoaded] = useState(false)
   const [queenRunning, setQueenRunning] = useState<Record<number, boolean>>({})
   const [showCreateRoomModal, setShowCreateRoomModal] = useState(false)
+  const [swarmInviteNonce, setSwarmInviteNonce] = useState(0)
 
   const [messagesUnread, setMessagesUnread] = useState(0)
   const [votesActive, setVotesActive] = useState(0)
   const [totalBalance, setTotalBalance] = useState<number | null>(null)
+  const [roomBalances, setRoomBalances] = useState<Record<number, number | null>>({})
+  const [queenModels, setQueenModels] = useState<Record<number, string | null>>({})
 
   useNotifications()
   const installPrompt = useInstallPrompt()
   const [installDismissed, setInstallDismissed] = useState(() => storageGet('quoroom_install_dismissed') === 'true')
+  const [showKeepInDockTip, setShowKeepInDockTip] = useState(false)
   const [showWalkthrough, setShowWalkthrough] = useState(() => !storageGet('quoroom_walkthrough_seen'))
   const [sidebarOpen, setSidebarOpen] = useState(false)
 
@@ -134,67 +171,126 @@ function App(): React.JSX.Element {
     })
   }, [gate])
 
-  // Poll unread message counts for the expanded room (for sidebar badge)
   useEffect(() => {
-    if (!ready || expandedRoomId === null) { setMessagesUnread(0); return }
-    async function fetchUnread(): Promise<void> {
-      try {
-        const [esc, msgs] = await Promise.all([
-          api.escalations.list(expandedRoomId!).catch(() => [] as Escalation[]),
-          api.roomMessages.list(expandedRoomId!).catch(() => [] as RoomMessage[]),
-        ])
-        setMessagesUnread(
-          esc.filter(e => e.status === 'pending').length +
-          msgs.filter(m => m.status === 'unread').length
-        )
-      } catch {
-        // ignore polling noise
-      }
+    if (installPrompt.installSignal <= 0) return
+    if (storageGet(KEEP_IN_DOCK_TIP_SEEN_KEY) === 'true') return
+    storageSet(KEEP_IN_DOCK_TIP_PENDING_KEY, 'true')
+  }, [installPrompt.installSignal])
+
+  useEffect(() => {
+    if (installPrompt.isInstalled) return
+    // Uninstall can leave origin storage behind; reset so reinstall can show tip.
+    storageRemove(KEEP_IN_DOCK_TIP_SEEN_KEY)
+    storageRemove(KEEP_IN_DOCK_TIP_PENDING_KEY)
+  }, [installPrompt.isInstalled])
+
+  useEffect(() => {
+    if (!installPrompt.isInstalled) return
+    if (storageGet(KEEP_IN_DOCK_TIP_SEEN_KEY) === 'true') return
+    if (storageGet(KEEP_IN_DOCK_TIP_PENDING_KEY) !== 'true') return
+    setShowKeepInDockTip(true)
+  }, [installPrompt.isInstalled])
+
+  const fetchRoomBadges = useCallback(async (): Promise<void> => {
+    if (!ready || expandedRoomId === null) {
+      setMessagesUnread(0)
+      setVotesActive(0)
+      return
     }
-    void fetchUnread().catch(() => {})
-    const interval = setInterval(() => { void fetchUnread().catch(() => {}) }, 10000)
-    return () => clearInterval(interval)
+    try {
+      const badges = await api.rooms.badges(expandedRoomId)
+      setMessagesUnread(badges.pendingEscalations + badges.unreadMessages)
+      setVotesActive(badges.activeVotes)
+    } catch {
+      // ignore polling noise
+    }
   }, [expandedRoomId, ready])
 
-  // Poll active voting count for the expanded room (for sidebar badge)
+  // Fallback poll for sidebar badges (room message/escalation/vote counts).
   useEffect(() => {
-    if (!ready || expandedRoomId === null) { setVotesActive(0); return }
-    async function fetchActive(): Promise<void> {
-      try {
-        const decisions = await api.decisions.list(expandedRoomId!, 'voting').catch(() => [] as QuorumDecision[])
-        setVotesActive(decisions.length)
-      } catch {
-        // ignore polling noise
-      }
+    if (!ready || expandedRoomId === null) {
+      setMessagesUnread(0)
+      setVotesActive(0)
+      return
     }
-    void fetchActive().catch(() => {})
-    const interval = setInterval(() => { void fetchActive().catch(() => {}) }, 10000)
+    void fetchRoomBadges().catch(() => {})
+    const interval = setInterval(() => { void fetchRoomBadges().catch(() => {}) }, 60000)
     return () => clearInterval(interval)
-  }, [expandedRoomId, ready])
+  }, [expandedRoomId, fetchRoomBadges, ready])
 
-  // Poll total on-chain balance across all rooms (only those with wallets)
-  useEffect(() => {
-    if (!ready || rooms.length === 0) { setTotalBalance(null); return }
-    async function fetchTotalBalance(): Promise<void> {
-      try {
-        const wallets = await Promise.all(
-          rooms.map(r => api.wallet.get(r.id).catch(() => null))
-        )
-        const roomsWithWallets = rooms.filter((_, i) => wallets[i] !== null)
-        if (roomsWithWallets.length === 0) { setTotalBalance(null); return }
-        const results = await Promise.all(
-          roomsWithWallets.map(r => api.wallet.balance(r.id).catch(() => null))
-        )
-        const sum = results.reduce((acc, b) => acc + (b?.totalBalance ?? 0), 0)
-        setTotalBalance(sum > 0 ? sum : null)
-      } catch {
-        // ignore polling noise
+  const fetchTotalBalance = useCallback(async (): Promise<void> => {
+    if (!ready || rooms.length === 0) {
+      setTotalBalance(null)
+      setRoomBalances({})
+      return
+    }
+    try {
+      const wallets = await Promise.all(
+        rooms.map(r => api.wallet.get(r.id).catch(() => null))
+      )
+      const nextBalances: Record<number, number | null> = {}
+      rooms.forEach((room, idx) => {
+        if (!wallets[idx]) nextBalances[room.id] = null
+      })
+      const roomsWithWallets = rooms.filter((_, i) => wallets[i] !== null)
+      if (roomsWithWallets.length === 0) {
+        setTotalBalance(null)
+        setRoomBalances(nextBalances)
+        return
       }
+      const results = await Promise.all(
+        roomsWithWallets.map(r => api.wallet.balance(r.id).catch(() => null))
+      )
+      roomsWithWallets.forEach((room, idx) => {
+        nextBalances[room.id] = results[idx]?.totalBalance ?? 0
+      })
+      const sum = Object.values(nextBalances).reduce((acc, b) => acc + (b ?? 0), 0)
+      setRoomBalances(nextBalances)
+      setTotalBalance(sum > 0 ? sum : null)
+    } catch {
+      // ignore polling noise
+    }
+  }, [ready, rooms])
+
+  // Fallback poll for total on-chain balance across all rooms.
+  useEffect(() => {
+    if (!ready || rooms.length === 0) {
+      setTotalBalance(null)
+      return
     }
     void fetchTotalBalance().catch(() => {})
     const interval = setInterval(() => { void fetchTotalBalance().catch(() => {}) }, 60000)
     return () => clearInterval(interval)
-  }, [ready, rooms])
+  }, [fetchTotalBalance, ready, rooms.length])
+
+  useEffect(() => {
+    if (!ready || expandedRoomId === null) return
+    return wsClient.subscribe(`room:${expandedRoomId}`, (event: WsMessage) => {
+      if (ROOM_BADGE_EVENT_TYPES.has(event.type)) {
+        void fetchRoomBadges()
+      }
+      if (ROOM_BALANCE_EVENT_TYPES.has(event.type)) {
+        void fetchTotalBalance()
+      }
+    })
+  }, [expandedRoomId, fetchRoomBadges, fetchTotalBalance, ready])
+
+  const fetchSelectedQueenModel = useCallback(async (): Promise<void> => {
+    if (!ready || selectedRoomId === null) return
+    try {
+      const q = await api.rooms.queenStatus(selectedRoomId)
+      setQueenModels(prev => ({ ...prev, [selectedRoomId]: q?.model ?? null }))
+    } catch {
+      // keep previous value on transient failures
+    }
+  }, [ready, selectedRoomId])
+
+  useEffect(() => {
+    if (!ready || selectedRoomId === null) return
+    void fetchSelectedQueenModel()
+    const interval = setInterval(() => { void fetchSelectedQueenModel() }, 60000)
+    return () => clearInterval(interval)
+  }, [fetchSelectedQueenModel, ready, selectedRoomId])
 
   // Local origin: normal auth flow
   useEffect(() => {
@@ -214,7 +310,7 @@ function App(): React.JSX.Element {
   useEffect(() => {
     if (gate !== 'app' || !ready) return
     function checkStatus(): void {
-      api.status.get().then((status) => {
+      api.status.getParts(['storage', 'update']).then((status) => {
         const isDevDb = (status.deploymentMode ?? 'local') === 'local' && isDevDbPath(status.dbPath)
         if (isDevDb) {
           setDevDbBanner({ dbPath: status.dbPath, dataDir: status.dataDir })
@@ -240,40 +336,86 @@ function App(): React.JSX.Element {
     return () => clearInterval(interval)
   }, [gate, ready])
 
-  function syncRooms(r: Room[]): void {
+  const syncRooms = useCallback((r: Room[]): void => {
     setRooms(r)
-    if (selectedRoomId === null && r.length > 0) {
-      handleRoomChange(r[0].id)
-      setExpandedRoomId(r[0].id)
+
+    const selectableRooms = r.filter(room => room.status !== 'stopped')
+    const fallbackRoomId = selectableRooms[0]?.id ?? null
+    const selectedStillSelectable = selectedRoomId !== null && selectableRooms.some(room => room.id === selectedRoomId)
+
+    if (selectedRoomId === null) {
+      if (fallbackRoomId !== null) {
+        handleRoomChange(fallbackRoomId)
+      }
+    } else if (!selectedStillSelectable) {
+      handleRoomChange(fallbackRoomId)
     }
-    if (selectedRoomId !== null && !r.find(room => room.id === selectedRoomId)) {
-      const next = r.length > 0 ? r[0].id : null
-      handleRoomChange(next)
-      setExpandedRoomId(next)
-    }
+
     setExpandedRoomId(prev => {
-      if (prev === null && selectedRoomId !== null && r.find(room => room.id === selectedRoomId)) {
+      if (prev !== null && selectableRooms.some(room => room.id === prev)) {
+        return prev
+      }
+      if (selectedStillSelectable && selectedRoomId !== null) {
         return selectedRoomId
       }
-      return prev
+      return fallbackRoomId
     })
-    Promise.all(
-      r.map(async room => {
-        const q = await api.rooms.queenStatus(room.id).catch(() => null)
-        return [room.id, q?.running ?? false] as const
-      })
-    ).then(entries => setQueenRunning(Object.fromEntries(entries))).catch(() => {})
-  }
+  }, [selectedRoomId])
+
+  const refreshQueenStates = useCallback(async (): Promise<void> => {
+    if (!ready) return
+    try {
+      const states = await api.rooms.queenStates()
+      setQueenRunning(states)
+    } catch {
+      // ignore polling noise
+    }
+  }, [ready])
+
+  const loadRooms = useCallback(async (): Promise<void> => {
+    try {
+      const nextRooms = await api.rooms.list()
+      syncRooms(nextRooms)
+      setRoomsLoaded(true)
+      void refreshQueenStates()
+    } catch {
+      // ignore polling noise
+    }
+  }, [refreshQueenStates, syncRooms])
 
   useEffect(() => {
     if (!ready) return
-    function loadRooms(): void {
-      api.rooms.list().then(syncRooms).catch(() => {})
-    }
-    loadRooms()
-    const interval = setInterval(loadRooms, 10000)
+    setRoomsLoaded(false)
+    void loadRooms()
+    const interval = setInterval(() => { void loadRooms() }, 60000)
     return () => clearInterval(interval)
-  }, [ready]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [loadRooms, ready])
+
+  useEffect(() => {
+    if (!ready) return
+    let roomsRefreshTimer: number | null = null
+    const scheduleRoomsReload = (): void => {
+      if (roomsRefreshTimer) window.clearTimeout(roomsRefreshTimer)
+      roomsRefreshTimer = window.setTimeout(() => {
+        roomsRefreshTimer = null
+        void loadRooms()
+      }, 200)
+    }
+    const unsubscribe = wsClient.subscribe('rooms', (event: WsMessage) => {
+      if (event.type === ROOMS_QUEEN_STATE_EVENT) {
+        const payload = event.data as { roomId?: number; running?: boolean }
+        if (typeof payload.roomId === 'number' && typeof payload.running === 'boolean') {
+          setQueenRunning(prev => ({ ...prev, [payload.roomId]: payload.running }))
+          return
+        }
+      }
+      scheduleRoomsReload()
+    })
+    return () => {
+      unsubscribe()
+      if (roomsRefreshTimer) window.clearTimeout(roomsRefreshTimer)
+    }
+  }, [loadRooms, ready])
 
   useEffect(() => {
     const room = rooms.find(r => r.id === selectedRoomId)
@@ -315,10 +457,16 @@ function App(): React.JSX.Element {
     handleTabChange(t)
   }
 
+  function handleOpenInvite(): void {
+    handleTabChange('swarm')
+    setSwarmInviteNonce(prev => prev + 1)
+  }
+
   async function handleRoomCreated(created: Room): Promise<void> {
     const createdRoomId = parseCreatedRoomId(created)
     const nextRooms = await api.rooms.list()
     syncRooms(nextRooms)
+    void refreshQueenStates()
 
     const resolvedRoomId = createdRoomId
       ?? [...nextRooms].reverse().find(r => r.name === created.name)?.id
@@ -334,11 +482,14 @@ function App(): React.JSX.Element {
   }
 
   const selectedRoom = rooms.find(r => r.id === selectedRoomId) ?? null
+  const selectedRoomModel = selectedRoom ? queenModels[selectedRoom.id] ?? null : null
+  const selectedRoomBalance = selectedRoom ? roomBalances[selectedRoom.id] ?? null : null
+  const activeRooms = useMemo(() => rooms.filter(r => r.status !== 'stopped'), [rooms])
 
   function renderPanel(): React.JSX.Element {
     switch (tab) {
       case 'swarm':
-        return <SwarmPanel rooms={rooms.filter(r => r.status !== 'stopped')} queenRunning={queenRunning} onNavigateToRoom={(roomId) => {
+        return <SwarmPanel rooms={activeRooms} queenRunning={queenRunning} forcedInviteOpenNonce={swarmInviteNonce} onNavigateToRoom={(roomId) => {
           handleRoomChange(roomId)
           setExpandedRoomId(roomId)
           handleTabChange('status')
@@ -382,6 +533,40 @@ function App(): React.JSX.Element {
     }
   }
 
+  function handleRetryAuth(): void {
+    setError(null)
+    setRestartingServer(false)
+    clearToken()
+    getToken()
+      .then(() => setReady(true))
+      .catch((e) => setError(e instanceof Error ? e.message : 'Auth failed'))
+  }
+
+  async function handleRestartServer(): Promise<void> {
+    if (APP_MODE !== 'local') return
+    setRestartingServer(true)
+    try {
+      const res = await fetch(`${API_BASE}/api/server/restart`, {
+        method: 'POST',
+        cache: 'no-store',
+      })
+      if (!res.ok) throw new Error(`HTTP ${res.status}`)
+      // Allow process shutdown and relaunch before retrying handshake.
+      setTimeout(() => {
+        handleRetryAuth()
+      }, 1800)
+    } catch {
+      setRestartingServer(false)
+      setError('Restart could not be triggered. Run "quoroom serve" in terminal, then Retry.')
+    }
+  }
+
+  function handleDismissKeepInDockTip(): void {
+    setShowKeepInDockTip(false)
+    storageSet(KEEP_IN_DOCK_TIP_SEEN_KEY, 'true')
+    storageRemove(KEEP_IN_DOCK_TIP_PENDING_KEY)
+  }
+
   if (gate === 'probing') {
     return (
       <div className="flex flex-col h-screen bg-surface-primary items-center justify-center">
@@ -404,12 +589,23 @@ function App(): React.JSX.Element {
       <div className="flex flex-col h-screen bg-surface-primary items-center justify-center px-4">
         <div className="text-status-error text-sm mb-1">Connection failed</div>
         <div className="text-text-muted text-xs mb-3">{error}</div>
-        <button
-          onClick={() => { setError(null); clearToken(); getToken().then(() => setReady(true)).catch((e) => setError(e instanceof Error ? e.message : 'Auth failed')) }}
-          className="text-sm px-3 py-1.5 rounded-lg bg-interactive text-text-invert hover:bg-interactive-hover transition-colors"
-        >
-          Retry
-        </button>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={handleRetryAuth}
+            className="text-sm px-3 py-1.5 rounded-lg bg-interactive text-text-invert hover:bg-interactive-hover transition-colors"
+          >
+            Retry
+          </button>
+          {APP_MODE === 'local' && (
+            <button
+              onClick={() => void handleRestartServer()}
+              disabled={restartingServer}
+              className="text-sm px-3 py-1.5 rounded-lg border border-border-primary text-text-secondary hover:text-text-primary hover:border-interactive transition-colors disabled:opacity-40"
+            >
+              {restartingServer ? 'Restarting...' : 'Restart'}
+            </button>
+          )}
+        </div>
       </div>
     )
   }
@@ -488,10 +684,15 @@ function App(): React.JSX.Element {
 
         {/* Room accordion — scrollable */}
         <div className="flex-1 overflow-y-auto min-h-0">
-          {rooms.filter(r => r.status !== 'stopped').length === 0 && (
+          {!roomsLoaded ? (
+            <div className="flex items-center justify-center gap-2 py-4 px-2 text-xs text-text-muted">
+              <span className="w-3 h-3 rounded-full border border-border-primary border-t-text-muted animate-spin" />
+              <span>Loading rooms...</span>
+            </div>
+          ) : activeRooms.length === 0 && (
             <p className="text-xs text-text-muted text-center py-4 px-2">No rooms</p>
           )}
-          {rooms.filter(r => r.status !== 'stopped').map(r => {
+          {activeRooms.map(r => {
             const isOpen = expandedRoomId === r.id
             const isSelected = selectedRoomId === r.id
             const running = r.status === 'active' && queenRunning[r.id]
@@ -542,7 +743,7 @@ function App(): React.JSX.Element {
           })}
         </div>
 
-        <TabBar active={tab} onChange={handleTabChange} />
+        <TabBar active={tab} onChange={handleTabChange} onInvite={handleOpenInvite} />
       </div>
 
       {/* Main content */}
@@ -605,13 +806,17 @@ function App(): React.JSX.Element {
           const statusLabel = running ? 'running' : paused ? 'paused' : 'idle'
           const statusColor = running ? 'text-status-success' : paused ? 'text-status-warning' : 'text-text-muted'
           return (
-            <div className="flex items-center gap-2 px-4 py-2 border-b border-border-secondary bg-surface-primary shrink-0">
+            <div className="flex items-center gap-2 px-4 py-2 border-b border-border-secondary bg-surface-primary shrink-0 flex-wrap">
               <button className="md:hidden p-1 -ml-1 mr-1 text-text-muted hover:text-text-primary" onClick={() => setSidebarOpen(true)} aria-label="Open menu">
                 <svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"><path d="M3 5h14M3 10h14M3 15h14" /></svg>
               </button>
               <span className={`w-2 h-2 rounded-full flex-shrink-0 ${dot}`} />
               <span className="text-sm font-semibold text-text-primary truncate">{selectedRoom.name}</span>
               <span className={`text-xs flex-shrink-0 ${statusColor}`}>{statusLabel}</span>
+              <span className="text-xs text-text-muted flex-shrink-0">model: {formatRoomModel(selectedRoomModel)}</span>
+              <span className="text-xs text-text-muted flex-shrink-0">
+                wallet: {selectedRoomBalance === null ? '--' : formatUsd(selectedRoomBalance)}
+              </span>
               {selectedRoom.goal && (
                 <>
                   <span className="text-text-muted flex-shrink-0 hidden sm:inline">{'\u00B7'}</span>
@@ -670,6 +875,9 @@ function App(): React.JSX.Element {
             setUpdateDismissed(true)
           }}
         />
+      )}
+      {showKeepInDockTip && (
+        <KeepInDockModal onDismiss={handleDismissKeepInDockTip} />
       )}
     </div>
   )

@@ -152,6 +152,29 @@ export interface ConsoleLogEntry {
   createdAt: string
 }
 
+// ─── Worker Cycle Types ─────────────────────────────────────
+
+export interface WorkerCycle {
+  id: number
+  workerId: number
+  roomId: number
+  model: string | null
+  startedAt: string
+  finishedAt: string | null
+  status: string
+  errorMessage: string | null
+  durationMs: number | null
+}
+
+export interface CycleLogEntry {
+  id: number
+  cycleId: number
+  seq: number
+  entryType: string
+  content: string
+  createdAt: string
+}
+
 // ─── Watch Types ────────────────────────────────────────────
 
 export interface Watch {
@@ -205,7 +228,7 @@ export interface Room {
   queenQuietUntil: string | null
   config: RoomConfig
   chatSessionId: string | null
-  inviteCode: string | null
+  referredByCode: string | null
   createdAt: string
   updatedAt: string
 }
@@ -214,7 +237,7 @@ export interface CreateRoomInput {
   name: string
   goal?: string
   queenSystemPrompt?: string
-  inviteCode?: string
+  referredByCode?: string
   config?: Partial<RoomConfig>
 }
 

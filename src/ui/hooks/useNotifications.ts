@@ -1,6 +1,7 @@
 import { useEffect, useRef } from 'react'
 import { wsClient, type WsMessage } from '../lib/ws'
 import { api } from '../lib/client'
+import { ROOM_DECISION_CREATED_EVENT, ROOM_ESCALATION_CREATED_EVENT } from '../lib/room-events'
 import { isPermitted, show, clearBadge } from '../lib/notifications'
 import type { Escalation, QuorumDecision } from '@shared/types'
 
@@ -42,10 +43,10 @@ export function useNotifications(): void {
         const unsub = wsClient.subscribe(channel, (event: WsMessage) => {
           if (!enabledRef.current || !isPermitted() || document.hasFocus()) return
 
-          if (event.type === 'escalation:created') {
+          if (event.type === ROOM_ESCALATION_CREATED_EVENT) {
             const esc = event.data as Escalation
             show('New Escalation', esc.question)
-          } else if (event.type === 'decision:created') {
+          } else if (event.type === ROOM_DECISION_CREATED_EVENT) {
             const dec = event.data as QuorumDecision
             show('New Proposal', dec.proposal)
           }

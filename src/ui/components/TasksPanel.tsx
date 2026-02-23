@@ -1,10 +1,13 @@
 import { usePolling } from '../hooks/usePolling'
+import { useWebSocket } from '../hooks/useWebSocket'
 import type { Task, TaskRun, Worker, ConsoleLogEntry } from '@shared/types'
 import { formatRelativeTime } from '../utils/time'
 import { useState, useEffect, useRef } from 'react'
 import { useContainerWidth } from '../hooks/useContainerWidth'
 import { api } from '../lib/client'
+import { wsClient, type WsMessage } from '../lib/ws'
 import { Select } from './Select'
+import { AutoModeLockModal, AUTO_MODE_LOCKED_BUTTON_CLASS, modeAwareButtonClass, useAutonomyControlGate } from './AutonomyControlGate'
 
 type StatusFilter = 'all' | 'active' | 'paused' | 'completed'
 
@@ -189,15 +192,35 @@ function ConsoleView({ runId }: { runId: number }): React.JSX.Element {
         const newEntries = await api.runs.getLogs(runId, lastSeqRef.current, 50)
         if (newEntries.length > 0 && mounted) {
           lastSeqRef.current = newEntries[newEntries.length - 1].seq
-          setEntries(prev => [...prev.slice(-150), ...newEntries])
+          setEntries(prev => {
+            const seen = new Set(prev.map((entry) => entry.seq))
+            const merged = [...prev]
+            for (const entry of newEntries) {
+              if (seen.has(entry.seq)) continue
+              seen.add(entry.seq)
+              merged.push(entry)
+            }
+            return merged.slice(-150)
+          })
         }
       } catch {
         // non-fatal
       }
     }
-    poll()
-    const timer = setInterval(poll, 3000)
-    return () => { mounted = false; clearInterval(timer) }
+    void poll()
+    const unsubscribe = wsClient.subscribe(`run:${runId}`, (event: WsMessage) => {
+      if (event.type !== 'run:log') return
+      const payload = event.data as Partial<ConsoleLogEntry> & { seq?: number; entryType?: string; content?: string }
+      if (typeof payload.seq !== 'number' || typeof payload.entryType !== 'string' || typeof payload.content !== 'string') return
+      const entry: ConsoleLogEntry = { seq: payload.seq, entryType: payload.entryType, content: payload.content }
+      lastSeqRef.current = Math.max(lastSeqRef.current, entry.seq)
+      setEntries(prev => {
+        if (prev.some((candidate) => candidate.seq === entry.seq)) return prev
+        return [...prev.slice(-149), entry]
+      })
+    })
+    const timer = setInterval(() => { void poll() }, 10000)
+    return () => { mounted = false; unsubscribe(); clearInterval(timer) }
   }, [runId])
 
   useEffect(() => {
@@ -361,7 +384,7 @@ function CreateTaskForm({ workers, onCreated, roomId }: { workers: Worker[] | nu
 }
 
 export function TasksPanel({ roomId, autonomyMode }: { roomId?: number | null; autonomyMode: 'auto' | 'semi' }): React.JSX.Element {
-  const semi = autonomyMode === 'semi'
+  const { semi, guard, requestSemiMode, showLockModal, closeLockModal } = useAutonomyControlGate(autonomyMode)
   const [containerRef, containerWidth] = useContainerWidth<HTMLDivElement>()
   const wide = containerWidth >= 600
   const [filter, setFilter] = useState<StatusFilter>(persistedFilter)
@@ -369,12 +392,24 @@ export function TasksPanel({ roomId, autonomyMode }: { roomId?: number | null; a
   const [pendingRuns, setPendingRuns] = useState<Set<number>>(new Set())
   const [consoleTaskId, setConsoleTaskId] = useState<number | null>(null)
   const [showCreateForm, setShowCreateForm] = useState(false)
-  const { data: tasks, refresh, error: tasksError, isLoading } = usePolling(() => api.tasks.list(roomId ?? undefined), 10000)
-  const { data: runningRuns } = usePolling(
+  const { data: tasks, refresh, error: tasksError, isLoading } = usePolling(() => api.tasks.list(roomId ?? undefined), 30000)
+  const { data: runningRuns, refresh: refreshRuns } = usePolling(
     () => api.runs.list(20, { status: 'running' }),
-    5000
+    30000
   )
-  const { data: workers } = usePolling(() => api.workers.list(), 30000)
+  const { data: workers } = usePolling(() => api.workers.list(), 60000)
+  const taskEvent = useWebSocket('tasks')
+  const runsEvent = useWebSocket('runs')
+
+  useEffect(() => {
+    if (taskEvent) refresh()
+  }, [refresh, taskEvent])
+
+  useEffect(() => {
+    if (!runsEvent) return
+    refreshRuns()
+    refresh()
+  }, [refresh, refreshRuns, runsEvent])
 
   function updateFilter(next: StatusFilter): void {
     persistedFilter = next
@@ -493,14 +528,12 @@ export function TasksPanel({ roomId, autonomyMode }: { roomId?: number | null; a
       <div className="px-3 py-1.5 border-b border-border-primary flex items-center gap-2 flex-wrap">
         <h2 className="text-base font-semibold text-text-primary">Tasks</h2>
         <span className="text-xs text-text-muted">{tasks.length} total</span>
-        {semi && (
-          <button
-            onClick={() => setShowCreateForm(!showCreateForm)}
-            className="text-xs px-2.5 py-1.5 rounded-lg bg-interactive text-text-invert hover:bg-interactive-hover"
-          >
-            {showCreateForm ? 'Cancel' : '+ New Task'}
-          </button>
-        )}
+        <button
+          onClick={() => guard(() => setShowCreateForm(!showCreateForm))}
+          className={`text-xs px-2.5 py-1.5 rounded-lg ${modeAwareButtonClass(semi, 'bg-interactive text-text-invert hover:bg-interactive-hover')}`}
+        >
+          {showCreateForm ? 'Cancel' : '+ New Task'}
+        </button>
       </div>
 
       {semi && showCreateForm && (
@@ -628,44 +661,44 @@ export function TasksPanel({ roomId, autonomyMode }: { roomId?: number | null; a
                 {activeRun && consoleTaskId === task.id && (
                   <ConsoleView runId={activeRun.id} />
                 )}
-                {semi && (
-                  <div className="flex flex-wrap gap-2 items-center mt-2">
+                <div className="flex flex-wrap gap-2 items-center mt-2">
+                  <button
+                    onClick={() => guard(() => { void runNow(task.id) })}
+                    disabled={semi && busy}
+                    className={`text-xs px-2.5 py-1.5 rounded-lg disabled:opacity-40 disabled:cursor-not-allowed ${modeAwareButtonClass(semi, 'bg-interactive text-text-invert hover:bg-interactive-hover')}`}
+                  >
+                    {busy ? 'Running' : 'Run'}
+                  </button>
+                  {task.status !== 'completed' && (
                     <button
-                      onClick={() => runNow(task.id)}
-                      disabled={busy}
-                      className="text-xs px-2.5 py-1.5 rounded-lg bg-interactive text-text-invert hover:bg-interactive-hover disabled:opacity-40 disabled:cursor-not-allowed"
+                      onClick={() => guard(() => { void togglePause(task) })}
+                      disabled={semi && busy}
+                      className={`text-xs px-2.5 py-1.5 rounded-lg disabled:opacity-40 disabled:cursor-not-allowed ${modeAwareButtonClass(semi, 'bg-status-warning-bg text-status-warning hover:bg-status-warning-bg')}`}
                     >
-                      {busy ? 'Running' : 'Run'}
+                      {task.status === 'paused' ? 'Resume' : 'Pause'}
                     </button>
-                    {task.status !== 'completed' && (
-                      <button
-                        onClick={() => togglePause(task)}
-                        disabled={busy}
-                        className="text-xs px-2.5 py-1.5 rounded-lg bg-status-warning-bg text-status-warning disabled:opacity-40 disabled:cursor-not-allowed"
-                      >
-                        {task.status === 'paused' ? 'Resume' : 'Pause'}
-                      </button>
-                    )}
+                  )}
+                  <button
+                    onClick={() => guard(() => { void deleteTask(task.id) })}
+                    disabled={semi && busy}
+                    className={`text-xs px-2.5 py-1.5 rounded-lg disabled:opacity-40 disabled:cursor-not-allowed ${modeAwareButtonClass(semi, 'bg-status-error-bg text-status-error hover:bg-status-error-bg')}`}
+                  >
+                    Delete
+                  </button>
+                  {activeRun && (
                     <button
-                      onClick={() => deleteTask(task.id)}
-                      disabled={busy}
-                      className="text-xs px-2.5 py-1.5 rounded-lg bg-status-error-bg text-status-error disabled:opacity-40 disabled:cursor-not-allowed"
+                      onClick={() => setConsoleTaskId(consoleTaskId === task.id ? null : task.id)}
+                      className="text-xs px-2.5 py-1.5 rounded-lg border border-border-primary text-text-muted hover:text-text-secondary hover:bg-surface-hover"
                     >
-                      Delete
+                      {consoleTaskId === task.id ? 'Hide Console' : 'Console'}
                     </button>
-                    {activeRun && (
-                      <button
-                        onClick={() => setConsoleTaskId(consoleTaskId === task.id ? null : task.id)}
-                        className="text-xs px-2.5 py-1.5 rounded-lg border border-border-primary text-text-muted hover:text-text-secondary hover:bg-surface-hover"
-                      >
-                        {consoleTaskId === task.id ? 'Hide Console' : 'Console'}
-                      </button>
-                    )}
-                    {semi && workers && workers.length > 0 && (
-                      <div className="ml-auto min-w-[160px]">
+                  )}
+                  {workers && workers.length > 0 && (
+                    <div className="ml-auto min-w-[160px]">
+                      {semi ? (
                         <Select
                           value={String(task.workerId ?? '')}
-                          onChange={(v) => assignWorker(task.id, v ? Number(v) : null)}
+                          onChange={(v) => { void assignWorker(task.id, v ? Number(v) : null) }}
                           variant="inline"
                           className="text-purple-400"
                           placeholder="No worker"
@@ -674,16 +707,24 @@ export function TasksPanel({ roomId, autonomyMode }: { roomId?: number | null; a
                             ...workers.map(w => ({ value: String(w.id), label: `${w.name}${w.isDefault ? ' (default)' : ''}` }))
                           ]}
                         />
-                      </div>
-                    )}
-                  </div>
-                )}
+                      ) : (
+                        <button
+                          onClick={requestSemiMode}
+                          className={`text-xs px-2.5 py-1.5 rounded-lg w-full text-left ${AUTO_MODE_LOCKED_BUTTON_CLASS}`}
+                        >
+                          Assign Worker
+                        </button>
+                      )}
+                    </div>
+                  )}
+                </div>
               </div>
             )
           })}
         </div>
       )}
       </div>
+      <AutoModeLockModal open={showLockModal} onClose={closeLockModal} />
     </div>
   )
 }

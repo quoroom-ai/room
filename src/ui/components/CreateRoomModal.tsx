@@ -1,20 +1,9 @@
 import { useState, useEffect, useRef } from 'react'
 import { api } from '../lib/client'
 import { storageGet, storageSet } from '../lib/storage'
+import { extractReferralCodeFromLocation, normalizeReferralCode } from '../lib/referrals'
 import type { Room } from '@shared/types'
-
-const PLACEHOLDERS = [
-  'Make money. Find opportunities, execute, and grow revenue autonomously...',
-  'Trade crypto markets: analyze trends, execute trades, manage risk...',
-  'Find freelance dev jobs on Upwork, write proposals, land contracts, deliver code...',
-  'Build and sell micro-SaaS products. Find niches, ship MVPs, acquire users...',
-  'Arbitrage opportunities across DeFi protocols. Monitor spreads, execute swaps...',
-  'Run a content agency: find clients, write copy, invoice, collect payments...',
-  'Flip domain names. Research trending keywords, buy low, sell high...',
-  'Automate dropshipping: find trending products, list on marketplaces, fulfill orders...',
-  'Monitor bounty platforms, pick up bug bounties and coding challenges for pay...',
-  'Do whatever it takes to generate revenue. Be creative, be relentless...',
-]
+import { OBJECTIVE_PLACEHOLDERS } from '../lib/objective-placeholders'
 
 interface CreateRoomModalProps {
   onClose: () => void
@@ -24,7 +13,7 @@ interface CreateRoomModalProps {
 export function CreateRoomModal({ onClose, onCreate }: CreateRoomModalProps): React.JSX.Element {
   const [name, setName] = useState('')
   const [goal, setGoal] = useState('')
-  const [inviteCode, setInviteCode] = useState('')
+  const [referredByCode, setReferredByCode] = useState('')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [placeholderIdx, setPlaceholderIdx] = useState(0)
@@ -34,36 +23,26 @@ export function CreateRoomModal({ onClose, onCreate }: CreateRoomModalProps): Re
   // Auto-focus name input
   useEffect(() => { nameRef.current?.focus() }, [])
 
-  // Auto-fill invite code from: URL param > localStorage > existing rooms
+  // Auto-fill referral code from URL or local storage.
   useEffect(() => {
     if (inviteAutoFilled.current) return
     inviteAutoFilled.current = true
-    const urlParams = new URLSearchParams(window.location.search)
-    const urlCode = urlParams.get('invite')
+    const urlCode = extractReferralCodeFromLocation()
     if (urlCode) {
-      setInviteCode(urlCode)
-      storageSet('quoroom_invite_code', urlCode)
+      setReferredByCode(urlCode)
+      storageSet('quoroom_referred_by_code', urlCode)
       return
     }
-    const stored = storageGet('quoroom_invite_code')
+    const stored = normalizeReferralCode(storageGet('quoroom_referred_by_code'))
     if (stored) {
-      setInviteCode(stored)
-      return
+      setReferredByCode(stored)
     }
-    // Check existing rooms for invite code
-    void api.rooms.list().then(rooms => {
-      const existing = rooms.find(r => r.inviteCode)
-      if (existing?.inviteCode) {
-        setInviteCode(existing.inviteCode)
-        storageSet('quoroom_invite_code', existing.inviteCode)
-      }
-    }).catch(() => {})
   }, [])
 
   // Rotate placeholder every 3s
   useEffect(() => {
     const timer = setInterval(() => {
-      setPlaceholderIdx(prev => (prev + 1) % PLACEHOLDERS.length)
+      setPlaceholderIdx(prev => (prev + 1) % OBJECTIVE_PLACEHOLDERS.length)
     }, 3000)
     return () => clearInterval(timer)
   }, [])
@@ -84,9 +63,9 @@ export function CreateRoomModal({ onClose, onCreate }: CreateRoomModalProps): Re
     setBusy(true)
     setError(null)
     try {
-      const trimCode = inviteCode.trim() || undefined
-      if (trimCode) storageSet('quoroom_invite_code', trimCode)
-      const created = await api.rooms.create({ name: trimName, goal: goal.trim() || undefined, inviteCode: trimCode })
+      const trimCode = normalizeReferralCode(referredByCode) ?? undefined
+      if (trimCode) storageSet('quoroom_referred_by_code', trimCode)
+      const created = await api.rooms.create({ name: trimName, goal: goal.trim() || undefined, referredByCode: trimCode })
       onCreate(created as Room)
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to create room')
@@ -128,18 +107,18 @@ export function CreateRoomModal({ onClose, onCreate }: CreateRoomModalProps): Re
             <textarea
               value={goal}
               onChange={e => setGoal(e.target.value)}
-              placeholder={PLACEHOLDERS[placeholderIdx]}
+              placeholder={OBJECTIVE_PLACEHOLDERS[placeholderIdx]}
               rows={6}
               className="w-full px-3 py-2 rounded-lg bg-surface-secondary border border-border-primary text-sm text-text-primary placeholder:text-text-muted focus:outline-none focus:border-interactive resize-none transition-colors"
             />
           </div>
 
           <div>
-            <label className="block text-sm font-medium text-text-muted mb-1">Referral Code <span className="text-xs font-normal">(optional)</span></label>
+            <label className="block text-sm font-medium text-text-muted mb-1">Referred By Code <span className="text-xs font-normal">(optional)</span></label>
             <input
               type="text"
-              value={inviteCode}
-              onChange={e => setInviteCode(e.target.value)}
+              value={referredByCode}
+              onChange={e => setReferredByCode(e.target.value)}
               placeholder="Enter invite code"
               className="w-full px-3 py-2 rounded-lg bg-surface-secondary border border-border-primary text-sm text-text-primary placeholder:text-text-muted focus:outline-none focus:border-interactive"
             />

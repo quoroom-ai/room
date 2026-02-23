@@ -1,8 +1,11 @@
 import { useState, useEffect } from 'react'
 import { usePolling } from '../hooks/usePolling'
 import { api } from '../lib/client'
+import { ROOM_DECISION_EVENT_TYPES } from '../lib/room-events'
+import { wsClient, type WsMessage } from '../lib/ws'
 import { formatRelativeTime } from '../utils/time'
 import { Select } from './Select'
+import { AutoModeLockModal, modeAwareButtonClass, useAutonomyControlGate } from './AutonomyControlGate'
 import type { QuorumDecision, QuorumVote, Worker } from '@shared/types'
 
 const STATUS_COLORS: Record<string, string> = {
@@ -43,13 +46,13 @@ interface VotesPanelProps {
 }
 
 export function VotesPanel({ roomId, autonomyMode }: VotesPanelProps): React.JSX.Element {
-  const semi = autonomyMode === 'semi'
+  const { semi, guard, requestSemiMode, showLockModal, closeLockModal } = useAutonomyControlGate(autonomyMode)
 
   const { data: decisions, refresh } = usePolling<QuorumDecision[]>(
     () => roomId ? api.decisions.list(roomId) : Promise.resolve([]),
-    5000
+    30000
   )
-  const { data: workers } = usePolling<Worker[]>(() => api.workers.list(), 30000)
+  const { data: workers } = usePolling<Worker[]>(() => api.workers.list(), 60000)
 
   const [expandedId, setExpandedId] = useState<number | null>(null)
   const [votesCache, setVotesCache] = useState<Record<number, QuorumVote[]>>({})
@@ -69,6 +72,15 @@ export function VotesPanel({ roomId, autonomyMode }: VotesPanelProps): React.JSX
   useEffect(() => {
     refresh()
   }, [roomId, refresh])
+
+  useEffect(() => {
+    if (!roomId) return
+    return wsClient.subscribe(`room:${roomId}`, (event: WsMessage) => {
+      if (ROOM_DECISION_EVENT_TYPES.has(event.type)) {
+        void refresh()
+      }
+    })
+  }, [refresh, roomId])
 
   async function handleCreate(): Promise<void> {
     if (!createProposal.trim() || roomId === null) return
@@ -146,14 +158,12 @@ export function VotesPanel({ roomId, autonomyMode }: VotesPanelProps): React.JSX
         {!roomId && (
           <span className="text-xs text-text-muted">Select a room</span>
         )}
-        {semi && (
-          <button
-            onClick={() => setShowCreate(!showCreate)}
-            className="text-xs px-2.5 py-1.5 rounded-lg bg-interactive text-text-invert hover:bg-interactive-hover"
-          >
-            {showCreate ? 'Cancel' : '+ New Proposal'}
-          </button>
-        )}
+        <button
+          onClick={() => guard(() => setShowCreate(!showCreate))}
+          className={`text-xs px-2.5 py-1.5 rounded-lg ${modeAwareButtonClass(semi, 'bg-interactive text-text-invert hover:bg-interactive-hover')}`}
+        >
+          {showCreate ? 'Cancel' : '+ New Proposal'}
+        </button>
       </div>
 
       {allDecisions.length > 0 && (presentStatuses.length > 1 || presentTypes.length > 1) && (
@@ -272,7 +282,7 @@ export function VotesPanel({ roomId, autonomyMode }: VotesPanelProps): React.JSX
                 <div className="px-3 py-1 text-xs font-medium text-text-muted uppercase tracking-wide bg-surface-secondary border-b border-border-primary">
                   Active Voting
                 </div>
-                <div className="p-3 space-y-2">
+                <div className="grid gap-2 p-3 md:grid-cols-2">
                   {active.map(d => (
                     <DecisionRow
                       key={d.id}
@@ -291,6 +301,7 @@ export function VotesPanel({ roomId, autonomyMode }: VotesPanelProps): React.JSX
                       onResolve={(status) => handleResolve(d.id, status)}
                       onVoteWorkerChange={setVoteWorkerId}
                       onVoteReasoningChange={setVoteReasoning}
+                      onLockedControl={requestSemiMode}
                     />
                   ))}
                 </div>
@@ -303,7 +314,7 @@ export function VotesPanel({ roomId, autonomyMode }: VotesPanelProps): React.JSX
                 <div className="px-3 py-1 text-xs font-medium text-text-muted uppercase tracking-wide bg-surface-secondary border-b border-border-primary">
                   History
                 </div>
-                <div className="p-3 space-y-2">
+                <div className="grid gap-2 p-3 md:grid-cols-2">
                   {resolved.map(d => (
                     <DecisionRow
                       key={d.id}
@@ -322,6 +333,7 @@ export function VotesPanel({ roomId, autonomyMode }: VotesPanelProps): React.JSX
                       onResolve={(status) => handleResolve(d.id, status)}
                       onVoteWorkerChange={setVoteWorkerId}
                       onVoteReasoningChange={setVoteReasoning}
+                      onLockedControl={requestSemiMode}
                     />
                   ))}
                 </div>
@@ -330,6 +342,7 @@ export function VotesPanel({ roomId, autonomyMode }: VotesPanelProps): React.JSX
           </>
         )}
       </div>
+      <AutoModeLockModal open={showLockModal} onClose={closeLockModal} />
     </div>
   )
 }
@@ -350,12 +363,13 @@ interface DecisionRowProps {
   onResolve: (status: string) => void
   onVoteWorkerChange: (v: number | '') => void
   onVoteReasoningChange: (v: string) => void
+  onLockedControl: () => void
 }
 
 function DecisionRow({
   decision: d, workerMap, workers, expanded, votes,
   voteWorkerId, voteReasoning, voteError, semi,
-  onToggle, onVote, onKeeperVote, onResolve, onVoteWorkerChange, onVoteReasoningChange
+  onToggle, onVote, onKeeperVote, onResolve, onVoteWorkerChange, onVoteReasoningChange, onLockedControl
 }: DecisionRowProps): React.JSX.Element {
   const isVoting = d.status === 'voting'
 
@@ -481,23 +495,19 @@ function DecisionRow({
                 >
                   Abstain
                 </button>
-                {semi && (
-                  <>
-                    <div className="flex-1" />
-                    <button
-                      onClick={() => onResolve('approved')}
-                      className="text-xs px-3 py-2 md:px-2.5 md:py-1.5 rounded-lg border border-emerald-200 text-status-success hover:bg-emerald-50"
-                    >
-                      Approve
-                    </button>
-                    <button
-                      onClick={() => onResolve('rejected')}
-                      className="text-xs px-3 py-2 md:px-2.5 md:py-1.5 rounded-lg border border-red-200 text-status-error hover:bg-red-50"
-                    >
-                      Reject
-                    </button>
-                  </>
-                )}
+                <div className="flex-1" />
+                <button
+                  onClick={() => semi ? onResolve('approved') : onLockedControl()}
+                  className={`text-xs px-3 py-2 md:px-2.5 md:py-1.5 rounded-lg border ${modeAwareButtonClass(semi, 'border-emerald-200 text-status-success hover:bg-emerald-50')}`}
+                >
+                  Approve
+                </button>
+                <button
+                  onClick={() => semi ? onResolve('rejected') : onLockedControl()}
+                  className={`text-xs px-3 py-2 md:px-2.5 md:py-1.5 rounded-lg border ${modeAwareButtonClass(semi, 'border-red-200 text-status-error hover:bg-red-50')}`}
+                >
+                  Reject
+                </button>
               </div>
             </div>
           )}

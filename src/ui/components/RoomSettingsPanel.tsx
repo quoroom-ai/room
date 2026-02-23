@@ -2,14 +2,20 @@ import { useState, useRef, useEffect } from 'react'
 import { usePolling } from '../hooks/usePolling'
 import { api } from '../lib/client'
 import { getCachedToken } from '../lib/auth'
+import {
+  ROOM_BALANCE_EVENT_TYPES,
+  ROOM_SETTINGS_REFRESH_EVENT_TYPES,
+} from '../lib/room-events'
 import { storageGet, storageRemove } from '../lib/storage'
 import { wsClient, type WsMessage } from '../lib/ws'
 import { Select } from './Select'
 import { CopyAddressButton } from './CopyAddressButton'
 import { PromptDialog } from './PromptDialog'
+import { ConfirmDialog } from './ConfirmDialog'
 import { RoomSetupGuideModal } from './RoomSetupGuideModal'
 import type { Room, Wallet, RevenueSummary, OnChainBalance } from '@shared/types'
 import { FREE_OLLAMA_MODEL_OPTIONS } from '@shared/ollama-models'
+import { OBJECTIVE_PLACEHOLDERS } from '../lib/objective-placeholders'
 
 interface RoomSettingsPanelProps {
   roomId: number | null
@@ -85,64 +91,112 @@ interface ProviderStatusEntry {
   installSession: ProviderInstallSession | null
 }
 
+interface InlineSpinnerProps {
+  label?: string
+}
+
+function InlineSpinner({ label = 'Applying...' }: InlineSpinnerProps): React.JSX.Element {
+  return (
+    <span className="inline-flex items-center gap-1.5 text-xs text-text-muted">
+      <span className="w-3 h-3 rounded-full border border-border-primary border-t-text-muted animate-spin" />
+      {label}
+    </span>
+  )
+}
+
 function getErrorMessage(err: unknown): string {
   return err instanceof Error ? err.message : 'Unknown error'
 }
 
 export function RoomSettingsPanel({ roomId }: RoomSettingsPanelProps): React.JSX.Element {
-  const { data: rooms, refresh } = usePolling<Room[]>(() => api.rooms.list(), 10000)
-  const { data: wallet } = usePolling<Wallet | null>(
+  const { data: rooms, refresh } = usePolling<Room[]>(() => api.rooms.list(), 60000)
+  const { data: wallet, refresh: refreshWallet } = usePolling<Wallet | null>(
     () => roomId ? api.wallet.get(roomId).catch(() => null) : Promise.resolve(null),
-    10000
+    60000
   )
-  const { data: revenueSummary } = usePolling<RevenueSummary | null>(
+  const { data: revenueSummary, refresh: refreshRevenueSummary } = usePolling<RevenueSummary | null>(
     () => roomId ? api.wallet.summary(roomId).catch(() => null) : Promise.resolve(null),
-    30000
+    60000
   )
-  const { data: onChainBalance } = usePolling<OnChainBalance | null>(
+  const { data: onChainBalance, refresh: refreshOnChainBalance } = usePolling<OnChainBalance | null>(
     () => roomId && wallet ? api.wallet.balance(roomId).catch(() => null) : Promise.resolve(null),
-    30000
+    90000
   )
   const { data: providerStatus, refresh: refreshProviderStatus } = usePolling<{
     codex: ProviderStatusEntry
     claude: ProviderStatusEntry
   } | null>(
     () => api.providers.status().catch(() => null),
-    10000
+    120000
   )
   const [queenRunning, setQueenRunning] = useState<Record<number, boolean>>({})
   const [queenModel, setQueenModel] = useState<Record<number, string | null>>({})
   const [queenAuth, setQueenAuth] = useState<Record<number, QueenStatus['auth'] | null>>({})
   const pendingModelUpdate = useRef(false)
-  const queenStatusLoaded = useRef(false)
 
-  // Fetch queen status for all rooms
-  const fetchQueenStatusRef = useRef(async (roomList: Room[]) => {
-    const entries = await Promise.all(
-      roomList.map(async r => {
-        const q = await api.rooms.queenStatus(r.id).catch(() => null)
-        return [r.id, q] as const
-      })
-    )
-    setQueenRunning(Object.fromEntries(entries.map(([id, q]) => [id, q?.running ?? false])))
+  // Fetch queen status for the selected room only.
+  const fetchQueenStatusRef = useRef(async (targetRoom: Room | null) => {
+    if (!targetRoom) return
+    if (!targetRoom.queenWorkerId) {
+      setQueenRunning(prev => ({ ...prev, [targetRoom.id]: false }))
+      if (!pendingModelUpdate.current) {
+        setQueenModel(prev => ({ ...prev, [targetRoom.id]: null }))
+        setQueenAuth(prev => ({ ...prev, [targetRoom.id]: null }))
+      }
+      return
+    }
+
+    const q = await api.rooms.queenStatus(targetRoom.id).catch(() => null)
+    setQueenRunning(prev => ({ ...prev, [targetRoom.id]: q?.running ?? false }))
     if (!pendingModelUpdate.current) {
-      setQueenModel(Object.fromEntries(entries.map(([id, q]) => [id, q?.model ?? null])))
-      setQueenAuth(Object.fromEntries(entries.map(([id, q]) => [id, q?.auth ?? null])))
+      setQueenModel(prev => ({ ...prev, [targetRoom.id]: q?.model ?? null }))
+      setQueenAuth(prev => ({ ...prev, [targetRoom.id]: q?.auth ?? null }))
     }
   })
 
-  // Fetch queen status immediately when rooms first load (no 5s delay)
+  // Sync editingName/editingGoal when selected room changes
+  const currentRoom = rooms?.find(r => r.id === roomId) ?? null
+  const currentRoomRef = useRef<Room | null>(currentRoom)
+
   useEffect(() => {
-    if (!rooms || rooms.length === 0 || queenStatusLoaded.current) return
-    queenStatusLoaded.current = true
-    void fetchQueenStatusRef.current(rooms)
-  }, [rooms])
+    currentRoomRef.current = currentRoom
+  }, [currentRoom])
+
+  // Fetch queen status immediately when selected room is available.
+  useEffect(() => {
+    if (!currentRoom) return
+    void fetchQueenStatusRef.current(currentRoom)
+  }, [currentRoom?.id, currentRoom?.queenWorkerId])
 
   usePolling(async () => {
-    if (!rooms || rooms.length === 0) return {}
-    await fetchQueenStatusRef.current(rooms)
+    if (!currentRoom) return {}
+    await fetchQueenStatusRef.current(currentRoom)
     return {}
-  }, 5000)
+  }, 60000)
+
+  useEffect(() => {
+    if (!roomId) return
+    return wsClient.subscribe(`room:${roomId}`, (event: WsMessage) => {
+      if (ROOM_SETTINGS_REFRESH_EVENT_TYPES.has(event.type)) {
+        void refresh()
+        if (currentRoomRef.current) {
+          void fetchQueenStatusRef.current(currentRoomRef.current)
+        }
+      }
+      if (ROOM_BALANCE_EVENT_TYPES.has(event.type)) {
+        void refreshWallet()
+        void refreshRevenueSummary()
+        void refreshOnChainBalance()
+      }
+    })
+  }, [refresh, refreshOnChainBalance, refreshRevenueSummary, refreshWallet, roomId])
+
+  useEffect(() => {
+    if (!roomId) return
+    return wsClient.subscribe('providers', () => {
+      void refreshProviderStatus()
+    })
+  }, [refreshProviderStatus, roomId])
 
   const [roomOverrides, setRoomOverrides] = useState<Record<number, Partial<Room>>>({})
   const [apiKeyPrompt, setApiKeyPrompt] = useState<{
@@ -167,19 +221,20 @@ export function RoomSettingsPanel({ roomId }: RoomSettingsPanelProps): React.JSX
   const [queenModelSetupTick, setQueenModelSetupTick] = useState<number>(Date.now())
   const [archiveBusy, setArchiveBusy] = useState(false)
   const [archiveError, setArchiveError] = useState<string | null>(null)
+  const [showArchiveConfirm, setShowArchiveConfirm] = useState(false)
   const [showCryptoTopUp, setShowCryptoTopUp] = useState(false)
   const [showSetupGuide, setShowSetupGuide] = useState(false)
-  const [editingInviteCode, setEditingInviteCode] = useState('')
+  const [objectivePlaceholderIdx, setObjectivePlaceholderIdx] = useState(0)
+  const [pendingSwitches, setPendingSwitches] = useState<Record<string, boolean>>({})
+  const pendingSwitchTokensRef = useRef<Record<string, number>>({})
+  const pendingSwitchTimeoutsRef = useRef<Map<string, number>>(new Map())
 
-  // Sync editingName/editingGoal when selected room changes
-  const currentRoom = rooms?.find(r => r.id === roomId) ?? null
   useEffect(() => {
     if (currentRoom) {
       setEditingName(currentRoom.name)
       setEditingGoal(currentRoom.goal ?? '')
-      setEditingInviteCode(currentRoom.inviteCode ?? '')
     }
-  }, [currentRoom?.name, currentRoom?.goal, currentRoom?.id, currentRoom?.inviteCode])
+  }, [currentRoom?.name, currentRoom?.goal, currentRoom?.id])
 
   // Auto-open setup popup flow once immediately after creating a room.
   useEffect(() => {
@@ -196,6 +251,13 @@ export function RoomSettingsPanel({ roomId }: RoomSettingsPanelProps): React.JSX
     const timer = window.setInterval(() => setQueenModelSetupTick(Date.now()), 500)
     return () => window.clearInterval(timer)
   }, [queenModelSetup])
+
+  useEffect(() => {
+    const timer = window.setInterval(() => {
+      setObjectivePlaceholderIdx((prev) => (prev + 1) % OBJECTIVE_PLACEHOLDERS.length)
+    }, 3000)
+    return () => window.clearInterval(timer)
+  }, [])
 
   function upsertProviderAuthSession(session: ProviderAuthSession): void {
     setProviderAuthSessions(prev => ({ ...prev, [session.provider]: session }))
@@ -382,26 +444,85 @@ export function RoomSettingsPanel({ roomId }: RoomSettingsPanelProps): React.JSX
     installUnsubs.clear()
   }, [])
 
+  useEffect(() => () => {
+    const timeouts = pendingSwitchTimeoutsRef.current
+    for (const timeoutId of timeouts.values()) {
+      window.clearTimeout(timeoutId)
+    }
+    timeouts.clear()
+  }, [])
+
+  function startSwitchPending(key: string): number {
+    const token = (pendingSwitchTokensRef.current[key] ?? 0) + 1
+    pendingSwitchTokensRef.current[key] = token
+    setPendingSwitches((prev) => ({ ...prev, [key]: true }))
+
+    const existingTimeout = pendingSwitchTimeoutsRef.current.get(key)
+    if (existingTimeout) window.clearTimeout(existingTimeout)
+    const timeoutId = window.setTimeout(() => {
+      if (pendingSwitchTokensRef.current[key] !== token) return
+      setPendingSwitches((prev) => {
+        if (!prev[key]) return prev
+        const next = { ...prev }
+        delete next[key]
+        return next
+      })
+      pendingSwitchTimeoutsRef.current.delete(key)
+    }, 20_000)
+    pendingSwitchTimeoutsRef.current.set(key, timeoutId)
+    return token
+  }
+
+  function stopSwitchPending(key: string, token: number): void {
+    if (pendingSwitchTokensRef.current[key] !== token) return
+    const timeoutId = pendingSwitchTimeoutsRef.current.get(key)
+    if (timeoutId) window.clearTimeout(timeoutId)
+    pendingSwitchTimeoutsRef.current.delete(key)
+    setPendingSwitches((prev) => {
+      if (!prev[key]) return prev
+      const next = { ...prev }
+      delete next[key]
+      return next
+    })
+  }
+
+  function isSwitchPending(key: string): boolean {
+    return pendingSwitches[key] === true
+  }
+
+  async function withSwitchPending<T>(key: string, fn: () => Promise<T>): Promise<T> {
+    const token = startSwitchPending(key)
+    try {
+      return await fn()
+    } finally {
+      stopSwitchPending(key, token)
+    }
+  }
+
   function optimistic(id: number, patch: Partial<Room>): void {
     setRoomOverrides(prev => ({ ...prev, [id]: { ...prev[id], ...patch } }))
   }
 
   async function handleToggleVisibility(room: Room): Promise<void> {
-    const next = room.visibility === 'public' ? 'private' : 'public'
-    optimistic(room.id, { visibility: next })
-    await api.rooms.update(room.id, { visibility: next })
-    refresh()
+    await withSwitchPending(`visibility:${room.id}`, async () => {
+      const next = room.visibility === 'public' ? 'private' : 'public'
+      optimistic(room.id, { visibility: next })
+      await api.rooms.update(room.id, { visibility: next })
+      refresh()
+    })
   }
 
   async function handleSetAutonomy(room: Room, mode: 'auto' | 'semi'): Promise<void> {
-    optimistic(room.id, { autonomyMode: mode })
-    try {
-      await api.rooms.update(room.id, { autonomyMode: mode })
-      refresh()
-    } catch (e) {
-      console.error('Failed to update autonomy mode:', e)
-      optimistic(room.id, { autonomyMode: room.autonomyMode })
-    }
+    await withSwitchPending(`autonomy:${room.id}`, async () => {
+      optimistic(room.id, { autonomyMode: mode })
+      try {
+        await api.rooms.update(room.id, { autonomyMode: mode })
+        refresh()
+      } catch (e) {
+        console.error('Failed to update autonomy mode:', e)
+        optimistic(room.id, { autonomyMode: room.autonomyMode })
+      }
+    })
   }
 
   async function handleChangeMaxTasks(room: Room, delta: number): Promise<void> {
@@ -427,9 +548,11 @@ export function RoomSettingsPanel({ roomId }: RoomSettingsPanelProps): React.JSX
   }
 
   async function handleSetQuietHours(room: Room, from: string | null, until: string | null): Promise<void> {
-    optimistic(room.id, { queenQuietFrom: from, queenQuietUntil: until })
-    await api.rooms.update(room.id, { queenQuietFrom: from, queenQuietUntil: until })
-    refresh()
+    await withSwitchPending(`quiet-hours:${room.id}`, async () => {
+      optimistic(room.id, { queenQuietFrom: from, queenQuietUntil: until })
+      await api.rooms.update(room.id, { queenQuietFrom: from, queenQuietUntil: until })
+      refresh()
+    })
   }
 
   async function handleToggleQuietHours(room: Room): Promise<void> {
@@ -667,14 +790,26 @@ export function RoomSettingsPanel({ roomId }: RoomSettingsPanelProps): React.JSX
     }
   }
 
-  async function handleQueenStart(roomId: number): Promise<void> {
-    await api.rooms.queenStart(roomId)
-    setQueenRunning(prev => ({ ...prev, [roomId]: true }))
+  async function handleQueenStart(targetRoomId: number): Promise<void> {
+    await withSwitchPending(`queen-running:${targetRoomId}`, async () => {
+      setQueenRunning(prev => ({ ...prev, [targetRoomId]: true }))
+      try {
+        await api.rooms.queenStart(targetRoomId)
+      } catch {
+        setQueenRunning(prev => ({ ...prev, [targetRoomId]: false }))
+      }
+    })
   }
 
-  async function handleQueenStop(roomId: number): Promise<void> {
-    await api.rooms.queenStop(roomId)
-    setQueenRunning(prev => ({ ...prev, [roomId]: false }))
+  async function handleQueenStop(targetRoomId: number): Promise<void> {
+    await withSwitchPending(`queen-running:${targetRoomId}`, async () => {
+      setQueenRunning(prev => ({ ...prev, [targetRoomId]: false }))
+      try {
+        await api.rooms.queenStop(targetRoomId)
+      } catch {
+        setQueenRunning(prev => ({ ...prev, [targetRoomId]: true }))
+      }
+    })
   }
 
 
@@ -688,6 +823,11 @@ export function RoomSettingsPanel({ roomId }: RoomSettingsPanelProps): React.JSX
   }
 
   const room = { ...rawRoom, ...roomOverrides[rawRoom.id] }
+  const autonomyPending = isSwitchPending(`autonomy:${room.id}`)
+  const quietHoursPending = isSwitchPending(`quiet-hours:${room.id}`)
+  const visibilityPending = isSwitchPending(`visibility:${room.id}`)
+  const governancePending = isSwitchPending(`governance:${room.id}`)
+  const queenRunningPending = isSwitchPending(`queen-running:${room.id}`)
   const quietEnabled = room.queenQuietFrom !== null
   const activeQueenAuth = queenAuth[room.id] ?? null
   const hasQueenModelLoaded = Object.prototype.hasOwnProperty.call(queenModel, room.id)
@@ -796,17 +936,21 @@ export function RoomSettingsPanel({ roomId }: RoomSettingsPanelProps): React.JSX
     )
   }
 
-  function toggleRow(label: string, value: boolean, onChange: () => void, description?: string): React.JSX.Element {
+  function toggleRow(label: string, value: boolean, onChange: () => void, description?: string, pending?: boolean): React.JSX.Element {
     return (
       <div className="py-2">
         <div className="flex items-center justify-between text-sm">
           <span className="text-text-secondary">{label}</span>
-          <button
-            onClick={onChange}
-            className={`w-9 h-5 rounded-full transition-colors relative ${value ? 'bg-interactive' : 'bg-surface-tertiary'}`}
-          >
-            <span className={`absolute top-0.5 w-3 h-3 bg-white rounded-full transition-transform ${value ? 'left-4' : 'left-0.5'}`} />
-          </button>
+          <div className="flex items-center gap-2">
+            {pending && <InlineSpinner />}
+            <button
+              onClick={onChange}
+              disabled={pending}
+              className={`w-9 h-5 rounded-full transition-colors relative disabled:opacity-70 disabled:cursor-not-allowed ${value ? 'bg-interactive' : 'bg-surface-tertiary'}`}
+            >
+              <span className={`absolute top-0.5 w-3 h-3 bg-white rounded-full transition-transform ${value ? 'left-4' : 'left-0.5'}`} />
+            </button>
+          </div>
         </div>
         {description && <p className="text-xs text-text-muted mt-0.5 leading-tight">{description}</p>}
       </div>
@@ -815,7 +959,6 @@ export function RoomSettingsPanel({ roomId }: RoomSettingsPanelProps): React.JSX
 
   const nameChanged = editingName.trim() !== '' && editingName.trim() !== room.name
   const goalChanged = editingGoal.trim() !== (room.goal ?? '')
-  const inviteCodeChanged = editingInviteCode.trim() !== (room.inviteCode ?? '')
 
   async function handleSaveName(): Promise<void> {
     const trimmed = editingName.trim()
@@ -833,16 +976,7 @@ export function RoomSettingsPanel({ roomId }: RoomSettingsPanelProps): React.JSX
     refresh()
   }
 
-  async function handleSaveInviteCode(): Promise<void> {
-    const trimmed = editingInviteCode.trim()
-    if (trimmed === (room.inviteCode ?? '')) return
-    optimistic(room.id, { inviteCode: trimmed || null })
-    await api.rooms.update(room.id, { inviteCode: trimmed || null })
-    refresh()
-  }
-
   async function handleArchiveRoom(): Promise<void> {
-    if (!window.confirm(`Archive "${room.name}"? This will stop the queen, cancel all stations, and hide the room.`)) return
     setArchiveBusy(true)
     setArchiveError(null)
     const issues: string[] = []
@@ -891,14 +1025,14 @@ export function RoomSettingsPanel({ roomId }: RoomSettingsPanelProps): React.JSX
       {/* Room name */}
       <div className="mb-4">
         <label className="block text-sm font-medium text-text-secondary mb-1">Room Name</label>
-        <div className="flex gap-2">
+        <div className="flex gap-2 max-w-sm">
           <input
             type="text"
             value={editingName}
             onChange={e => setEditingName(e.target.value)}
             onKeyDown={e => { if (e.key === 'Enter') void handleSaveName() }}
             onBlur={() => void handleSaveName()}
-            className="flex-1 px-3 py-2 rounded-lg bg-surface-secondary border border-border-primary text-sm text-text-primary focus:outline-none focus:border-interactive"
+            className="w-full px-3 py-2 rounded-lg bg-surface-secondary border border-border-primary text-sm text-text-primary focus:outline-none focus:border-interactive"
           />
           {nameChanged && (
             <button
@@ -919,7 +1053,7 @@ export function RoomSettingsPanel({ roomId }: RoomSettingsPanelProps): React.JSX
           onChange={e => setEditingGoal(e.target.value)}
           onBlur={() => void handleSaveGoal()}
           rows={4}
-          placeholder="What should this room accomplish?"
+          placeholder={OBJECTIVE_PLACEHOLDERS[objectivePlaceholderIdx]}
           className="w-full px-3 py-2 rounded-lg bg-surface-secondary border border-border-primary text-sm text-text-primary placeholder:text-text-muted focus:outline-none focus:border-interactive resize-none"
         />
         {goalChanged && (
@@ -949,19 +1083,24 @@ export function RoomSettingsPanel({ roomId }: RoomSettingsPanelProps): React.JSX
 
               {/* Autonomy mode */}
               {row('Control',
-                <div className="flex rounded-lg overflow-hidden border border-border-primary">
-                  <button
-                    onClick={() => handleSetAutonomy(room, 'auto')}
-                    className={`px-4 py-2 text-sm font-medium transition-colors ${
-                      room.autonomyMode === 'auto' ? 'bg-interactive text-text-invert' : 'bg-surface-primary text-text-muted hover:bg-surface-hover'
-                    }`}
-                  >Auto</button>
-                  <button
-                    onClick={() => handleSetAutonomy(room, 'semi')}
-                    className={`px-4 py-2 text-sm font-medium transition-colors ${
-                      room.autonomyMode === 'semi' ? 'bg-interactive text-text-invert' : 'bg-surface-primary text-text-muted hover:bg-surface-hover'
-                    }`}
-                  >Semi</button>
+                <div className="flex items-center gap-2">
+                  {autonomyPending && <InlineSpinner />}
+                  <div className="flex rounded-lg overflow-hidden border border-border-primary">
+                    <button
+                      onClick={() => { void handleSetAutonomy(room, 'auto') }}
+                      disabled={autonomyPending}
+                      className={`px-4 py-2 text-sm font-medium transition-colors disabled:opacity-70 disabled:cursor-not-allowed ${
+                        room.autonomyMode === 'auto' ? 'bg-interactive text-text-invert' : 'bg-surface-primary text-text-muted hover:bg-surface-hover'
+                      }`}
+                    >Auto</button>
+                    <button
+                      onClick={() => { void handleSetAutonomy(room, 'semi') }}
+                      disabled={autonomyPending}
+                      className={`px-4 py-2 text-sm font-medium transition-colors disabled:opacity-70 disabled:cursor-not-allowed ${
+                        room.autonomyMode === 'semi' ? 'bg-interactive text-text-invert' : 'bg-surface-primary text-text-muted hover:bg-surface-hover'
+                      }`}
+                    >Semi</button>
+                  </div>
                 </div>,
                 'Auto: agents control everything, UI is read-only. Semi: full UI controls for the keeper.'
               )}
@@ -1301,20 +1440,22 @@ export function RoomSettingsPanel({ roomId }: RoomSettingsPanelProps): React.JSX
 
               {/* Quiet hours */}
               <div className="py-2 space-y-2">
-                {toggleRow('Quiet hours', quietEnabled, () => handleToggleQuietHours(room), 'Pause the queen during off-hours')}
+                {toggleRow('Quiet hours', quietEnabled, () => { void handleToggleQuietHours(room) }, 'Pause the queen during off-hours', quietHoursPending)}
                 {quietEnabled && (
                   <div className="flex items-center gap-2 pl-0">
                     <input
                       type="time"
                       value={room.queenQuietFrom ?? '22:00'}
-                      onChange={(e) => handleSetQuietHours(room, e.target.value, room.queenQuietUntil ?? '08:00')}
+                      onChange={(e) => { void handleSetQuietHours(room, e.target.value, room.queenQuietUntil ?? '08:00') }}
+                      disabled={quietHoursPending}
                       className="text-sm border border-border-primary rounded-lg px-2.5 py-1.5 bg-surface-primary text-text-secondary"
                     />
                     <span className="text-text-muted text-sm">–</span>
                     <input
                       type="time"
                       value={room.queenQuietUntil ?? '08:00'}
-                      onChange={(e) => handleSetQuietHours(room, room.queenQuietFrom ?? '22:00', e.target.value)}
+                      onChange={(e) => { void handleSetQuietHours(room, room.queenQuietFrom ?? '22:00', e.target.value) }}
+                      disabled={quietHoursPending}
                       className="text-sm border border-border-primary rounded-lg px-2.5 py-1.5 bg-surface-primary text-text-secondary"
                     />
                   </div>
@@ -1322,20 +1463,28 @@ export function RoomSettingsPanel({ roomId }: RoomSettingsPanelProps): React.JSX
               </div>
 
               {/* Queen start/stop */}
-              <div className="pt-2 flex gap-2">
+              <div className="pt-2 flex gap-2 items-center">
                 {room.status === 'active' && (
-                  queenRunning[room.id] ? (
+                  !Object.prototype.hasOwnProperty.call(queenRunning, room.id) ? (
                     <button
-                      onClick={() => handleQueenStop(room.id)}
-                      className="text-sm px-2.5 py-1.5 rounded-lg border text-orange-600 border-orange-200 hover:border-orange-300 transition-colors"
+                      disabled
+                      className="text-sm px-2.5 py-1.5 rounded-lg border border-border-primary text-text-muted opacity-70 cursor-not-allowed"
+                    >Checking...</button>
+                  ) : queenRunning[room.id] ? (
+                    <button
+                      onClick={() => { void handleQueenStop(room.id) }}
+                      disabled={queenRunningPending}
+                      className="text-sm px-2.5 py-1.5 rounded-lg border text-orange-600 border-orange-200 hover:border-orange-300 transition-colors disabled:opacity-70 disabled:cursor-not-allowed"
                     >Stop Queen</button>
                   ) : (
                     <button
-                      onClick={() => handleQueenStart(room.id)}
-                      className="text-sm px-2.5 py-1.5 rounded-lg border text-status-success border-green-200 hover:border-green-300 transition-colors"
+                      onClick={() => { void handleQueenStart(room.id) }}
+                      disabled={queenRunningPending}
+                      className="text-sm px-2.5 py-1.5 rounded-lg border text-status-success border-green-200 hover:border-green-300 transition-colors disabled:opacity-70 disabled:cursor-not-allowed"
                     >Start Queen</button>
                   )
                 )}
+                {room.status === 'active' && queenRunningPending && <InlineSpinner />}
               </div>
             </div>
           </div>
@@ -1425,39 +1574,22 @@ export function RoomSettingsPanel({ roomId }: RoomSettingsPanelProps): React.JSX
                   <p className="text-xs text-text-muted mt-0.5 leading-tight">Visible on the public leaderboard at quoroom.ai. Shows objective, balances, and activity only.</p>
                 </div>
                 <button
-                  onClick={() => handleToggleVisibility(room)}
+                  onClick={() => { void handleToggleVisibility(room) }}
+                  disabled={visibilityPending}
                   className={`w-8 h-4 rounded-full transition-colors relative ml-3 flex-shrink-0 ${
                     room.visibility === 'public' ? 'bg-interactive' : 'bg-surface-tertiary'
-                  }`}
+                  } ${visibilityPending ? 'opacity-70 cursor-not-allowed' : ''}`}
                 >
                   <span className={`absolute top-0.5 w-3 h-3 bg-white rounded-full transition-transform ${
                     room.visibility === 'public' ? 'left-4' : 'left-0.5'
                   }`} />
                 </button>
               </div>
-              <div className="py-1">
-                <label className="block text-sm text-text-secondary mb-1">Referral Code</label>
-                <div className="flex gap-2">
-                  <input
-                    type="text"
-                    value={editingInviteCode}
-                    onChange={e => setEditingInviteCode(e.target.value)}
-                    onKeyDown={e => { if (e.key === 'Enter') void handleSaveInviteCode() }}
-                    onBlur={() => void handleSaveInviteCode()}
-                    placeholder="Enter invite code"
-                    className="flex-1 px-3 py-2 rounded-lg bg-surface-primary border border-border-primary text-sm text-text-primary placeholder:text-text-muted focus:outline-none focus:border-interactive"
-                  />
-                  {inviteCodeChanged && (
-                    <button
-                      onClick={() => void handleSaveInviteCode()}
-                      className="px-3 py-2 rounded-lg bg-interactive text-text-invert text-sm font-medium hover:bg-interactive-hover transition-colors"
-                    >
-                      Save
-                    </button>
-                  )}
+              {visibilityPending && (
+                <div className="pt-0.5">
+                  <InlineSpinner />
                 </div>
-                <p className="text-xs text-text-muted mt-0.5">Links this room to a referrer's network</p>
-              </div>
+              )}
             </div>
           </div>
 
@@ -1477,20 +1609,23 @@ export function RoomSettingsPanel({ roomId }: RoomSettingsPanelProps): React.JSX
                     <button
                       key={preset.key}
                       onClick={async () => {
-                        const configUpdate = preset.key === 'open'
-                          ? { sealedBallot: false, voterHealth: false, minVoters: 0 }
-                          : preset.key === 'sealed'
-                            ? { sealedBallot: true, voterHealth: false, minVoters: 0 }
-                            : { sealedBallot: true, voterHealth: true, voterHealthThreshold: 0.5, minVoters: 2 }
-                        optimistic(room.id, { config: { ...room.config, ...configUpdate } })
-                        await api.rooms.update(room.id, { config: { ...room.config, ...configUpdate } })
-                        refresh()
+                        await withSwitchPending(`governance:${room.id}`, async () => {
+                          const configUpdate = preset.key === 'open'
+                            ? { sealedBallot: false, voterHealth: false, minVoters: 0 }
+                            : preset.key === 'sealed'
+                              ? { sealedBallot: true, voterHealth: false, minVoters: 0 }
+                              : { sealedBallot: true, voterHealth: true, voterHealthThreshold: 0.5, minVoters: 2 }
+                          optimistic(room.id, { config: { ...room.config, ...configUpdate } })
+                          await api.rooms.update(room.id, { config: { ...room.config, ...configUpdate } })
+                          refresh()
+                        })
                       }}
+                      disabled={governancePending}
                       className={`px-3 py-2 rounded-lg text-xs font-medium border transition-colors text-left ${
                         isActive
                           ? 'border-interactive bg-interactive-bg text-interactive'
                           : 'border-border-primary bg-surface-primary text-text-secondary hover:bg-surface-hover'
-                      }`}
+                      } ${governancePending ? 'opacity-70 cursor-not-allowed' : ''}`}
                     >
                       <div className="font-semibold">{preset.label}</div>
                       <div className="text-xs opacity-70 mt-0.5">{preset.desc}</div>
@@ -1498,6 +1633,7 @@ export function RoomSettingsPanel({ roomId }: RoomSettingsPanelProps): React.JSX
                   )
                 })}
               </div>
+              {governancePending && <InlineSpinner />}
               {!(!room.config.sealedBallot && !room.config.voterHealth && room.config.minVoters === 0) &&
                !(room.config.sealedBallot && !room.config.voterHealth && room.config.minVoters === 0) &&
                !(room.config.sealedBallot && room.config.voterHealth && room.config.minVoters >= 2) && (
@@ -1515,7 +1651,7 @@ export function RoomSettingsPanel({ roomId }: RoomSettingsPanelProps): React.JSX
           <p className="text-sm text-text-secondary mb-1">Archive this room</p>
           <p className="text-xs text-text-muted mb-3">Stops the queen, cancels all stations, and hides the room from the sidebar.</p>
           <button
-            onClick={() => void handleArchiveRoom()}
+            onClick={() => setShowArchiveConfirm(true)}
             disabled={archiveBusy}
             className="px-4 py-2 rounded-lg border border-status-error text-status-error text-sm font-medium hover:bg-status-error-bg transition-colors disabled:opacity-50"
           >
@@ -1554,6 +1690,20 @@ export function RoomSettingsPanel({ roomId }: RoomSettingsPanelProps): React.JSX
             if (apiKeyBusyRoomId === apiKeyPrompt.roomId) return
             setApiKeyPrompt(null)
           }}
+        />
+      )}
+
+      {showArchiveConfirm && (
+        <ConfirmDialog
+          title={`Archive "${room.name}"?`}
+          message="This will stop the queen, cancel all stations, and hide the room."
+          confirmLabel="Archive Room"
+          danger
+          onConfirm={() => {
+            setShowArchiveConfirm(false)
+            void handleArchiveRoom()
+          }}
+          onCancel={() => setShowArchiveConfirm(false)}
         />
       )}
 

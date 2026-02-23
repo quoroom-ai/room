@@ -13,9 +13,13 @@ export function registerRunRoutes(router: Router): void {
     const limit = parseLimit(ctx.query.limit, 20, 500)
     const status = ctx.query.status
     const includeResult = ctx.query.includeResult === '1'
+    const roomId = ctx.query.roomId ? Number(ctx.query.roomId) : undefined
     let runs: TaskRun[]
 
-    if (status === 'running') {
+    if (roomId) {
+      runs = queries.listRunsByRoom(ctx.db, roomId, limit)
+      if (status) runs = runs.filter((run) => run.status === status)
+    } else if (status === 'running') {
       runs = queries.getRunningTaskRuns(ctx.db).slice(0, limit)
     } else if (status) {
       runs = queries.listAllRuns(ctx.db, limit).filter((run) => run.status === status)

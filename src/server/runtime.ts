@@ -8,6 +8,7 @@ import { APP_NAME } from '../shared/constants'
 import { executeTask, isTaskRunning } from '../shared/task-runner'
 import { executeAgent } from '../shared/agent-executor'
 import { resolveApiKeyForModel } from '../shared/model-provider'
+import { triggerAgent } from '../shared/agent-loop'
 import {
   ensureCloudRoomToken,
   fetchCloudRoomMessages,
@@ -79,6 +80,9 @@ function queueTaskExecution(
     resultsDir: getResultsDir(),
     onComplete: (t) => eventBus.emit('runs', 'run:completed', { taskId: t.id, roomId: t.roomId }),
     onFailed: (t, error) => eventBus.emit('runs', 'run:failed', { taskId: t.id, roomId: t.roomId, error }),
+    onConsoleLogEntry: (entry) => {
+      eventBus.emit(`run:${entry.runId}`, 'run:log', entry)
+    },
   })
     .catch((err) => {
       console.error(`Task ${taskId} execution error:`, err)
@@ -299,6 +303,7 @@ function refreshWatches(db: Database.Database): void {
 
 async function syncCloudRoomMessages(db: Database.Database): Promise<void> {
   const rooms = queries.listRooms(db)
+  const keeperReferralCode = queries.getSetting(db, 'keeper_referral_code')
   for (const room of rooms) {
     const cloudRoomId = getRoomCloudId(room.id)
     const hasToken = await ensureCloudRoomToken({
@@ -306,7 +311,8 @@ async function syncCloudRoomMessages(db: Database.Database): Promise<void> {
       name: room.name,
       goal: room.goal ?? null,
       visibility: room.visibility,
-      inviteCode: room.inviteCode,
+      referredByCode: room.referredByCode,
+      keeperReferralCode,
     })
     if (!hasToken) continue
 
@@ -365,6 +371,33 @@ export function startServerRuntime(db: Database.Database): void {
       cloudSyncInFlight = false
     })
   }, CLOUD_MESSAGE_SYNC_MS)
+
+  resumeActiveQueens(db)
+}
+
+function makeCycleCallbacks() {
+  return {
+    onCycleLogEntry: (entry: { cycleId: number; seq: number; entryType: string; content: string }) => {
+      eventBus.emit(`cycle:${entry.cycleId}`, 'cycle:log', entry)
+    },
+    onCycleLifecycle: (event: 'created' | 'completed' | 'failed', cycleId: number, roomId: number) => {
+      eventBus.emit(`room:${roomId}`, `cycle:${event}`, { cycleId, roomId })
+    }
+  }
+}
+
+function resumeActiveQueens(db: Database.Database): void {
+  // Cleanup stale cycles from previous server run
+  const cleaned = queries.cleanupStaleCycles(db)
+  if (cleaned > 0) console.log(`Cleaned up ${cleaned} stale worker cycles`)
+
+  const rooms = queries.listRooms(db, 'active')
+  const callbacks = makeCycleCallbacks()
+  for (const room of rooms) {
+    if (!room.queenWorkerId) continue
+    console.log(`Auto-resuming queen for room "${room.name}" (#${room.id})`)
+    triggerAgent(db, room.id, room.queenWorkerId, callbacks)
+  }
 }
 
 export function stopServerRuntime(): void {

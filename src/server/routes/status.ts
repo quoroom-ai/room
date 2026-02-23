@@ -1,10 +1,14 @@
 import type { Router } from '../router'
-import { execSync, spawn } from 'node:child_process'
 import os from 'node:os'
+import { execFile } from 'node:child_process'
+import { promisify } from 'node:util'
 import { getDataDir } from '../db'
-import { isOllamaAvailable, listOllamaModels } from '../../shared/agent-executor'
 import { invalidateOllamaCache } from '../../shared/model-provider'
 import { isSupportedFreeOllamaModel, stripOllamaPrefix } from '../../shared/ollama-models'
+import {
+  isOllamaAvailable, listOllamaModels,
+  ensureOllamaRunning, isModelInstalled, pullOllamaModel,
+} from '../../shared/ollama-ensure'
 import { getUpdateInfo, simulateUpdate, forceCheck } from '../updateChecker'
 import { getDeploymentMode } from '../auth'
 
@@ -23,164 +27,119 @@ function getVersion(): string {
   return cachedVersion!
 }
 
-function checkClaude(): { available: boolean; version?: string } {
+const execFileAsync = promisify(execFile)
+
+type CliCheckResult = { available: boolean; version?: string }
+const CLI_CACHE_MS = 30_000
+
+let cachedClaude: CliCheckResult = { available: false }
+let claudeCachedAt = 0
+let claudeRefreshInFlight: Promise<void> | null = null
+
+async function refreshClaude(): Promise<void> {
   try {
-    const out = execSync('claude --version 2>/dev/null', { timeout: 5000 }).toString().trim()
-    return { available: true, version: out }
+    const { stdout } = await execFileAsync('claude', ['--version'], { timeout: 5000 })
+    cachedClaude = { available: true, version: stdout.trim() }
   } catch {
-    return { available: false }
+    cachedClaude = { available: false }
   }
+  claudeCachedAt = Date.now()
 }
 
-function checkCodex(): { available: boolean; version?: string } {
+function scheduleClaudeRefresh(force: boolean = false): void {
+  if (!force && claudeCachedAt > 0 && Date.now() - claudeCachedAt < CLI_CACHE_MS) return
+  if (claudeRefreshInFlight) return
+  claudeRefreshInFlight = refreshClaude().finally(() => { claudeRefreshInFlight = null })
+}
+
+function getClaudeStatus(): CliCheckResult {
+  scheduleClaudeRefresh()
+  return cachedClaude
+}
+
+let cachedCodex: CliCheckResult = { available: false }
+let codexCachedAt = 0
+let codexRefreshInFlight: Promise<void> | null = null
+
+async function refreshCodex(): Promise<void> {
   try {
-    const out = execSync('codex --version 2>/dev/null', { timeout: 5000 }).toString().trim()
-    return { available: true, version: out }
+    const { stdout } = await execFileAsync('codex', ['--version'], { timeout: 5000 })
+    cachedCodex = { available: true, version: stdout.trim() }
   } catch {
-    return { available: false }
+    cachedCodex = { available: false }
   }
+  codexCachedAt = Date.now()
+}
+
+function scheduleCodexRefresh(force: boolean = false): void {
+  if (!force && codexCachedAt > 0 && Date.now() - codexCachedAt < CLI_CACHE_MS) return
+  if (codexRefreshInFlight) return
+  codexRefreshInFlight = refreshCodex().finally(() => { codexRefreshInFlight = null })
+}
+
+function getCodexStatus(): CliCheckResult {
+  scheduleCodexRefresh()
+  return cachedCodex
 }
 
 // Cache Ollama status for 30s to avoid hammering it on every UI poll
-let cachedOllama: { available: boolean; models: Array<{ name: string; size: number }> } | null = null
+let cachedOllama: { available: boolean; models: Array<{ name: string; size: number }> } = {
+  available: false,
+  models: []
+}
 let ollamaCachedAt = 0
 const OLLAMA_CACHE_MS = 30_000
-const OLLAMA_INSTALL_TIMEOUT_MS = 10 * 60 * 1000
-const OLLAMA_STARTUP_TIMEOUT_MS = 30_000
+let ollamaRefreshInFlight: Promise<void> | null = null
 
-async function checkOllama(): Promise<{ available: boolean; models: Array<{ name: string; size: number }> }> {
-  if (cachedOllama && Date.now() - ollamaCachedAt < OLLAMA_CACHE_MS) return cachedOllama
+async function refreshOllama(): Promise<void> {
   const available = await isOllamaAvailable()
   const models = available ? await listOllamaModels() : []
   cachedOllama = { available, models }
   ollamaCachedAt = Date.now()
+}
+
+function scheduleOllamaRefresh(force: boolean = false): void {
+  if (!force && ollamaCachedAt > 0 && Date.now() - ollamaCachedAt < OLLAMA_CACHE_MS) return
+  if (ollamaRefreshInFlight) return
+  ollamaRefreshInFlight = refreshOllama().finally(() => { ollamaRefreshInFlight = null })
+}
+
+function getOllamaStatus(): { available: boolean; models: Array<{ name: string; size: number }> } {
+  scheduleOllamaRefresh()
   return cachedOllama
 }
 
 function resetOllamaCaches(): void {
-  cachedOllama = null
+  cachedOllama = { available: false, models: [] }
   ollamaCachedAt = 0
   invalidateOllamaCache()
 }
 
-function hasOllamaBinary(): boolean {
-  try {
-    execSync('which ollama 2>/dev/null', { timeout: 3000 })
-    return true
-  } catch {
-    return false
-  }
-}
+type StatusPart = 'storage' | 'providers' | 'ollama' | 'resources' | 'update'
 
-function installOllamaBinary(): boolean {
-  try {
-    if (process.platform === 'darwin') {
-      execSync('brew install ollama 2>&1', { timeout: OLLAMA_INSTALL_TIMEOUT_MS })
-    } else {
-      execSync('curl -fsSL https://ollama.com/install.sh | sh 2>&1', { timeout: OLLAMA_INSTALL_TIMEOUT_MS })
+function parseStatusParts(raw: string | undefined): Set<StatusPart> | null {
+  if (!raw || !raw.trim()) return null // null => include all parts
+  const values = raw.split(',').map((part) => part.trim().toLowerCase()).filter(Boolean)
+  const set = new Set<StatusPart>()
+  for (const part of values) {
+    if (part === 'storage' || part === 'providers' || part === 'ollama' || part === 'resources' || part === 'update') {
+      set.add(part)
     }
-    return true
-  } catch {
-    return false
   }
+  return set
 }
 
-function startOllamaServe(): boolean {
-  try {
-    const child = spawn('ollama', ['serve'], { detached: true, stdio: 'ignore' })
-    child.on('error', () => {})
-    child.unref()
-    return true
-  } catch {
-    return false
-  }
+function warmStatusCaches(): void {
+  // Startup warmup (async): route can still return immediately while these resolve.
+  scheduleClaudeRefresh(true)
+  scheduleCodexRefresh(true)
+  scheduleOllamaRefresh(true)
 }
 
-async function waitForOllamaAvailable(timeoutMs: number = OLLAMA_STARTUP_TIMEOUT_MS): Promise<boolean> {
-  const startedAt = Date.now()
-  while (Date.now() - startedAt < timeoutMs) {
-    if (await isOllamaAvailable()) return true
-    await new Promise((resolve) => setTimeout(resolve, 1000))
-  }
-  return false
-}
+warmStatusCaches()
 
-async function ensureOllamaRunning(): Promise<{ available: boolean; status: 'running' | 'install_failed' | 'start_failed' }> {
-  const already = await isOllamaAvailable()
-  if (already) return { available: true, status: 'running' }
-
-  if (!hasOllamaBinary() && !installOllamaBinary()) {
-    return { available: false, status: 'install_failed' }
-  }
-  if (!startOllamaServe()) {
-    return { available: false, status: 'start_failed' }
-  }
-
-  const available = await waitForOllamaAvailable()
-  return { available, status: available ? 'running' : 'start_failed' }
-}
-
-function isModelInstalled(models: Array<{ name: string; size: number }>, requested: string): boolean {
-  const requestedLower = requested.toLowerCase()
-  for (const model of models) {
-    const installedName = model.name.toLowerCase()
-    if (installedName === requestedLower) return true
-    if (!requestedLower.includes(':') && installedName === `${requestedLower}:latest`) return true
-    if (requestedLower.endsWith(':latest') && installedName === requestedLower.slice(0, -7)) return true
-  }
-  return false
-}
-
-async function pullOllamaModel(model: string): Promise<{ ok: true } | { ok: false; error: string }> {
-  return await new Promise((resolve) => {
-    let stdout = ''
-    let stderr = ''
-    let settled = false
-    let proc: ReturnType<typeof spawn>
-
-    try {
-      proc = spawn('ollama', ['pull', model], {
-        stdio: ['ignore', 'pipe', 'pipe'],
-      })
-    } catch (err) {
-      const message = err instanceof Error ? err.message : String(err)
-      resolve({ ok: false, error: `Failed to start ollama pull: ${message}` })
-      return
-    }
-
-    const finish = (result: { ok: true } | { ok: false; error: string }): void => {
-      if (settled) return
-      settled = true
-      resolve(result)
-    }
-
-    const timer = setTimeout(() => {
-      proc.kill('SIGTERM')
-      finish({ ok: false, error: `Timed out while pulling model ${model}` })
-    }, 15 * 60 * 1000)
-
-    proc.stdout?.on('data', (chunk) => {
-      stdout += String(chunk)
-    })
-    proc.stderr?.on('data', (chunk) => {
-      stderr += String(chunk)
-    })
-    proc.on('error', (err) => {
-      clearTimeout(timer)
-      const message = err instanceof Error ? err.message : String(err)
-      finish({ ok: false, error: `ollama pull failed: ${message}` })
-    })
-    proc.on('close', (code) => {
-      clearTimeout(timer)
-      if (code === 0) {
-        finish({ ok: true })
-        return
-      }
-      const details = `${stderr}\n${stdout}`.trim().split('\n').slice(-3).join('\n')
-      finish({ ok: false, error: details || `ollama pull exited with code ${code ?? -1}` })
-    })
-  })
-}
+// Ollama helpers (hasOllamaBinary, installOllamaBinary, startOllamaServe, etc.)
+// are in ../../shared/ollama-ensure.ts
 
 function getResources(): { cpuCount: number; loadAvg1m: number; loadAvg5m: number; memTotalGb: number; memFreeGb: number; memUsedPct: number } {
   const [load1, load5] = os.loadavg()
@@ -210,6 +169,7 @@ export function registerStatusRoutes(router: Router): void {
   router.post('/api/ollama/start', async () => {
     const result = await ensureOllamaRunning()
     resetOllamaCaches()
+    scheduleOllamaRefresh(true)
     return { data: result }
   })
 
@@ -230,38 +190,60 @@ export function registerStatusRoutes(router: Router): void {
     const installedModels = await listOllamaModels()
     if (isModelInstalled(installedModels, normalizedModel)) {
       resetOllamaCaches()
+      scheduleOllamaRefresh(true)
       return { data: { ok: true, status: 'ready', model: `ollama:${normalizedModel}` } }
     }
 
     const pulled = await pullOllamaModel(normalizedModel)
     if (!pulled.ok) return { status: 500, error: `Failed to pull model ${normalizedModel}: ${pulled.error}` }
     resetOllamaCaches()
+    scheduleOllamaRefresh(true)
     return { data: { ok: true, status: 'pulled', model: `ollama:${normalizedModel}` } }
   })
 
-  router.get('/api/status', async (ctx) => {
+  router.get('/api/status', (ctx) => {
     const dataDir = getDataDir()
     const dbPath = ctx.db.name
-    const claude = checkClaude()
-    const codex = checkCodex()
-    const ollama = await checkOllama()
-    const resources = getResources()
     const deploymentMode = getDeploymentMode()
+    const parts = parseStatusParts(ctx.query.parts)
+    const include = (part: StatusPart): boolean => parts === null || parts.has(part)
+    const pending: Partial<Record<'claude' | 'codex' | 'ollama', boolean>> = {}
 
     const isCloud = deploymentMode === 'cloud'
+    const data: Record<string, unknown> = {
+      version: getVersion(),
+      uptime: Math.floor((Date.now() - startedAt) / 1000),
+      deploymentMode,
+      serverPlatform: process.platform === 'darwin' ? 'mac' : process.platform === 'win32' ? 'windows' : 'linux',
+      generatedAt: new Date().toISOString(),
+    }
+
+    if (include('storage') && !isCloud) {
+      data.dataDir = dataDir
+      data.dbPath = dbPath
+    }
+    if (include('providers')) {
+      data.claude = getClaudeStatus()
+      data.codex = getCodexStatus()
+      pending.claude = claudeRefreshInFlight !== null
+      pending.codex = codexRefreshInFlight !== null
+    }
+    if (include('ollama')) {
+      data.ollama = getOllamaStatus()
+      pending.ollama = ollamaRefreshInFlight !== null
+    }
+    if (include('resources')) {
+      data.resources = getResources()
+    }
+    if (include('update')) {
+      data.updateInfo = getUpdateInfo()
+    }
+    if (Object.keys(pending).length > 0) {
+      data.pending = pending
+    }
+
     return {
-      data: {
-        version: getVersion(),
-        uptime: Math.floor((Date.now() - startedAt) / 1000),
-        ...(!isCloud && { dataDir, dbPath }),
-        claude,
-        codex,
-        ollama,
-        resources,
-        deploymentMode,
-        updateInfo: getUpdateInfo(),
-        serverPlatform: process.platform === 'darwin' ? 'mac' : process.platform === 'win32' ? 'windows' : 'linux',
-      }
+      data
     }
   })
 }

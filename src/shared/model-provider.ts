@@ -2,7 +2,7 @@ import type Database from 'better-sqlite3'
 import { execSync } from 'node:child_process'
 import * as queries from './db-queries'
 import { checkClaudeCliAvailable } from './claude-code'
-import { isOllamaAvailable } from './agent-executor'
+import { isOllamaAvailable } from './ollama-ensure'
 
 export type ModelProvider =
   | 'claude_subscription'

@@ -1,9 +1,6 @@
-name: Rotate Social Image
+name: Rotate Social Image (Room Manual)
 
 on:
-  schedule:
-    # Runs daily at 09:00 UTC.
-    - cron: '0 9 * * *'
   workflow_dispatch:
     inputs:
       variants_dir:
