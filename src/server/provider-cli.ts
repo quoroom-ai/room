@@ -29,6 +29,13 @@ export function probeProviderInstalled(provider: ProviderName): { installed: boo
 }
 
 export function probeProviderConnected(provider: ProviderName): boolean | null {
+  // Claude Code has no `auth status` subcommand — all interactive commands
+  // require a TTY and hang in headless contexts. Subscription users are
+  // automatically authenticated when installed, so treat installed = connected.
+  if (provider === 'claude') {
+    return probeProviderInstalled('claude').installed ? true : null
+  }
+
   const attempts = provider === 'codex'
     ? [['login', 'status'], ['auth', 'status']]
     : [['auth', 'status'], ['login', 'status']]
