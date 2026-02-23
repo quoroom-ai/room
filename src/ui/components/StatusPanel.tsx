@@ -193,7 +193,7 @@ export function StatusPanel({ onNavigate, advancedMode, roomId }: StatusPanelPro
   const workerMap = new Map((workers ?? []).map(w => [w.id, w]))
 
   if (isLoading && !data) {
-    return <div ref={containerRef} className="p-4 text-sm text-text-muted">Loading...</div>
+    return <div ref={containerRef} className="p-4 flex-1 flex items-center justify-center text-base text-text-muted">Loading...</div>
   }
   if (!data) {
     return (

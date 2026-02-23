@@ -210,7 +210,7 @@ export function ResultsPanel({ roomId, autonomyMode }: ResultsPanelProps): React
   }, [runs, wide])
 
   if (isLoading && !runs) {
-    return <div className="p-4 text-sm text-text-muted">Loading...</div>
+    return <div className="p-4 flex-1 flex items-center justify-center text-base text-text-muted">Loading...</div>
   }
   if (!runs) {
     return <div className="p-4 text-sm text-status-error">{error ?? 'Failed to load runs.'}</div>

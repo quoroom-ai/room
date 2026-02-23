@@ -81,7 +81,7 @@ export function WatchesPanel({ roomId, autonomyMode }: WatchesPanelProps): React
   }
 
   if (isLoading && !watches) {
-    return <div className="p-4 text-sm text-text-muted">Loading...</div>
+    return <div className="p-4 flex-1 flex items-center justify-center text-base text-text-muted">Loading...</div>
   }
   if (!watches) {
     return <div className="p-4 text-sm text-status-error">{error ?? 'Failed to load watches.'}</div>

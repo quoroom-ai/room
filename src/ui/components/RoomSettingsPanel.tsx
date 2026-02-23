@@ -801,7 +801,7 @@ export function RoomSettingsPanel({ roomId }: RoomSettingsPanelProps): React.JSX
 
   const rawRoom = rooms?.find(r => r.id === roomId)
   if (!rawRoom) {
-    return <p className="p-4 text-sm text-text-muted">Loading...</p>
+    return <p className="p-4 flex-1 flex items-center justify-center text-base text-text-muted">Loading...</p>
   }
 
   const room = { ...rawRoom, ...roomOverrides[rawRoom.id] }

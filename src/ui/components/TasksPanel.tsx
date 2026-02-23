@@ -508,7 +508,7 @@ export function TasksPanel({ roomId, autonomyMode }: { roomId?: number | null; a
   }
 
   if (isLoading && !tasks) {
-    return <div className="p-4 text-sm text-text-muted">Loading...</div>
+    return <div className="p-4 flex-1 flex items-center justify-center text-base text-text-muted">Loading...</div>
   }
   if (!tasks) {
     return <div className="p-4 text-sm text-status-error">{tasksError ?? 'Failed to load tasks.'}</div>
