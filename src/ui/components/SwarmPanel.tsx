@@ -31,10 +31,6 @@ interface SwarmPanelProps {
 interface PlaceholderRoom {
   kind: 'placeholder'
   id: string
-  name: string
-  goal: string
-  workerModel: string
-  stationCount: number
 }
 
 interface RealRoomNode {
@@ -515,19 +511,7 @@ const INVITE_CARDS: InviteCard[] = [
   },
 ]
 
-const SWARM_PLACEHOLDERS: Array<{
-  name: string
-  goal: string
-  workerModel: string
-  stationCount: number
-}> = [
-  { name: 'Placeholder Market Lab', goal: 'Test 3 market angles and keep winners', workerModel: 'claude', stationCount: 2 },
-  { name: 'Placeholder Offer Studio', goal: 'Build offer pages and run conversion checks', workerModel: 'codex', stationCount: 3 },
-  { name: 'Placeholder Support Mesh', goal: 'Handle inbound leads and route hot threads', workerModel: 'claude', stationCount: 2 },
-  { name: 'Placeholder Growth Relay', goal: 'Run daily growth tasks across channels', workerModel: 'claude', stationCount: 2 },
-  { name: 'Placeholder Treasury Pod', goal: 'Track spend, income, and weekly burn', workerModel: 'codex', stationCount: 1 },
-  { name: 'Placeholder QA Ring', goal: 'Review outputs and ship safe updates', workerModel: 'claude', stationCount: 2 },
-]
+const SWARM_PLACEHOLDER_COUNT = 6
 
 function pickDifferentIndex(current: number, total: number): number {
   if (total <= 1) return 0
@@ -749,14 +733,10 @@ export function SwarmPanel({ rooms, queenRunning, forcedInviteOpenNonce, onNavig
   const displayRooms = useMemo<DisplayRoomNode[]>(() => {
     const realNodes: DisplayRoomNode[] = rooms.map((room) => ({ kind: 'room', room }))
     if (rooms.length >= 2) return realNodes
-    const needed = Math.max(0, 6 - rooms.length)
-    const placeholders = SWARM_PLACEHOLDERS.slice(0, needed).map((tpl, idx): DisplayRoomNode => ({
+    const needed = Math.max(0, SWARM_PLACEHOLDER_COUNT - rooms.length)
+    const placeholders = Array.from({ length: needed }, (_, idx): DisplayRoomNode => ({
       kind: 'placeholder',
       id: `placeholder-${idx + 1}`,
-      name: tpl.name,
-      goal: tpl.goal,
-      workerModel: tpl.workerModel,
-      stationCount: tpl.stationCount,
     }))
     return [...realNodes, ...placeholders]
   }, [rooms])
@@ -785,12 +765,6 @@ export function SwarmPanel({ rooms, queenRunning, forcedInviteOpenNonce, onNavig
     return Math.max(...positions.map((p) => p.cy))
   }, [positions, margin])
 
-  const realRoomMaxY = useMemo(() => {
-    const ys = positions.filter((p) => p.node.kind === 'room').map((p) => p.cy)
-    if (ys.length === 0) return mainMaxY
-    return Math.max(...ys)
-  }, [positions, mainMaxY])
-
   // Referred rooms are placed below the main swarm so they are always reachable via scroll.
   const referredPositions = useMemo(() => {
     const result: Array<{
@@ -799,7 +773,7 @@ export function SwarmPanel({ rooms, queenRunning, forcedInviteOpenNonce, onNavig
       cx: number
       cy: number
     }> = []
-    const referredStartY = realRoomMaxY + ROOM_R + REFERRED_R + 8
+    const referredStartY = mainMaxY + ROOM_R + REFERRED_R + 8
     const referredRowGap = REFERRED_R * 2 + 22
 
     for (const { node, cx, cy } of positions) {
@@ -818,7 +792,7 @@ export function SwarmPanel({ rooms, queenRunning, forcedInviteOpenNonce, onNavig
       })
     }
     return result
-  }, [positions, referredMap, realRoomMaxY])
+  }, [positions, referredMap, mainMaxY])
 
   const svgWidth = useMemo(() => {
     if (positions.length === 0) return 300
@@ -1148,26 +1122,25 @@ export function SwarmPanel({ rooms, queenRunning, forcedInviteOpenNonce, onNavig
             const stroke = isPlaceholder ? 'var(--border-primary)' : roomStateColors.stroke
             const workers = room ? (workersPerRoom[room.id] ?? []) : []
             const stations = room ? ((stationMap ?? {})[room.id] ?? []) : []
-            const placeholderStationCount = isPlaceholder ? node.stationCount : 0
             const revenue = room ? ((revenueMap ?? {})[room.id]) : undefined
             const isHovered = room ? hoveredRoomId === room.id : false
-            const totalSats = workers.length + stations.length + placeholderStationCount
+            const totalSats = workers.length + stations.length
             const satPositions = showSatellites ? satellitePositions(cx, cy, totalSats) : []
 
             // Queen model
             const queenWorker = room ? workers.find(w => w.id === room.queenWorkerId) : null
-            const queenModel = room ? (queenWorker?.model || room.workerModel) : node.workerModel
+            const queenModel = room ? (queenWorker?.model || room.workerModel) : null
 
             // Goal text wrapped into lines
             const goalLines = isPlaceholder
-              ? [...wrapText(node.name, 24), ...wrapText(node.goal, 28)].slice(0, 6)
+              ? ['your future room']
               : wrapText(room?.goal || 'No objective set', 28).slice(0, 6) // max 6 lines
 
             // Life indicators
             const busyWorkers = workers.filter(w => w.agentState === 'thinking' || w.agentState === 'acting').length
             const activeStations = stations.filter(s => s.status === 'active').length
             const lifeLabel = isPlaceholder
-              ? `0w · ${placeholderStationCount}s preview`
+              ? ''
               : `${workers.length}w${busyWorkers > 0 ? ` (${busyWorkers} active)` : ''}${stations.length > 0 ? ` · ${stations.length}s${activeStations > 0 ? ` (${activeStations} up)` : ''}` : ''}`
 
             // Layout: goal lines at top, then gap, then life bar, then model, then money
@@ -1232,18 +1205,20 @@ export function SwarmPanel({ rooms, queenRunning, forcedInviteOpenNonce, onNavig
                 </text>
 
                 {/* Queen model */}
-                <text
-                  x={cx}
-                  y={startY + goalBlockH + modelLineY + 8}
-                  textAnchor="middle"
-                  dominantBaseline="middle"
-                  fontSize="13"
-                  fontWeight="500"
-                  fill={isPlaceholder ? 'var(--text-muted)' : 'var(--interactive)'}
-                  style={{ pointerEvents: 'none' }}
-                >
-                  {fmtModel(queenModel)}
-                </text>
+                {!isPlaceholder && (
+                  <text
+                    x={cx}
+                    y={startY + goalBlockH + modelLineY + 8}
+                    textAnchor="middle"
+                    dominantBaseline="middle"
+                    fontSize="13"
+                    fontWeight="500"
+                    fill="var(--interactive)"
+                    style={{ pointerEvents: 'none' }}
+                  >
+                    {fmtModel(queenModel)}
+                  </text>
+                )}
 
                 {/* Money line — always shown when $ toggle is on */}
                 {showMoney && !isPlaceholder && (
@@ -1323,33 +1298,6 @@ export function SwarmPanel({ rooms, queenRunning, forcedInviteOpenNonce, onNavig
                   )
                 })}
 
-                {/* Placeholder station satellites */}
-                {showSatellites && isPlaceholder && Array.from({ length: placeholderStationCount }).map((_, si) => {
-                  const pos = satPositions[workers.length + stations.length + si]
-                  if (!pos) return null
-                  return (
-                    <g key={`placeholder-s-${si}`}>
-                      <polygon
-                        points={hexPoints(pos[0], pos[1], SAT_R)}
-                        fill={stationColor(si % 2 === 0 ? 'pending' : 'idle')}
-                        stroke="var(--border-primary)"
-                        strokeWidth={0.8}
-                        strokeDasharray="5 2"
-                      />
-                      <rect
-                        x={pos[0] - 5}
-                        y={pos[1] - 3.5}
-                        width={10}
-                        height={6}
-                        rx={1.5}
-                        fill="none"
-                        stroke="var(--text-muted)"
-                        strokeWidth={0.8}
-                        style={{ pointerEvents: 'none' }}
-                      />
-                    </g>
-                  )
-                })}
               </g>
             )
           })}
