@@ -3,6 +3,7 @@ import * as queries from './db-queries'
 import { propose, vote, tally } from './quorum'
 import { updateGoalProgress, decomposeGoal, completeGoal, abandonGoal, setRoomObjective } from './goals'
 import type { DecisionType, VoteValue } from './types'
+import { webFetch, webSearch, browserAction, type BrowserAction } from './web-tools'
 
 // ─── Ollama tool definition format (compatible with OpenAI format) ──────────
 
@@ -136,6 +137,34 @@ export const SLIM_QUEEN_TOOL_DEFINITIONS: OllamaToolDef[] = [
           question: { type: 'string', description: 'Question for keeper' }
         },
         required: ['question']
+      }
+    }
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'quoroom_web_search',
+      description: 'Search the web. Returns top 5 results with title, URL, and snippet.',
+      parameters: {
+        type: 'object',
+        properties: {
+          query: { type: 'string', description: 'Search query' }
+        },
+        required: ['query']
+      }
+    }
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'quoroom_web_fetch',
+      description: 'Fetch any URL and return its content as clean text. Use to read articles, docs, pricing pages.',
+      parameters: {
+        type: 'object',
+        properties: {
+          url: { type: 'string', description: 'Full URL (https://...)' }
+        },
+        required: ['url']
       }
     }
   }
@@ -389,6 +418,55 @@ export const QUEEN_TOOL_DEFINITIONS: OllamaToolDef[] = [
         }
       }
     }
+  },
+
+  // ── Web / Internet access ────────────────────────────────────────────────
+  {
+    type: 'function',
+    function: {
+      name: 'quoroom_web_search',
+      description: 'Search the web. Returns top 5 results with title, URL, and snippet. No API key required.',
+      parameters: {
+        type: 'object',
+        properties: {
+          query: { type: 'string', description: 'Search query' }
+        },
+        required: ['query']
+      }
+    }
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'quoroom_web_fetch',
+      description: 'Fetch any URL and return its content as clean markdown text. Use to read articles, docs, pricing pages, or any public web page.',
+      parameters: {
+        type: 'object',
+        properties: {
+          url: { type: 'string', description: 'Full URL (https://...)' }
+        },
+        required: ['url']
+      }
+    }
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'quoroom_browser',
+      description: 'Control a headless browser to interact with websites: navigate pages, click buttons, fill forms, buy services, register domains. Returns accessibility tree snapshot of the page. Use for tasks requiring user interaction that quoroom_web_fetch cannot handle.',
+      parameters: {
+        type: 'object',
+        properties: {
+          url: { type: 'string', description: 'Starting URL' },
+          actions: {
+            type: 'array',
+            description: 'Sequence of browser actions. Each action is an object with required "type" field (one of: navigate, click, fill, select, wait, submit, snapshot) plus optional fields: url (navigate), text/selector (click), selector+value (fill/select), ms (wait), selector (submit).',
+            items: { type: 'object' }
+          }
+        },
+        required: ['url', 'actions']
+      }
+    }
   }
 ]
 
@@ -576,7 +654,9 @@ export async function executeQueenTool(
       case 'quoroom_ask_keeper': {
         const question = String(args.question ?? '')
         const escalation = queries.createEscalation(db, roomId, workerId, question)
-        return { content: `Question sent to keeper (escalation #${escalation.id}).` }
+        const deliveryStatus = await deliverQueenMessage(db, roomId, question)
+        const deliveryNote = deliveryStatus ? ` ${deliveryStatus}` : ''
+        return { content: `Question sent to keeper (escalation #${escalation.id}).${deliveryNote}` }
       }
 
       // ── Room config ──────────────────────────────────────────────────
@@ -591,11 +671,97 @@ export async function executeQueenTool(
         return { content: 'No changes applied.' }
       }
 
+      // ── Web / Internet access ────────────────────────────────────────
+      case 'quoroom_web_search': {
+        const query = String(args.query ?? '').trim()
+        if (!query) return { content: 'Error: query is required', isError: true }
+        const results = await webSearch(query)
+        if (results.length === 0) return { content: 'No results found.' }
+        return { content: results.map((r, i) => `${i + 1}. **${r.title}**\n   ${r.url}\n   ${r.snippet}`).join('\n\n') }
+      }
+
+      case 'quoroom_web_fetch': {
+        const url = String(args.url ?? '').trim()
+        if (!url) return { content: 'Error: url is required', isError: true }
+        return { content: await webFetch(url) }
+      }
+
+      case 'quoroom_browser': {
+        const url = String(args.url ?? '').trim()
+        const actions = (args.actions ?? []) as BrowserAction[]
+        if (!url) return { content: 'Error: url is required', isError: true }
+        return { content: await browserAction(url, actions) }
+      }
+
       default:
         return { content: `Unknown tool: ${toolName}`, isError: true }
     }
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err)
     return { content: `Error in ${toolName}: ${message}`, isError: true }
+  }
+}
+
+// ─── Queen → Keeper external delivery ───────────────────────────────────────
+
+async function deliverQueenMessage(db: Database.Database, roomId: number, question: string): Promise<string> {
+  try {
+    const cloudApiBase = (process.env.QUOROOM_CLOUD_API ?? 'https://quoroom.ai/api').replace(/\/+$/, '')
+    const room = queries.getRoom(db, roomId)
+    if (!room) return ''
+
+    const queenNickname = room.queenNickname
+    if (!queenNickname) return ''
+
+    const keeperEmail = queries.getSetting(db, 'contact_email')
+    const emailVerifiedAt = queries.getSetting(db, 'contact_email_verified_at')
+    const telegramId = queries.getSetting(db, 'contact_telegram_id')
+    const telegramVerifiedAt = queries.getSetting(db, 'contact_telegram_verified_at')
+    const keeperUserNumberRaw = queries.getSetting(db, 'keeper_user_number')
+    const keeperUserNumber = keeperUserNumberRaw && /^\d{5,6}$/.test(keeperUserNumberRaw)
+      ? Number(keeperUserNumberRaw) : null
+
+    const hasEmail = Boolean(keeperEmail && emailVerifiedAt)
+    const hasTelegram = Boolean(telegramId && telegramVerifiedAt)
+
+    if (!hasEmail && !hasTelegram) return ''
+    if (!keeperUserNumber) return ''
+
+    const { getStoredCloudRoomToken, getRoomCloudId } = await import('./cloud-sync')
+    const cloudRoomId = getRoomCloudId(roomId)
+    const roomToken = getStoredCloudRoomToken(cloudRoomId)
+    if (!roomToken) return ''
+
+    const channels: string[] = []
+    if (hasEmail) channels.push('email')
+    if (hasTelegram) channels.push('telegram')
+
+    const res = await fetch(`${cloudApiBase}/contacts/queen-message`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Room-Token': roomToken,
+      },
+      body: JSON.stringify({
+        roomId: cloudRoomId,
+        queenNickname,
+        userNumber: keeperUserNumber,
+        question,
+        channels,
+      }),
+      signal: AbortSignal.timeout(10_000),
+    })
+
+    if (!res.ok) return ''
+
+    const data = await res.json() as { email?: string; telegram?: string }
+    const parts: string[] = []
+    if (data.email === 'sent') parts.push('email ✓')
+    else if (data.email === 'failed') parts.push('email ✗')
+    if (data.telegram === 'sent') parts.push('telegram ✓')
+    else if (data.telegram === 'failed') parts.push('telegram ✗')
+    return parts.length > 0 ? `External delivery: ${parts.join(', ')}.` : ''
+  } catch {
+    return '' // Best-effort — don't block the tool call
   }
 }

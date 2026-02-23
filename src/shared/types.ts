@@ -227,6 +227,7 @@ export interface Room {
   queenQuietFrom: string | null
   queenQuietUntil: string | null
   config: RoomConfig
+  queenNickname: string | null
   chatSessionId: string | null
   referredByCode: string | null
   createdAt: string

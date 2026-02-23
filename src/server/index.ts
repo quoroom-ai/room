@@ -34,6 +34,7 @@ import { initCloudSync } from './cloud'
 import { _stopAllLoops } from '../shared/agent-loop'
 import { initUpdateChecker, stopUpdateChecker, getUpdateInfo } from './updateChecker'
 import { startServerRuntime, stopServerRuntime } from './runtime'
+import { closeBrowser } from '../shared/web-tools'
 
 try {
   (process as unknown as { loadEnvFile?: (path?: string) => void }).loadEnvFile?.('.env')
@@ -761,6 +762,7 @@ export function startServer(options: ServerOptions = {}): void {
     stopServerRuntime()
     stopCloudSync()
     stopUpdateChecker()
+    closeBrowser().catch(() => { /* ignore */ })
     server.close()
     closeServerDatabase()
     process.exit(0)
@@ -771,6 +773,7 @@ export function startServer(options: ServerOptions = {}): void {
     stopServerRuntime()
     stopCloudSync()
     stopUpdateChecker()
+    closeBrowser().catch(() => { /* ignore */ })
     server.close()
     closeServerDatabase()
     process.exit(0)

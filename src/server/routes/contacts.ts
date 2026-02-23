@@ -2,6 +2,7 @@ import crypto from 'node:crypto'
 import type { Router } from '../router'
 import * as queries from '../../shared/db-queries'
 import { isCloudDeployment, getToken } from '../auth'
+import { ensureCloudRoomToken, getRoomCloudId, getStoredCloudRoomToken } from '../../shared/cloud-sync'
 
 const EMAIL_VERIFY_CODE_TTL_MINUTES = 15
 const EMAIL_RESEND_COOLDOWN_SECONDS = 60
@@ -16,6 +17,7 @@ const CONTACT_EMAIL_CODE_EXPIRES_AT_KEY = 'contact_email_verify_code_expires_at'
 const CONTACT_EMAIL_LAST_SENT_AT_KEY = 'contact_email_verify_last_sent_at'
 const CONTACT_EMAIL_RATE_WINDOW_START_KEY = 'contact_email_verify_rate_window_start'
 const CONTACT_EMAIL_RATE_WINDOW_COUNT_KEY = 'contact_email_verify_rate_window_count'
+const CONTACT_EMAIL_RELAY_ROOM_ID_KEY = 'contact_email_relay_room_id'
 
 const CONTACT_TELEGRAM_ID_KEY = 'contact_telegram_id'
 const CONTACT_TELEGRAM_USERNAME_KEY = 'contact_telegram_username'
@@ -66,6 +68,15 @@ interface CloudTelegramVerifyStatus {
   username: string | null
   firstName: string | null
   verifiedAt: string | null
+}
+
+interface VerifiedContactBindingPayload {
+  email: string | null
+  emailVerifiedAt: string | null
+  telegramId: string | null
+  telegramUsername: string | null
+  telegramFirstName: string | null
+  telegramVerifiedAt: string | null
 }
 
 function getSettingTrimmed(db: Parameters<typeof queries.getSetting>[0], key: string): string {
@@ -140,6 +151,46 @@ function isValidEmail(input: string): boolean {
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(input)
 }
 
+function isValidCloudRoomId(input: string): boolean {
+  return /^[A-Za-z0-9_-]{8,128}$/.test(input)
+}
+
+function createEmailRelayRoomId(): string {
+  return `contact_${crypto.randomBytes(16).toString('hex')}`
+}
+
+async function getEmailRelayAuth(
+  db: Parameters<typeof queries.getSetting>[0],
+): Promise<{ roomId: string; roomToken: string }> {
+  let roomId = getSettingTrimmed(db, CONTACT_EMAIL_RELAY_ROOM_ID_KEY)
+  if (!isValidCloudRoomId(roomId)) {
+    roomId = createEmailRelayRoomId()
+    setSetting(db, CONTACT_EMAIL_RELAY_ROOM_ID_KEY, roomId)
+  }
+
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    const cachedToken = getStoredCloudRoomToken(roomId)
+    if (cachedToken) return { roomId, roomToken: cachedToken }
+
+    const hasToken = await ensureCloudRoomToken({
+      roomId,
+      name: 'Keeper Contact Relay',
+      goal: 'Relay keeper contact verification emails',
+      visibility: 'private',
+    })
+    const issuedToken = getStoredCloudRoomToken(roomId)
+    if (hasToken && issuedToken) return { roomId, roomToken: issuedToken }
+
+    roomId = createEmailRelayRoomId()
+    setSetting(db, CONTACT_EMAIL_RELAY_ROOM_ID_KEY, roomId)
+  }
+
+  throw new ApiError({
+    status: 503,
+    message: 'Cloud relay room token is unavailable. Check connection and retry.',
+  })
+}
+
 function emailSendGate(db: Parameters<typeof queries.getSetting>[0], nowMs: number): { windowStartMs: number; windowCount: number } {
   const lastSentAt = parseIsoToMs(getSettingTrimmed(db, CONTACT_EMAIL_LAST_SENT_AT_KEY))
   if (lastSentAt != null) {
@@ -172,48 +223,31 @@ function emailSendGate(db: Parameters<typeof queries.getSetting>[0], nowMs: numb
   return { windowStartMs, windowCount }
 }
 
-async function sendVerificationCodeEmail(email: string, code: string): Promise<void> {
-  const apiKey = (process.env.QUOROOM_RESEND_API_KEY || process.env.RESEND_API_KEY || '').trim()
-  if (!apiKey) {
-    throw new ApiError({ status: 503, message: 'Email provider is not configured (RESEND_API_KEY).' })
-  }
-
-  const fromEmail = (process.env.QUOROOM_RESEND_FROM_EMAIL || process.env.RESEND_FROM_EMAIL || 'Quoroom <noreply@quoroom.ai>').trim()
-  const ttlLabel = `${EMAIL_VERIFY_CODE_TTL_MINUTES} minutes`
-  const subject = 'Your Quoroom verification code'
-  const text = [
-    'Your Quoroom email verification code:',
-    code,
-    '',
-    `This code expires in ${ttlLabel}.`,
-    '',
-    'If you did not request this code, you can ignore this email.',
-  ].join('\n')
-  const html = [
-    '<div style="font-family:Arial,sans-serif;line-height:1.45;">',
-    '<p>Your Quoroom email verification code:</p>',
-    `<p style="font-size:24px;font-weight:700;letter-spacing:2px;margin:12px 0;">${code}</p>`,
-    `<p>This code expires in ${ttlLabel}.</p>`,
-    '<p style="color:#666;">If you did not request this code, you can ignore this email.</p>',
-    '</div>',
-  ].join('')
-
-  const res = await fetch('https://api.resend.com/emails', {
+async function sendVerificationCodeEmail(
+  db: Parameters<typeof queries.getSetting>[0],
+  email: string,
+  code: string,
+  retryOnAuthFailure: boolean = true,
+): Promise<void> {
+  const { roomId, roomToken } = await getEmailRelayAuth(db)
+  const res = await fetch(`${getCloudApiBase()}/contacts/email/send-code/${encodeURIComponent(roomId)}`, {
     method: 'POST',
     headers: {
-      'Authorization': `Bearer ${apiKey}`,
       'Content-Type': 'application/json',
+      'X-Room-Token': roomToken,
     },
     body: JSON.stringify({
-      from: fromEmail,
-      to: [email],
-      subject,
-      text,
-      html,
+      email,
+      code,
+      ttlMinutes: EMAIL_VERIFY_CODE_TTL_MINUTES,
     }),
     signal: AbortSignal.timeout(12_000),
   })
   if (!res.ok) {
+    if (retryOnAuthFailure && (res.status === 401 || res.status === 404)) {
+      setSetting(db, CONTACT_EMAIL_RELAY_ROOM_ID_KEY, createEmailRelayRoomId())
+      return sendVerificationCodeEmail(db, email, code, false)
+    }
     const details = await res.text().catch(() => '')
     throw new ApiError({
       status: 502,
@@ -229,7 +263,7 @@ async function issueEmailVerification(
   const nowMs = Date.now()
   const { windowStartMs, windowCount } = emailSendGate(db, nowMs)
   const code = crypto.randomInt(0, 1_000_000).toString().padStart(6, '0')
-  await sendVerificationCodeEmail(email, code)
+  await sendVerificationCodeEmail(db, email, code)
 
   const nowIso = new Date(nowMs).toISOString()
   const expiresAt = new Date(nowMs + EMAIL_VERIFY_CODE_TTL_MINUTES * 60 * 1000).toISOString()
@@ -357,6 +391,161 @@ function telegramSafeIso(value: string): string | null {
   return parseIsoToMs(value) == null ? null : value
 }
 
+function getVerifiedContactBindingPayload(
+  db: Parameters<typeof queries.getSetting>[0],
+): VerifiedContactBindingPayload {
+  const email = getSettingTrimmed(db, CONTACT_EMAIL_KEY).toLowerCase()
+  const emailVerifiedAtRaw = getSettingTrimmed(db, CONTACT_EMAIL_VERIFIED_AT_KEY)
+  const emailVerifiedAt = parseIsoToMs(emailVerifiedAtRaw) == null ? null : emailVerifiedAtRaw
+  const hasVerifiedEmail = isValidEmail(email) && Boolean(emailVerifiedAt)
+
+  const telegramIdRaw = getSettingTrimmed(db, CONTACT_TELEGRAM_ID_KEY)
+  const telegramId = /^-?\d{5,20}$/.test(telegramIdRaw) ? telegramIdRaw : null
+  const telegramVerifiedAtRaw = getSettingTrimmed(db, CONTACT_TELEGRAM_VERIFIED_AT_KEY)
+  const telegramVerifiedAt = parseIsoToMs(telegramVerifiedAtRaw) == null ? null : telegramVerifiedAtRaw
+  const hasVerifiedTelegram = Boolean(telegramId) && Boolean(telegramVerifiedAt)
+
+  return {
+    email: hasVerifiedEmail ? email : null,
+    emailVerifiedAt: hasVerifiedEmail ? emailVerifiedAt : null,
+    telegramId: hasVerifiedTelegram ? telegramId : null,
+    telegramUsername: hasVerifiedTelegram ? (getSettingTrimmed(db, CONTACT_TELEGRAM_USERNAME_KEY) || null) : null,
+    telegramFirstName: hasVerifiedTelegram ? (getSettingTrimmed(db, CONTACT_TELEGRAM_FIRST_NAME_KEY) || null) : null,
+    telegramVerifiedAt: hasVerifiedTelegram ? telegramVerifiedAt : null,
+  }
+}
+
+function hasVerifiedContacts(payload: VerifiedContactBindingPayload): boolean {
+  return Boolean(payload.email && payload.emailVerifiedAt)
+    || Boolean(payload.telegramId && payload.telegramVerifiedAt)
+}
+
+async function syncCloudContactBindings(
+  db: Parameters<typeof queries.getSetting>[0],
+): Promise<void> {
+  if (isCloudDeployment()) return
+
+  const rooms = queries.listRooms(db)
+  if (rooms.length === 0) return
+
+  const payload = getVerifiedContactBindingPayload(db)
+  const hasContacts = hasVerifiedContacts(payload)
+  const keeperReferralCodeRaw = getSettingTrimmed(db, 'keeper_referral_code')
+  const keeperReferralCode = keeperReferralCodeRaw || null
+  const keeperUserNumberRaw = getSettingTrimmed(db, 'keeper_user_number')
+  const keeperUserNumber = /^\d{5,6}$/.test(keeperUserNumberRaw) ? Number(keeperUserNumberRaw) : null
+
+  for (const room of rooms) {
+    const cloudRoomId = getRoomCloudId(room.id)
+    const hasToken = await ensureCloudRoomToken({
+      roomId: cloudRoomId,
+      name: room.name,
+      goal: room.goal ?? null,
+      visibility: room.visibility,
+      referredByCode: room.referredByCode,
+      keeperReferralCode,
+    })
+    if (!hasToken) continue
+
+    const roomToken = getStoredCloudRoomToken(cloudRoomId)
+    if (!roomToken) continue
+
+    const endpoint = `${getCloudApiBase()}/contacts/bindings/${encodeURIComponent(cloudRoomId)}`
+    const method = hasContacts ? 'POST' : 'DELETE'
+    const bindingPayload = hasContacts ? {
+      ...payload,
+      queenNickname: room.queenNickname ?? null,
+      keeperUserNumber,
+    } : undefined
+    const res = await fetch(endpoint, {
+      method,
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Room-Token': roomToken,
+      },
+      body: bindingPayload ? JSON.stringify(bindingPayload) : undefined,
+      signal: AbortSignal.timeout(10_000),
+    })
+    if (!res.ok) {
+      const details = await res.text().catch(() => '')
+      throw new ApiError({
+        status: 502,
+        message: `Failed to sync contact bindings (${res.status}). ${details.slice(0, 180)}`.trim(),
+      })
+    }
+  }
+}
+
+interface QueenInboxMessage {
+  id: number
+  queenNickname: string
+  channel: string
+  senderIdentifier: string | null
+  body: string
+  receivedAt: string
+}
+
+interface QueenInboxResponse {
+  messages?: QueenInboxMessage[]
+  ok?: boolean
+}
+
+export async function pollQueenInbox(db: Parameters<typeof queries.getSetting>[0]): Promise<void> {
+  if (isCloudDeployment()) return
+
+  const rooms = queries.listRooms(db, 'active')
+  for (const room of rooms) {
+    try {
+      const cloudRoomId = getRoomCloudId(room.id)
+      const roomToken = getStoredCloudRoomToken(cloudRoomId)
+      if (!roomToken) continue
+
+      const res = await fetch(`${getCloudApiBase()}/contacts/queen-inbox/${encodeURIComponent(cloudRoomId)}`, {
+        headers: { 'X-Room-Token': roomToken },
+        signal: AbortSignal.timeout(8_000),
+      })
+      if (!res.ok) continue
+
+      const data = await res.json() as QueenInboxResponse
+      const messages = data.messages ?? []
+      if (messages.length === 0) continue
+
+      const messageIds: number[] = []
+      for (const msg of messages) {
+        const nickname = msg.queenNickname || 'Queen'
+        const channel = msg.channel || 'external'
+        const body = `[Reply from keeper via ${channel} to ${nickname}]\n${msg.body}`
+        queries.insertChatMessage(db, room.id, 'user', body)
+        queries.logRoomActivity(db, room.id, 'system', `Keeper replied to ${nickname} via ${channel}`, msg.body.slice(0, 200))
+        messageIds.push(msg.id)
+      }
+
+      // Ack delivered messages
+      if (messageIds.length > 0) {
+        await fetch(`${getCloudApiBase()}/contacts/queen-inbox/ack`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'X-Room-Token': roomToken },
+          body: JSON.stringify({ roomId: cloudRoomId, messageIds }),
+          signal: AbortSignal.timeout(8_000),
+        }).catch(() => { /* best-effort */ })
+      }
+    } catch {
+      // Best-effort: skip this room on error
+    }
+  }
+}
+
+async function syncCloudContactBindingsSafe(
+  db: Parameters<typeof queries.getSetting>[0],
+): Promise<void> {
+  try {
+    await syncCloudContactBindings(db)
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error)
+    console.warn(`[contacts] contact binding sync skipped: ${message}`)
+  }
+}
+
 export function registerContactRoutes(router: Router): void {
   router.get('/api/contacts/status', (ctx) => {
     return { data: getContactsStatus(ctx.db) }
@@ -377,6 +566,7 @@ export function registerContactRoutes(router: Router): void {
 
     try {
       const result = await issueEmailVerification(ctx.db, emailRaw)
+      void syncCloudContactBindingsSafe(ctx.db)
       return { data: { ok: true, ...result } }
     } catch (error) {
       if (error instanceof ApiError) {
@@ -437,6 +627,7 @@ export function registerContactRoutes(router: Router): void {
     setSetting(ctx.db, CONTACT_EMAIL_VERIFIED_AT_KEY, verifiedAt)
     clearSetting(ctx.db, CONTACT_EMAIL_CODE_HASH_KEY)
     clearSetting(ctx.db, CONTACT_EMAIL_CODE_EXPIRES_AT_KEY)
+    void syncCloudContactBindingsSafe(ctx.db)
     return {
       data: {
         ok: true,
@@ -500,6 +691,7 @@ export function registerContactRoutes(router: Router): void {
         setSetting(ctx.db, CONTACT_TELEGRAM_VERIFIED_AT_KEY, status.verifiedAt ?? new Date().toISOString())
         clearSetting(ctx.db, CONTACT_TELEGRAM_PENDING_HASH_KEY)
         clearSetting(ctx.db, CONTACT_TELEGRAM_PENDING_EXPIRES_AT_KEY)
+        void syncCloudContactBindingsSafe(ctx.db)
         return {
           data: {
             ok: true,
@@ -541,6 +733,7 @@ export function registerContactRoutes(router: Router): void {
     clearSetting(ctx.db, CONTACT_TELEGRAM_VERIFIED_AT_KEY)
     clearSetting(ctx.db, CONTACT_TELEGRAM_PENDING_HASH_KEY)
     clearSetting(ctx.db, CONTACT_TELEGRAM_PENDING_EXPIRES_AT_KEY)
+    void syncCloudContactBindingsSafe(ctx.db)
     return { data: { ok: true } }
   })
 }

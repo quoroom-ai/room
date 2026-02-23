@@ -15,6 +15,7 @@ import {
   getRoomCloudId,
   sendCloudRoomMessage,
 } from '../shared/cloud-sync'
+import { pollQueenInbox } from './routes/contacts'
 import type { Watch } from '../shared/types'
 import { eventBus } from './event-bus'
 
@@ -22,6 +23,7 @@ const SCHEDULER_REFRESH_MS = 15_000
 const WATCH_REFRESH_MS = 15_000
 const TASK_MAINTENANCE_MS = 60_000
 const CLOUD_MESSAGE_SYNC_MS = 60_000
+const QUEEN_INBOX_POLL_MS = 60_000
 const WATCH_DEBOUNCE_MS = 1_500
 
 const cronJobs = new Map<number, { expression: string; job: cron.ScheduledTask }>()
@@ -40,7 +42,9 @@ let schedulerTimer: ReturnType<typeof setInterval> | null = null
 let watcherTimer: ReturnType<typeof setInterval> | null = null
 let maintenanceTimer: ReturnType<typeof setInterval> | null = null
 let cloudMessageTimer: ReturnType<typeof setInterval> | null = null
+let queenInboxTimer: ReturnType<typeof setInterval> | null = null
 let cloudSyncInFlight = false
+let queenInboxInFlight = false
 
 function getResultsDir(): string {
   return process.env.QUOROOM_RESULTS_DIR || join(homedir(), APP_NAME, 'results')
@@ -372,6 +376,14 @@ export function startServerRuntime(db: Database.Database): void {
     })
   }, CLOUD_MESSAGE_SYNC_MS)
 
+  queenInboxTimer = setInterval(() => {
+    if (queenInboxInFlight) return
+    queenInboxInFlight = true
+    void pollQueenInbox(db).finally(() => {
+      queenInboxInFlight = false
+    })
+  }, QUEEN_INBOX_POLL_MS)
+
   resumeActiveQueens(db)
 }
 
@@ -405,11 +417,14 @@ export function stopServerRuntime(): void {
   if (watcherTimer) clearInterval(watcherTimer)
   if (maintenanceTimer) clearInterval(maintenanceTimer)
   if (cloudMessageTimer) clearInterval(cloudMessageTimer)
+  if (queenInboxTimer) clearInterval(queenInboxTimer)
   schedulerTimer = null
   watcherTimer = null
   maintenanceTimer = null
   cloudMessageTimer = null
+  queenInboxTimer = null
   cloudSyncInFlight = false
+  queenInboxInFlight = false
 
   for (const [, entry] of cronJobs) {
     entry.job.stop()

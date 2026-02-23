@@ -3,7 +3,7 @@ import type { Worker, AgentState } from './types'
 import type { AgentExecutionResult } from './agent-executor'
 import type { RateLimitInfo } from './rate-limit'
 import * as queries from './db-queries'
-import { executeAgent } from './agent-executor'
+import { executeAgent, compressSession } from './agent-executor'
 import { loadSkillsForAgent } from './skills'
 import { checkExpiredDecisions } from './quorum'
 import { getRoomStatus } from './room'
@@ -295,7 +295,71 @@ export async function runCycle(
     ].join('')
 
     const isOllama = model.startsWith('ollama:')
+    const isCli = model === 'claude' || model.startsWith('claude-') || model === 'codex'
+    // isApi = openai:* or anthropic:* — uses messages_json like ollama but with larger context window
 
+    // ─── Load agent session ────────────────────────────────────────────────────
+    // Group A (CLI): load sessionId for --resume
+    // Group B (API) + Group C (ollama): load messages_json for previousMessages
+    let resumeSessionId: string | undefined
+    let previousMessages: Array<{ role: string; content: string }> | undefined
+
+    const agentSession = queries.getAgentSession(db, worker.id)
+    if (agentSession) {
+      const updatedAt = new Date(agentSession.updatedAt)
+      const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000)
+      if (updatedAt < sevenDaysAgo || agentSession.model !== model) {
+        // Stale session (>7 days) or model changed → start fresh
+        queries.deleteAgentSession(db, worker.id)
+      } else if (isCli && agentSession.sessionId) {
+        resumeSessionId = agentSession.sessionId
+      } else if (!isCli && agentSession.messagesJson) {
+        try {
+          previousMessages = JSON.parse(agentSession.messagesJson) as Array<{ role: string; content: string }>
+        } catch { /* corrupt session — start fresh */ }
+      }
+    }
+
+    // ─── Context compression (OpenClaw pattern) ────────────────────────────────
+    // When the session history grows large, compress it into a summary before the
+    // next cycle instead of blindly trimming old messages.
+    const COMPRESS_THRESHOLD = isOllama ? 12 : 30
+    const MAX_MESSAGES = isOllama ? 16 : 40
+    const apiKeyEarly = resolveApiKeyForModel(db, roomId, model)
+
+    if (!isCli && previousMessages && previousMessages.length >= COMPRESS_THRESHOLD) {
+      logBuffer.addSynthetic('system', `Session history ${previousMessages.length} msgs — compressing...`)
+      logBuffer.flush()
+      const summary = await compressSession(model, apiKeyEarly, previousMessages)
+      if (summary) {
+        // Persist summary as a room memory so it appears in future queen prompts
+        try {
+          const existing = queries.listEntities(db, roomId).find(e => e.name === 'queen_session_summary')
+          if (existing) {
+            const obs = queries.getObservations(db, existing.id)
+            if (obs.length > 0) {
+              db.prepare('UPDATE observations SET content = ?, created_at = datetime(\'now\',\'localtime\') WHERE id = ?').run(summary, obs[0].id)
+            } else {
+              queries.addObservation(db, existing.id, summary, 'queen')
+            }
+          } else {
+            const entity = queries.createEntity(db, 'queen_session_summary', 'fact', 'work', roomId)
+            queries.addObservation(db, entity.id, summary, 'queen')
+          }
+        } catch { /* non-fatal */ }
+
+        // Reset messages to just the summary entry
+        previousMessages = [{ role: 'user', content: `Your compressed session memory from previous cycles: ${summary}` }]
+        queries.saveAgentSession(db, worker.id, { messagesJson: JSON.stringify(previousMessages), model })
+        logBuffer.addSynthetic('system', 'Session compressed and saved.')
+      } else {
+        // Compression failed — hard trim as fallback
+        previousMessages = previousMessages.slice(-MAX_MESSAGES)
+      }
+      logBuffer.flush()
+    }
+
+    // ─── Build context prompt ──────────────────────────────────────────────────
     const contextParts: string[] = []
 
     // Identity — always first so agents know their roomId and workerId for MCP tool calls
@@ -304,7 +368,7 @@ export async function runCycle(
     )
 
     const keeperReferralCode = queries.getSetting(db, 'keeper_referral_code')?.trim()
-    if (keeperReferralCode && !isOllama) {
+    if (keeperReferralCode) {
       const encodedKeeperCode = encodeURIComponent(keeperReferralCode)
       contextParts.push(
         `## Keeper Referral\n- Keeper code: ${keeperReferralCode}\n- Invite link: https://quoroom.ai/invite/${encodedKeeperCode}\n- Share link: https://quoroom.ai/share/v2/${encodedKeeperCode}`
@@ -321,20 +385,18 @@ export async function runCycle(
       ).join('\n')}`)
     }
 
-    // Auto-load room memories so queen can build on what it learned in previous cycles
-    if (isOllama) {
-      const memoryEntities = queries.listEntities(db, roomId).slice(0, 20)
-      if (memoryEntities.length > 0) {
-        const memLines = memoryEntities
-          .map(e => {
-            const obs = queries.getObservations(db, e.id)
-            const content = obs[0]?.content ?? ''
-            return content ? `- **${e.name}**: ${content}` : null
-          })
-          .filter((l): l is string => l !== null)
-        if (memLines.length > 0) {
-          contextParts.push(`## Room Memory (use quoroom_remember to add)\n${memLines.join('\n')}`)
-        }
+    // Auto-load room memories for all models — queens build knowledge across cycles
+    const memoryEntities = queries.listEntities(db, roomId).slice(0, 20)
+    if (memoryEntities.length > 0) {
+      const memLines = memoryEntities
+        .map(e => {
+          const obs = queries.getObservations(db, e.id)
+          const content = obs[0]?.content ?? ''
+          return content ? `- **${e.name}**: ${content.slice(0, 300)}` : null
+        })
+        .filter((l): l is string => l !== null)
+      if (memLines.length > 0) {
+        contextParts.push(`## Room Memory (use quoroom_remember to add)\n${memLines.join('\n')}`)
       }
     }
 
@@ -360,8 +422,8 @@ export async function runCycle(
       ).join('\n')}`)
     }
 
-    // Ollama: 15 most recent (was 3 — more context for goal tracking); Claude: 10
-    const activitySlice = isOllama ? recentActivity.slice(0, 15) : recentActivity
+    // All models get 15 most recent activity items for goal tracking
+    const activitySlice = recentActivity.slice(0, 15)
     if (activitySlice.length > 0) {
       contextParts.push(`## Recent Activity\n${activitySlice.map(a =>
         `- [${a.eventType}] ${a.summary}`
@@ -374,8 +436,7 @@ export async function runCycle(
       ).join('\n')}`)
     }
 
-    // Ollama: skip tasks (reduces prompt size significantly)
-    if (!isOllama && roomTasks.length > 0) {
+    if (roomTasks.length > 0) {
       contextParts.push(`## Room Tasks\n${roomTasks.map(t =>
         `- #${t.id} "${t.name}" [${t.triggerType}] — ${t.status}`
       ).join('\n')}`)
@@ -387,47 +448,43 @@ export async function runCycle(
       ).join('\n')}`)
     }
 
-    // Station awareness — skip for ollama (not relevant, saves tokens)
-    if (!isOllama) {
-      if (cloudStations.length > 0) {
-        const activeCount = cloudStations.filter(s => s.status === 'active').length
-        contextParts.push(`## Stations (${activeCount} active)\n${cloudStations.map(s =>
-          `- #${s.id} "${s.stationName}" (${s.tier}) — ${s.status} — $${s.monthlyCost}/mo`
-        ).join('\n')}`)
-      } else {
-        const effectiveWorkerModel = status.room.workerModel === 'queen' ? (worker.model ?? 'claude') : (status.room.workerModel ?? 'claude')
-        if (effectiveWorkerModel.startsWith('ollama:')) {
-          contextParts.push(`## Stations\n⚠ NO ACTIVE STATIONS. Worker model is ${effectiveWorkerModel} — workers CANNOT run without a station.\nRent a station with quoroom_station_create (minimum tier: small at $15/mo) as your FIRST action before creating any tasks or workers.`)
-        }
-      }
-
-      if (publicRooms.length > 0) {
-        const top3 = publicRooms.slice(0, 3)
-        contextParts.push(
-          `## Public Rooms (cross-room learning)\nOther rooms you can learn strategies from:\n${top3.map((r, i) =>
-            `${i + 1}. "${r.name}" — ${r.earnings} USDC | Goal: ${r.goal ?? 'No goal set'}`
-          ).join('\n')}`
-        )
+    // Station awareness — all models get this (relevant for planning worker execution)
+    if (cloudStations.length > 0) {
+      const activeCount = cloudStations.filter(s => s.status === 'active').length
+      contextParts.push(`## Stations (${activeCount} active)\n${cloudStations.map(s =>
+        `- #${s.id} "${s.stationName}" (${s.tier}) — ${s.status} — $${s.monthlyCost}/mo`
+      ).join('\n')}`)
+    } else {
+      const effectiveWorkerModel = status.room.workerModel === 'queen' ? (worker.model ?? 'claude') : (status.room.workerModel ?? 'claude')
+      if (effectiveWorkerModel.startsWith('ollama:')) {
+        contextParts.push(`## Stations\n⚠ NO ACTIVE STATIONS. Worker model is ${effectiveWorkerModel} — workers CANNOT run without a station.\nRent a station with quoroom_station_create (minimum tier: small at $15/mo) as your FIRST action before creating any tasks or workers.`)
       }
     }
 
-    // Execution settings + rate limit awareness
+    if (publicRooms.length > 0) {
+      const top3 = publicRooms.slice(0, 3)
+      contextParts.push(
+        `## Public Rooms (cross-room learning)\nOther rooms you can learn strategies from:\n${top3.map((r, i) =>
+          `${i + 1}. "${r.name}" — ${r.earnings} USDC | Goal: ${r.goal ?? 'No goal set'}`
+        ).join('\n')}`
+      )
+    }
+
+    // Execution settings + rate limit awareness — all models
     const rateLimitEvents = recentActivity.filter(a =>
       a.eventType === 'system' && a.summary.includes('rate limited')
     )
-    if (!isOllama) {
-      const settingsParts = [
-        `- Cycle gap: ${Math.round(status.room.queenCycleGapMs / 1000)}s`,
-        `- Max turns per cycle: ${status.room.queenMaxTurns}`,
-        `- Max concurrent tasks: ${status.room.maxConcurrentTasks}`
-      ]
-      if (rateLimitEvents.length > 0) {
-        settingsParts.push(`- **Rate limits hit recently: ${rateLimitEvents.length}** (in last ${recentActivity.length} events)`)
-      }
-      contextParts.push(`## Execution Settings\n${settingsParts.join('\n')}`)
+    const settingsParts = [
+      `- Cycle gap: ${Math.round(status.room.queenCycleGapMs / 1000)}s`,
+      `- Max turns per cycle: ${status.room.queenMaxTurns}`,
+      `- Max concurrent tasks: ${status.room.maxConcurrentTasks}`
+    ]
+    if (rateLimitEvents.length > 0) {
+      settingsParts.push(`- **Rate limits hit recently: ${rateLimitEvents.length}** (in last ${recentActivity.length} events)`)
     }
+    contextParts.push(`## Execution Settings\n${settingsParts.join('\n')}`)
 
-    const selfRegulateHint = (!isOllama && rateLimitEvents.length > 0)
+    const selfRegulateHint = rateLimitEvents.length > 0
       ? '\n- **Self-regulate**: You are hitting rate limits. Use quoroom_configure_room to increase your cycle gap or reduce max turns to stay within API limits.'
       : ''
 
@@ -437,8 +494,8 @@ export async function runCycle(
       : 'IMPORTANT: You MUST call at least one tool in your response. Respond ONLY with a tool call — do not write explanatory text without a tool call.'
 
     const toolList = isOllama
-      ? '**Goals:** quoroom_set_goal, quoroom_update_progress\n**Governance:** quoroom_propose\n**Workers:** quoroom_create_worker\n**Tasks:** quoroom_schedule\n**Memory:** quoroom_remember\n**Comms:** quoroom_ask_keeper'
-      : `**Goals:** quoroom_set_goal, quoroom_update_progress, quoroom_create_subgoal, quoroom_complete_goal, quoroom_abandon_goal\n**Governance:** quoroom_propose, quoroom_vote\n**Workers:** quoroom_create_worker, quoroom_update_worker\n**Tasks:** quoroom_schedule\n**Memory:** quoroom_remember, quoroom_recall\n**Comms:** quoroom_ask_keeper\n**Settings:** quoroom_configure_room${selfRegulateHint}`
+      ? '**Goals:** quoroom_set_goal, quoroom_update_progress\n**Governance:** quoroom_propose\n**Workers:** quoroom_create_worker\n**Tasks:** quoroom_schedule\n**Memory:** quoroom_remember\n**Web:** quoroom_web_search, quoroom_web_fetch\n**Comms:** quoroom_ask_keeper'
+      : `**Goals:** quoroom_set_goal, quoroom_update_progress, quoroom_create_subgoal, quoroom_complete_goal, quoroom_abandon_goal\n**Governance:** quoroom_propose, quoroom_vote\n**Workers:** quoroom_create_worker, quoroom_update_worker\n**Tasks:** quoroom_schedule\n**Memory:** quoroom_remember, quoroom_recall\n**Web:** quoroom_web_search, quoroom_web_fetch, quoroom_browser\n**Comms:** quoroom_ask_keeper\n**Settings:** quoroom_configure_room${selfRegulateHint}`
 
     contextParts.push(`## Instructions\nBased on the current state, decide what to do next and call the appropriate tools. Available tools:\n\n${toolList}\n\n${toolCallInstruction}`)
 
@@ -450,7 +507,7 @@ export async function runCycle(
     logBuffer.addSynthetic('system', `Sending to ${model}... (~${promptTokenEstimate} tokens)`)
     logBuffer.flush()
 
-    const apiKey = resolveApiKeyForModel(db, roomId, model)
+    const apiKey = apiKeyEarly  // already resolved above for compression check
 
     // For non-Claude models: provide queen tools so they can take real actions
     // (Claude uses MCP natively; codex doesn't support tool calling)
@@ -458,7 +515,7 @@ export async function runCycle(
       || model === 'openai' || model.startsWith('openai:')
       || model === 'anthropic' || model.startsWith('anthropic:') || model.startsWith('claude-api:')
 
-    // Ollama: use slim tool set (7 tools vs 12) and shorter timeout to fail fast
+    // Ollama: use slim tool set (7 tools vs 12) to fit small context windows
     const toolDefs = needsQueenTools
       ? (isOllama ? SLIM_QUEEN_TOOL_DEFINITIONS : QUEEN_TOOL_DEFINITIONS)
       : undefined
@@ -474,26 +531,7 @@ export async function runCycle(
         }
       : {}
 
-    // Load ollama session for cross-cycle continuity
-    // The model sees its full conversation history and can continue from where it left off
-    let ollamaPreviousMessages: Array<{ role: string; content: string }> = []
-    if (isOllama) {
-      const session = queries.getOllamaSession(db, worker.id)
-      if (session) {
-        // Auto-reset stale sessions (older than 7 days — stale context is harmful)
-        const updatedAt = new Date(session.updatedAt)
-        const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000)
-        if (updatedAt < sevenDaysAgo) {
-          queries.deleteOllamaSession(db, worker.id)
-        } else {
-          try {
-            ollamaPreviousMessages = JSON.parse(session.messagesJson) as Array<{ role: string; content: string }>
-          } catch { /* corrupt session — start fresh */ }
-        }
-      }
-    }
-
-    // Ollama: 10 min timeout for large models on CPU (e.g. qwen3:14b ~5 tok/s); Claude/API: 5 min
+    // Ollama: 10 min timeout for large models on CPU (e.g. qwen3:14b ~5 tok/s); others: 5 min
     const cycleTimeoutMs = isOllama ? 10 * 60 * 1000 : 5 * 60 * 1000
 
     const result = await executeAgent({
@@ -504,17 +542,17 @@ export async function runCycle(
       timeoutMs: cycleTimeoutMs,
       maxTurns: maxTurns ?? 10,
       onConsoleLog: logBuffer.onConsoleLog,
-      // Ollama: JSON action mode + session continuity
-      ...(isOllama ? {
-        useJsonActionMode: true,
-        previousMessages: ollamaPreviousMessages,
-        onSessionUpdate: (msgs: Array<{ role: string; content: string }>) => {
-          // Keep last 16 messages (8 turns) to stay within 4096-token context window
-          // Each turn ~300-400 tokens; 8 turns ≈ 2800 tokens leaving room for new prompt
-          const trimmed = msgs.length > 16 ? msgs.slice(-16) : msgs
-          queries.saveOllamaSession(db, worker.id, roomId, trimmed)
-        }
-      } : {}),
+      // CLI models: pass resumeSessionId for native --resume
+      resumeSessionId,
+      // API/ollama models: pass conversation history + persistence callback
+      previousMessages: isCli ? undefined : previousMessages,
+      onSessionUpdate: isCli ? undefined : (msgs: Array<{ role: string; content: string }>) => {
+        // Hard trim as safety net (compression should have already run above threshold)
+        const trimmed = msgs.length > MAX_MESSAGES ? msgs.slice(-MAX_MESSAGES) : msgs
+        queries.saveAgentSession(db, worker.id, { messagesJson: JSON.stringify(trimmed), model })
+      },
+      // Ollama: JSON action mode (avoids slow constrained tool decoding on small models)
+      ...(isOllama ? { useJsonActionMode: true } : {}),
       ...ollamaToolOpts
     })
 
@@ -522,6 +560,11 @@ export async function runCycle(
     const rateLimitInfo = checkRateLimit(result)
     if (rateLimitInfo) {
       throw new RateLimitError(rateLimitInfo)
+    }
+
+    // CLI models: save returned sessionId for --resume in next cycle
+    if (isCli && result.sessionId) {
+      queries.saveAgentSession(db, worker.id, { sessionId: result.sessionId, model })
     }
 
     // For non-Claude models that don't stream: add synthetic output entry

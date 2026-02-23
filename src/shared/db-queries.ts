@@ -1044,6 +1044,7 @@ function mapRoomRow(row: Record<string, unknown>): Room {
     queenQuietFrom: (row.queen_quiet_from as string | null) ?? null,
     queenQuietUntil: (row.queen_quiet_until as string | null) ?? null,
     config,
+    queenNickname: (row.queen_nickname as string | null) ?? null,
     chatSessionId: (row.chat_session_id as string | null) ?? null,
     referredByCode: (row.referred_by_code as string | null) ?? null,
     createdAt: row.created_at as string,
@@ -1051,12 +1052,28 @@ function mapRoomRow(row: Record<string, unknown>): Room {
   }
 }
 
-export function createRoom(db: Database.Database, name: string, goal?: string, config?: Partial<RoomConfig>, referredByCode?: string): Room {
+export function createRoom(db: Database.Database, name: string, goal?: string, config?: Partial<RoomConfig>, referredByCode?: string, queenNickname?: string): Room {
   const configJson = config ? JSON.stringify({ ...DEFAULT_ROOM_CONFIG, ...config }) : JSON.stringify(DEFAULT_ROOM_CONFIG)
+  const nickname = queenNickname ?? pickQueenNickname(db)
   const result = db
-    .prepare('INSERT INTO rooms (name, goal, config, referred_by_code) VALUES (?, ?, ?, ?)')
-    .run(name, goal ?? null, configJson, referredByCode ?? null)
+    .prepare('INSERT INTO rooms (name, goal, config, referred_by_code, queen_nickname) VALUES (?, ?, ?, ?, ?)')
+    .run(name, goal ?? null, configJson, referredByCode ?? null, nickname)
   return getRoom(db, result.lastInsertRowid as number)!
+}
+
+const QUEEN_WOMAN_NAMES = [
+  'Alice', 'Anna', 'Belle', 'Cara', 'Dana', 'Elena', 'Fiona', 'Grace',
+  'Hana', 'Iris', 'Julia', 'Kate', 'Lena', 'Luna', 'Mara', 'Maya',
+  'Nina', 'Nora', 'Olga', 'Petra', 'Rose', 'Sara', 'Sofia', 'Tara',
+  'Uma', 'Vera', 'Wren', 'Zara', 'Zoe', 'Ava', 'Cleo', 'Dara',
+  'Emmy', 'Gaia', 'Hera', 'Ines', 'Jada', 'Kara', 'Lila', 'Mina',
+]
+
+export function pickQueenNickname(db: Database.Database): string {
+  const usedNames = (db.prepare(`SELECT queen_nickname FROM rooms WHERE queen_nickname IS NOT NULL AND queen_nickname != ''`).all() as { queen_nickname: string }[]).map(r => r.queen_nickname.toLowerCase())
+  const available = QUEEN_WOMAN_NAMES.filter(n => !usedNames.includes(n.toLowerCase()))
+  const pool = available.length > 0 ? available : QUEEN_WOMAN_NAMES
+  return pool[Math.floor(Math.random() * pool.length)]
 }
 
 export function getRoom(db: Database.Database, id: number): Room | null {
@@ -1074,7 +1091,7 @@ export function listRooms(db: Database.Database, status?: string): Room[] {
 }
 
 export function updateRoom(db: Database.Database, id: number, updates: Partial<{
-  name: string; queenWorkerId: number | null; goal: string | null; status: string; visibility: string; autonomyMode: string; maxConcurrentTasks: number; workerModel: string; queenCycleGapMs: number; queenMaxTurns: number; queenQuietFrom: string | null; queenQuietUntil: string | null; config: RoomConfig; referredByCode: string | null
+  name: string; queenWorkerId: number | null; goal: string | null; status: string; visibility: string; autonomyMode: string; maxConcurrentTasks: number; workerModel: string; queenCycleGapMs: number; queenMaxTurns: number; queenQuietFrom: string | null; queenQuietUntil: string | null; config: RoomConfig; referredByCode: string | null; queenNickname: string
 }>): void {
   const fieldMap: Record<string, string> = {
     name: 'name', queenWorkerId: 'queen_worker_id', goal: 'goal',
@@ -1082,7 +1099,7 @@ export function updateRoom(db: Database.Database, id: number, updates: Partial<{
     maxConcurrentTasks: 'max_concurrent_tasks', workerModel: 'worker_model',
     queenCycleGapMs: 'queen_cycle_gap_ms', queenMaxTurns: 'queen_max_turns',
     queenQuietFrom: 'queen_quiet_from', queenQuietUntil: 'queen_quiet_until',
-    config: 'config', referredByCode: 'referred_by_code'
+    config: 'config', referredByCode: 'referred_by_code', queenNickname: 'queen_nickname'
   }
   const fields: string[] = []
   const values: unknown[] = []
@@ -2125,38 +2142,53 @@ export function listRecentDecisions(db: Database.Database, roomId: number, limit
   return (rows as Record<string, unknown>[]).map(mapDecisionRow)
 }
 
-// ─── Ollama session continuity ───────────────────────────────────────────────
-// Persists the conversation messages array across queen cycles so the model
-// remembers what it thought, decided, and did in previous cycles.
+// ─── Agent session continuity (all model types) ──────────────────────────────
+// Persists cross-cycle session state for every queen model:
+//   - CLI models (claude/codex): session_id string for --resume
+//   - API/ollama models: messages_json conversation turns array
 
-export function getOllamaSession(
+export function getAgentSession(
   db: Database.Database,
   workerId: number
-): { messagesJson: string; turnCount: number; updatedAt: string } | undefined {
+): { sessionId: string | null; messagesJson: string | null; model: string; turnCount: number; updatedAt: string } | undefined {
   const row = db.prepare(
-    'SELECT messages_json, turn_count, updated_at FROM ollama_sessions WHERE worker_id = ?'
-  ).get(workerId) as { messages_json: string; turn_count: number; updated_at: string } | undefined
+    'SELECT session_id, messages_json, model, turn_count, updated_at FROM agent_sessions WHERE worker_id = ?'
+  ).get(workerId) as { session_id: string | null; messages_json: string | null; model: string; turn_count: number; updated_at: string } | undefined
   if (!row) return undefined
-  return { messagesJson: row.messages_json, turnCount: row.turn_count, updatedAt: row.updated_at }
+  return {
+    sessionId: row.session_id,
+    messagesJson: row.messages_json,
+    model: row.model,
+    turnCount: row.turn_count,
+    updatedAt: row.updated_at
+  }
 }
 
-export function saveOllamaSession(
+export function saveAgentSession(
   db: Database.Database,
   workerId: number,
-  roomId: number,
-  messages: Array<{ role: string; content: string }>
+  opts: { sessionId?: string | null; messagesJson?: string | null; model: string }
 ): void {
-  const json = JSON.stringify(messages)
   db.prepare(
-    `INSERT INTO ollama_sessions (worker_id, room_id, messages_json, turn_count, updated_at)
-     VALUES (?, ?, ?, 1, datetime('now','localtime'))
+    `INSERT INTO agent_sessions (worker_id, session_id, messages_json, model, turn_count, updated_at)
+     VALUES (?, ?, ?, ?, 1, datetime('now','localtime'))
      ON CONFLICT(worker_id) DO UPDATE SET
-       messages_json = ?,
+       session_id = CASE WHEN ? IS NOT NULL THEN ? ELSE session_id END,
+       messages_json = CASE WHEN ? IS NOT NULL THEN ? ELSE messages_json END,
+       model = ?,
        turn_count = turn_count + 1,
        updated_at = datetime('now','localtime')`
-  ).run(workerId, roomId, json, json)
+  ).run(
+    workerId,
+    opts.sessionId ?? null,
+    opts.messagesJson ?? null,
+    opts.model,
+    opts.sessionId ?? null, opts.sessionId ?? null,
+    opts.messagesJson ?? null, opts.messagesJson ?? null,
+    opts.model
+  )
 }
 
-export function deleteOllamaSession(db: Database.Database, workerId: number): void {
-  db.prepare('DELETE FROM ollama_sessions WHERE worker_id = ?').run(workerId)
+export function deleteAgentSession(db: Database.Database, workerId: number): void {
+  db.prepare('DELETE FROM agent_sessions WHERE worker_id = ?').run(workerId)
 }

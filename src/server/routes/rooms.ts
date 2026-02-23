@@ -239,7 +239,7 @@ export function registerRoomRoutes(router: Router): void {
     const body = ctx.body as Record<string, unknown> || {}
     const room = queries.getRoom(ctx.db, roomId)
     if (!room) return { status: 404, error: 'Room not found' }
-    const updates: Partial<{ name: string; goal: string | null; status: string; visibility: string; autonomyMode: string; maxConcurrentTasks: number; workerModel: string; queenCycleGapMs: number; queenMaxTurns: number; queenQuietFrom: string | null; queenQuietUntil: string | null; referredByCode: string | null; config: typeof room.config }> = {}
+    const updates: Partial<{ name: string; goal: string | null; status: string; visibility: string; autonomyMode: string; maxConcurrentTasks: number; workerModel: string; queenCycleGapMs: number; queenMaxTurns: number; queenQuietFrom: string | null; queenQuietUntil: string | null; referredByCode: string | null; queenNickname: string; config: typeof room.config }> = {}
     if (body.name !== undefined) updates.name = body.name as string
     if (body.goal !== undefined) updates.goal = body.goal as string | null
     if (body.status === 'stopped') updates.status = 'stopped'
@@ -261,6 +261,10 @@ export function registerRoomRoutes(router: Router): void {
     if (body.queenQuietFrom !== undefined) updates.queenQuietFrom = body.queenQuietFrom as string | null
     if (body.queenQuietUntil !== undefined) updates.queenQuietUntil = body.queenQuietUntil as string | null
     if (body.referredByCode !== undefined) updates.referredByCode = (body.referredByCode as string | null) || null
+    if (body.queenNickname !== undefined && typeof body.queenNickname === 'string') {
+      const trimmed = body.queenNickname.trim().replace(/\s+/g, '')
+      if (trimmed.length > 0 && trimmed.length <= 40) updates.queenNickname = trimmed
+    }
     if (body.config !== undefined && typeof body.config === 'object' && body.config !== null) {
       updates.config = { ...room.config, ...(body.config as Record<string, unknown>) } as typeof room.config
     }

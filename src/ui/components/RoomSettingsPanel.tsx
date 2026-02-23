@@ -208,6 +208,8 @@ export function RoomSettingsPanel({ roomId }: RoomSettingsPanelProps): React.JSX
   const [apiKeyFeedback, setApiKeyFeedback] = useState<Record<number, ApiKeyFeedback | null>>({})
   const [editingName, setEditingName] = useState('')
   const [editingGoal, setEditingGoal] = useState('')
+  const [editingQueenNickname, setEditingQueenNickname] = useState('')
+  const [keeperUserNumber, setKeeperUserNumber] = useState<string | null>(null)
   const [queenModelBusyRoomId, setQueenModelBusyRoomId] = useState<number | null>(null)
   const [queenModelFeedback, setQueenModelFeedback] = useState<Record<number, ApiKeyFeedback | null>>({})
   const [providerFeedback, setProviderFeedback] = useState<Record<number, ApiKeyFeedback | null>>({})
@@ -233,8 +235,13 @@ export function RoomSettingsPanel({ roomId }: RoomSettingsPanelProps): React.JSX
     if (currentRoom) {
       setEditingName(currentRoom.name)
       setEditingGoal(currentRoom.goal ?? '')
+      setEditingQueenNickname(currentRoom.queenNickname ?? '')
     }
-  }, [currentRoom?.name, currentRoom?.goal, currentRoom?.id])
+  }, [currentRoom?.name, currentRoom?.goal, currentRoom?.queenNickname, currentRoom?.id])
+
+  useEffect(() => {
+    api.settings.get('keeper_user_number').then(v => setKeeperUserNumber(v ?? null)).catch(() => {})
+  }, [])
 
   // Auto-open setup popup flow once immediately after creating a room.
   useEffect(() => {
@@ -968,6 +975,14 @@ export function RoomSettingsPanel({ roomId }: RoomSettingsPanelProps): React.JSX
     refresh()
   }
 
+  async function handleSaveQueenNickname(room: Room): Promise<void> {
+    const trimmed = editingQueenNickname.trim().replace(/\s+/g, '')
+    if (!trimmed || trimmed === (room.queenNickname ?? '')) return
+    optimistic(room.id, { queenNickname: trimmed })
+    await api.rooms.update(room.id, { queenNickname: trimmed })
+    refresh()
+  }
+
   async function handleSaveGoal(): Promise<void> {
     const trimmed = editingGoal.trim()
     if (trimmed === (room.goal ?? '')) return
@@ -1461,6 +1476,35 @@ export function RoomSettingsPanel({ roomId }: RoomSettingsPanelProps): React.JSX
                   </div>
                 )}
               </div>
+
+              {/* Queen identity (nickname + email address for external messaging) */}
+              {row('Nickname',
+                <div className="flex items-center gap-1.5">
+                  <input
+                    type="text"
+                    value={editingQueenNickname}
+                    onChange={e => setEditingQueenNickname(e.target.value)}
+                    onKeyDown={e => { if (e.key === 'Enter') void handleSaveQueenNickname(room) }}
+                    onBlur={() => void handleSaveQueenNickname(room)}
+                    maxLength={40}
+                    placeholder="e.g. Kate"
+                    className="w-28 text-sm border border-border-primary rounded-lg px-2.5 py-1.5 bg-surface-primary text-text-primary"
+                  />
+                  {editingQueenNickname.trim() !== (room.queenNickname ?? '') && (
+                    <button
+                      onClick={() => void handleSaveQueenNickname(room)}
+                      className="text-xs px-2.5 py-1.5 rounded-lg bg-interactive text-text-invert font-medium hover:bg-interactive-hover transition-colors"
+                    >Save</button>
+                  )}
+                </div>,
+                'Her name used in email and Telegram messages to the keeper.'
+              )}
+              {keeperUserNumber && room.queenNickname && row('Queen email',
+                <span className="text-xs font-mono text-text-muted select-all">
+                  {room.queenNickname.toLowerCase()}.{keeperUserNumber}@email.quoroom.ai
+                </span>,
+                'Email address the keeper can reply to. Replies route back to this room.'
+              )}
 
               {/* Queen start/stop */}
               <div className="pt-2 flex gap-2 items-center">

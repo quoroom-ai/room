@@ -52,6 +52,7 @@ CREATE TABLE IF NOT EXISTS rooms (
     queen_quiet_from TEXT,
     queen_quiet_until TEXT,
     config TEXT,
+    queen_nickname TEXT,
     chat_session_id TEXT,
     referred_by_code TEXT,
     created_at DATETIME DEFAULT (datetime('now','localtime')),
@@ -440,16 +441,17 @@ CREATE TABLE IF NOT EXISTS cycle_logs (
 );
 CREATE INDEX IF NOT EXISTS idx_cycle_logs_seq ON cycle_logs(cycle_id, seq);
 
--- Ollama session continuity (persists conversation history across cycles per worker)
-CREATE TABLE IF NOT EXISTS ollama_sessions (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    worker_id INTEGER NOT NULL REFERENCES workers(id) ON DELETE CASCADE,
-    room_id INTEGER NOT NULL,
-    messages_json TEXT NOT NULL DEFAULT '[]',
+-- Agent session continuity (persists conversation history across queen cycles for all model types)
+-- session_id: for CLI models (claude/codex) — passed as --resume to continue the native session
+-- messages_json: for API/ollama models — full conversation turns array (no system prompt), stored as JSON
+CREATE TABLE IF NOT EXISTS agent_sessions (
+    worker_id INTEGER PRIMARY KEY REFERENCES workers(id) ON DELETE CASCADE,
+    session_id TEXT,
+    messages_json TEXT,
+    model TEXT NOT NULL DEFAULT '',
     turn_count INTEGER NOT NULL DEFAULT 0,
     updated_at DATETIME DEFAULT (datetime('now','localtime'))
 );
-CREATE UNIQUE INDEX IF NOT EXISTS idx_ollama_sessions_worker ON ollama_sessions(worker_id);
 
 -- Schema version tracking
 CREATE TABLE IF NOT EXISTS schema_version (

@@ -6,7 +6,9 @@ const EXTERNALS = [
   'better-sqlite3',
   'sqlite-vec',
   '@huggingface/transformers',
-  'onnxruntime-node'
+  'onnxruntime-node',
+  'playwright',
+  'playwright-core'
 ]
 
 const COMMON = {
@@ -38,6 +40,7 @@ async function main() {
       'better-sqlite3': '11.10.0',
       'sqlite-vec': '*',
       '@huggingface/transformers': '*',
+      'playwright': '*',
       'ws': '*'
     }
   }, null, 2))

@@ -500,9 +500,19 @@ async function executeOpenAiWithTools(options: AgentExecutionOptions): Promise<A
   const startTime = Date.now()
   const maxTurns = options.maxTurns ?? 10
 
-  const messages: OpenAiMessage[] = []
-  if (options.systemPrompt) messages.push({ role: 'system', content: options.systemPrompt })
-  messages.push({ role: 'user', content: options.prompt })
+  // Session continuity: resume from prior conversation turns (no system prompt stored)
+  const previousTurns = (options.previousMessages ?? []) as OpenAiMessage[]
+  const isResume = previousTurns.length > 0
+  const messages: OpenAiMessage[] = [
+    ...(options.systemPrompt ? [{ role: 'system' as const, content: options.systemPrompt }] : []),
+    ...previousTurns,
+    {
+      role: 'user' as const,
+      content: isResume
+        ? `NEW CYCLE. Updated room state:\n${options.prompt}\n\nContinue working toward the goal.`
+        : options.prompt
+    }
+  ]
 
   let finalOutput = ''
 
@@ -557,6 +567,11 @@ async function executeOpenAiWithTools(options: AgentExecutionOptions): Promise<A
       }
       messages.push({ role: 'tool', tool_call_id: tc.id, content: toolResult })
     }
+
+    // Persist session after each tool exchange (strip system prompt before saving)
+    if (options.onSessionUpdate) {
+      options.onSessionUpdate(messages.filter(m => m.role !== 'system') as Array<{ role: string; content: string }>)
+    }
   }
 
   return { output: finalOutput || 'Actions completed.', exitCode: 0, durationMs: Date.now() - startTime, sessionId: null, timedOut: false }
@@ -594,7 +609,18 @@ async function executeAnthropicWithTools(options: AgentExecutionOptions): Promis
   const maxTurns = options.maxTurns ?? 10
   const anthropicTools = options.toolDefs ? ollamaToolDefsToAnthropic(options.toolDefs) : []
 
-  const messages: AnthropicMessage[] = [{ role: 'user', content: options.prompt }]
+  // Session continuity: resume from prior conversation turns (system prompt passed separately)
+  const previousTurns = (options.previousMessages ?? []) as AnthropicMessage[]
+  const isResume = previousTurns.length > 0
+  const messages: AnthropicMessage[] = [
+    ...previousTurns,
+    {
+      role: 'user',
+      content: isResume
+        ? `NEW CYCLE. Updated room state:\n${options.prompt}\n\nContinue working toward the goal.`
+        : options.prompt
+    }
+  ]
   let finalOutput = ''
 
   for (let turn = 0; turn < maxTurns; turn++) {
@@ -660,6 +686,11 @@ async function executeAnthropicWithTools(options: AgentExecutionOptions): Promis
       resultBlocks.push({ type: 'tool_result', id: block.id, content: toolResult } as unknown as AnthropicContentBlock)
     }
     messages.push({ role: 'user', content: resultBlocks })
+
+    // Persist session after each tool exchange
+    if (options.onSessionUpdate) {
+      options.onSessionUpdate(messages as unknown as Array<{ role: string; content: string }>)
+    }
   }
 
   return { output: finalOutput || 'Actions completed.', exitCode: 0, durationMs: Date.now() - startTime, sessionId: null, timedOut: false }
@@ -943,6 +974,89 @@ function immediateError(message: string): AgentExecutionResult {
     sessionId: null,
     timedOut: false
   }
+}
+
+/**
+ * Compress a long conversation history into a compact JSON summary.
+ * Called at the start of a cycle when the session exceeds the trim threshold.
+ * Applies to API/ollama models (Group B/C). CLI models manage their own context.
+ *
+ * Returns the raw summary text (JSON string from the model), or null on failure.
+ */
+export async function compressSession(
+  model: string,
+  apiKey: string | undefined,
+  history: Array<{ role: string; content: string }>
+): Promise<string | null> {
+  const historyText = history
+    .map(m => {
+      const content = typeof m.content === 'string' ? m.content : JSON.stringify(m.content)
+      return `[${m.role}]: ${content.slice(0, 2000)}`
+    })
+    .join('\n---\n')
+
+  const compressionPrompt = `You are summarizing your own previous session history as the queen of an AI collective room.
+Compress the history below into a concise memory that preserves all important decisions and context.
+History:
+${historyText}
+
+Respond ONLY with a JSON object (no markdown, no explanation):
+{
+  "session_summary": "...",
+  "goals_set": ["..."],
+  "workers_created": [{"name": "...", "role": "..."}],
+  "decisions_approved": ["..."],
+  "decisions_rejected": ["..."],
+  "last_actions": ["..."],
+  "next_intention": "..."
+}`
+
+  const timeoutMs = 60_000
+  try {
+    if (model.startsWith('ollama:')) {
+      const modelName = model.replace(/^ollama:/, '')
+      const body = JSON.stringify({
+        model: modelName,
+        messages: [{ role: 'user', content: compressionPrompt }],
+        stream: false
+      })
+      const response = await ollamaRequest('/api/chat', body, timeoutMs)
+      const parsed = JSON.parse(response) as Record<string, unknown>
+      const text = (parsed?.message as Record<string, unknown>)?.content as string | undefined
+      return text?.trim() ?? null
+    }
+
+    if (model === 'openai' || model.startsWith('openai:')) {
+      const key = apiKey?.trim() || (process.env.OPENAI_API_KEY || '').trim()
+      if (!key) return null
+      const modelName = parseModelSuffix(model, 'openai') || 'gpt-4o-mini'
+      const response = await fetch('https://api.openai.com/v1/chat/completions', {
+        method: 'POST',
+        headers: { 'Authorization': `Bearer ${key}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ model: modelName, messages: [{ role: 'user', content: compressionPrompt }] }),
+        signal: AbortSignal.timeout(timeoutMs)
+      })
+      const json = await response.json() as Record<string, unknown>
+      return extractOpenAiText(json).trim() || null
+    }
+
+    if (model === 'anthropic' || model.startsWith('anthropic:') || model.startsWith('claude-api:')) {
+      const key = apiKey?.trim() || (process.env.ANTHROPIC_API_KEY || '').trim()
+      if (!key) return null
+      const modelName = parseAnthropicModel(model)
+      const response = await fetch('https://api.anthropic.com/v1/messages', {
+        method: 'POST',
+        headers: { 'x-api-key': key, 'anthropic-version': '2023-06-01', 'content-type': 'application/json' },
+        body: JSON.stringify({ model: modelName, max_tokens: 1024, messages: [{ role: 'user', content: compressionPrompt }] }),
+        signal: AbortSignal.timeout(timeoutMs)
+      })
+      const json = await response.json() as Record<string, unknown>
+      return extractAnthropicText(json).trim() || null
+    }
+  } catch {
+    // Non-fatal: fall through to hard trim
+  }
+  return null
 }
 
 /**
