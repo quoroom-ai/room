@@ -116,6 +116,8 @@ function App(): React.JSX.Element {
   const [autonomyMode, setAutonomyMode] = useState<'auto' | 'semi'>('auto')
   const [ready, setReady] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [startupRetrying, setStartupRetrying] = useState(false)
+  const [authAttemptKey, setAuthAttemptKey] = useState(0)
   const [restartingServer, setRestartingServer] = useState(false)
 
   // Global room selection
@@ -293,13 +295,36 @@ function App(): React.JSX.Element {
     return () => clearInterval(interval)
   }, [fetchSelectedQueenModel, ready, selectedRoomId])
 
-  // Local origin: normal auth flow
+  // Local origin: auth flow with auto-retry for server startup
   useEffect(() => {
     if (gate !== 'app') return
-    getToken()
-      .then(() => setReady(true))
-      .catch((err) => setError(err instanceof Error ? err.message : 'Auth failed'))
-  }, [gate])
+    let cancelled = false
+    const MAX_RETRIES = 6
+    const RETRY_DELAY = 3000
+
+    async function attemptAuth(retriesLeft: number): Promise<void> {
+      try {
+        await getToken()
+        if (!cancelled) {
+          setStartupRetrying(false)
+          setReady(true)
+        }
+      } catch (err) {
+        if (cancelled) return
+        if (retriesLeft > 0) {
+          setStartupRetrying(true)
+          await new Promise(r => setTimeout(r, RETRY_DELAY))
+          if (!cancelled) await attemptAuth(retriesLeft - 1)
+        } else {
+          setStartupRetrying(false)
+          setError(err instanceof Error ? err.message : 'Auth failed')
+        }
+      }
+    }
+
+    void attemptAuth(MAX_RETRIES)
+    return () => { cancelled = true }
+  }, [gate, authAttemptKey])
 
   useEffect(() => {
     if (gate !== 'app') return
@@ -554,10 +579,9 @@ function App(): React.JSX.Element {
   function handleRetryAuth(): void {
     setError(null)
     setRestartingServer(false)
+    setStartupRetrying(false)
     clearToken()
-    getToken()
-      .then(() => setReady(true))
-      .catch((e) => setError(e instanceof Error ? e.message : 'Auth failed'))
+    setAuthAttemptKey(k => k + 1)
   }
 
   async function handleRestartServer(): Promise<void> {
@@ -637,7 +661,10 @@ function App(): React.JSX.Element {
   if (!ready) {
     return (
       <div className="flex flex-col h-screen bg-surface-primary items-center justify-center">
-        <div className="text-text-muted text-sm">Connecting...</div>
+        <span className="w-4 h-4 rounded-full border-2 border-border-primary border-t-interactive animate-spin mb-3" />
+        <div className="text-text-muted text-sm">
+          {startupRetrying ? 'Waiting for server to start...' : 'Connecting...'}
+        </div>
       </div>
     )
   }

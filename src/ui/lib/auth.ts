@@ -112,15 +112,22 @@ async function fetchCloudToken(): Promise<string> {
 }
 
 async function fetchHandshakeToken(): Promise<string> {
-  const res = await fetch(`${API_BASE}/api/auth/handshake`, {
-    cache: 'no-store',
-  })
-  if (!res.ok) throw new Error('Failed to fetch')
-  const data = await res.json() as { token?: unknown }
-  if (typeof data.token !== 'string' || data.token.length === 0) {
-    throw new Error('Invalid auth token response')
+  const controller = new AbortController()
+  const timeout = setTimeout(() => controller.abort(), 5000)
+  try {
+    const res = await fetch(`${API_BASE}/api/auth/handshake`, {
+      cache: 'no-store',
+      signal: controller.signal,
+    })
+    if (!res.ok) throw new Error('Failed to fetch')
+    const data = await res.json() as { token?: unknown }
+    if (typeof data.token !== 'string' || data.token.length === 0) {
+      throw new Error('Invalid auth token response')
+    }
+    return data.token
+  } finally {
+    clearTimeout(timeout)
   }
-  return data.token
 }
 
 function requestToken(forceRefresh = false): Promise<string> {

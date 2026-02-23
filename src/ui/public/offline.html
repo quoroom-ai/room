@@ -4,7 +4,7 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta name="theme-color" content="#111827" />
-    <title>Quoroom Offline</title>
+    <title>Quoroom</title>
     <style>
       :root {
         color-scheme: dark;
@@ -44,14 +44,86 @@
         padding: 10px 12px;
         cursor: pointer;
       }
+      .spinner {
+        width: 18px;
+        height: 18px;
+        border: 2px solid #2a345a;
+        border-top-color: #f59542;
+        border-radius: 50%;
+        animation: spin 0.8s linear infinite;
+        display: inline-block;
+        vertical-align: middle;
+        margin-right: 8px;
+      }
+      @keyframes spin {
+        to { transform: rotate(360deg); }
+      }
+      .status {
+        font-size: 13px;
+        color: #6b7aad;
+        margin-top: 4px;
+      }
     </style>
   </head>
   <body>
-    <main class="card">
+    <!-- State A: Connecting (auto-retry active) -->
+    <main id="connecting" class="card">
+      <h1><span class="spinner"></span>Starting server...</h1>
+      <p>Quoroom is starting up. This usually takes a few seconds.</p>
+      <p id="status" class="status"></p>
+    </main>
+
+    <!-- State B: Failed (auto-retry exhausted) -->
+    <main id="failed" class="card" style="display:none">
       <h1>You're offline</h1>
-      <p>Quoroom cannot reach the server right now. Reconnect and retry.</p>
-      <button type="button" onclick="location.reload()">Retry</button>
+      <p>Quoroom cannot reach the server right now.</p>
+      <button type="button" id="retry-btn">Retry</button>
       <p style="margin-top:12px"><a href="mailto:hello@email.quoroom.ai?subject=Offline issue&body=Quoroom is not reachable." style="color:#a9b3d9;font-size:13px">Email Developer</a></p>
     </main>
+
+    <script>
+      (function () {
+        var MAX_ATTEMPTS = 10;
+        var INTERVAL_MS = 2000;
+        var attempt = 0;
+        var connecting = document.getElementById('connecting');
+        var failed = document.getElementById('failed');
+        var status = document.getElementById('status');
+        var retryBtn = document.getElementById('retry-btn');
+
+        function tryConnect() {
+          attempt++;
+          if (status) status.textContent = 'Attempt ' + attempt + ' of ' + MAX_ATTEMPTS + '...';
+
+          fetch('/api/status', { cache: 'no-store' })
+            .then(function (res) {
+              if (res.ok) { location.reload(); return; }
+              scheduleNext();
+            })
+            .catch(function () {
+              scheduleNext();
+            });
+        }
+
+        function scheduleNext() {
+          if (attempt >= MAX_ATTEMPTS) {
+            connecting.style.display = 'none';
+            failed.style.display = 'block';
+            return;
+          }
+          setTimeout(tryConnect, INTERVAL_MS);
+        }
+
+        function restart() {
+          attempt = 0;
+          failed.style.display = 'none';
+          connecting.style.display = 'block';
+          tryConnect();
+        }
+
+        retryBtn.addEventListener('click', restart);
+        tryConnect();
+      })();
+    </script>
   </body>
 </html>
