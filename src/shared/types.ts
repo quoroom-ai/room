@@ -28,6 +28,8 @@ export interface Worker {
   model: string | null
   isDefault: boolean
   taskCount: number
+  cycleGapMs: number | null
+  maxTurns: number | null
   roomId: number | null
   agentState: AgentState
   votesCast: number
@@ -43,6 +45,8 @@ export interface CreateWorkerInput {
   description?: string
   model?: string
   isDefault?: boolean
+  cycleGapMs?: number | null
+  maxTurns?: number | null
   roomId?: number
   agentState?: AgentState
 }
@@ -166,6 +170,8 @@ export interface WorkerCycle {
   status: string
   errorMessage: string | null
   durationMs: number | null
+  inputTokens: number | null
+  outputTokens: number | null
 }
 
 export interface CycleLogEntry {

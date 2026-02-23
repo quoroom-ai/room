@@ -53,7 +53,7 @@ export function HelpPanel({ installPrompt, onStartWalkthrough }: HelpPanelProps)
                 ? 'Hosted server, SQLite database.'
                 : <>Server at <span className="font-mono text-text-secondary">localhost:3700</span>, SQLite database.</>
               }{' '}
-              Queen and workers support Claude/Codex/API and free Ollama models.
+              Queen and workers support Claude, Codex, OpenAI, and Anthropic API models.
             </p>
             <p className="text-xs text-text-muted">
               {APP_MODE === 'cloud'
@@ -74,7 +74,7 @@ export function HelpPanel({ installPrompt, onStartWalkthrough }: HelpPanelProps)
             </div>
             <div className="flex gap-2">
               <span className="font-medium text-text-secondary shrink-0">Worker</span>
-              <span className="text-text-muted">— executor, can inherit queen model or use Ollama</span>
+              <span className="text-text-muted">— executor, can inherit queen model or use a separate API model</span>
             </div>
             <div className="flex gap-2">
               <span className="font-medium text-text-secondary shrink-0">Goals</span>
@@ -130,9 +130,7 @@ export function HelpPanel({ installPrompt, onStartWalkthrough }: HelpPanelProps)
             </p>
             <p className="text-xs text-text-muted">
               <span className="font-medium text-text-secondary">No token budget?</span>{' '}
-              {APP_MODE === 'cloud'
-                ? 'Pick an Ollama model in Room Settings — free models are available on your server.'
-                : 'Pick an Ollama model in Room Settings. Queen model install runs automatically.'}
+              Use a pay-per-use API model (OpenAI or Anthropic) for precise cost control.
             </p>
           </div>
         </div>

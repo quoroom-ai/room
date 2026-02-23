@@ -77,6 +77,26 @@ export function runMigrations(database: Database.Database, log: (msg: string) =>
     database.exec(`CREATE UNIQUE INDEX IF NOT EXISTS idx_rooms_webhook_token ON rooms(webhook_token) WHERE webhook_token IS NOT NULL`)
   }
 
+  // Add token usage columns to worker_cycles
+  const hasCycleInputTokens = (database.prepare(
+    `SELECT name FROM pragma_table_info('worker_cycles') WHERE name='input_tokens'`
+  ).get() as { name: string } | undefined)?.name
+  if (!hasCycleInputTokens) {
+    database.exec(`ALTER TABLE worker_cycles ADD COLUMN input_tokens INTEGER`)
+    database.exec(`ALTER TABLE worker_cycles ADD COLUMN output_tokens INTEGER`)
+    log('Migrated: added token usage columns to worker_cycles')
+  }
+
+  // Add cycle_gap_ms and max_turns to workers (per-worker execution profiles)
+  const hasWorkerCycleGap = (database.prepare(
+    `SELECT name FROM pragma_table_info('workers') WHERE name='cycle_gap_ms'`
+  ).get() as { name: string } | undefined)?.name
+  if (!hasWorkerCycleGap) {
+    database.exec(`ALTER TABLE workers ADD COLUMN cycle_gap_ms INTEGER`)
+    database.exec(`ALTER TABLE workers ADD COLUMN max_turns INTEGER`)
+    log('Migrated: added cycle_gap_ms and max_turns columns to workers')
+  }
+
   // Migrate ollama models → 'claude' (ollama removed in v0.1.12+)
   const ollamaWorkers = database
     .prepare(`SELECT id FROM workers WHERE model LIKE 'ollama:%'`)

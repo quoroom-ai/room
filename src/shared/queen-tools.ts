@@ -4,6 +4,7 @@ import { propose, vote, tally } from './quorum'
 import { updateGoalProgress, decomposeGoal, completeGoal, abandonGoal, setRoomObjective } from './goals'
 import type { DecisionType, VoteValue } from './types'
 import { webFetch, webSearch, browserAction, type BrowserAction } from './web-tools'
+import { WORKER_ROLE_PRESETS } from './constants'
 
 // ─── Tool definition format (OpenAI-compatible) ─────────────────────────────
 
@@ -152,14 +153,16 @@ export const QUEEN_TOOL_DEFINITIONS: ToolDef[] = [
     type: 'function',
     function: {
       name: 'quoroom_create_worker',
-      description: 'Create a new agent worker. REQUIRED: name (string, e.g. "Alice") and systemPrompt (string, the agent\'s instructions). Do NOT pass worker_id or room_id — this creates a NEW worker.',
+      description: 'Create a new agent worker. REQUIRED: name (string, e.g. "Alice") and systemPrompt (string, the agent\'s instructions). Do NOT pass worker_id or room_id — this creates a NEW worker. Role presets (guardian/analyst/writer) auto-apply cycle_gap_ms and max_turns defaults unless overridden.',
       parameters: {
         type: 'object',
         properties: {
           name: { type: 'string', description: 'The worker\'s name, e.g. "Alice" or "Research Agent"' },
           systemPrompt: { type: 'string', description: 'Full instructions for this worker — personality, goals, constraints. E.g. "You are a research agent. Your job is to..."' },
-          role: { type: 'string', description: 'Optional job title, e.g. "Chief of Staff"' },
-          description: { type: 'string', description: 'Optional one-line summary of what this worker does' }
+          role: { type: 'string', description: 'Optional job title or role preset. Built-in presets with execution defaults: "guardian" (60s cycle, 5 turns, monitoring-focused), "analyst" (300s cycle, 15 turns), "writer" (300s cycle, 20 turns).' },
+          description: { type: 'string', description: 'Optional one-line summary of what this worker does' },
+          cycle_gap_ms: { type: 'number', description: 'Override cycle gap in milliseconds (default: role preset or room default)' },
+          max_turns: { type: 'number', description: 'Override max turns per cycle (default: role preset or room default)' }
         },
         required: ['name', 'systemPrompt']
       }
@@ -169,7 +172,7 @@ export const QUEEN_TOOL_DEFINITIONS: ToolDef[] = [
     type: 'function',
     function: {
       name: 'quoroom_update_worker',
-      description: 'Update an existing worker\'s name, role, system prompt, or description.',
+      description: 'Update an existing worker\'s name, role, system prompt, description, or execution settings.',
       parameters: {
         type: 'object',
         properties: {
@@ -177,7 +180,9 @@ export const QUEEN_TOOL_DEFINITIONS: ToolDef[] = [
           name: { type: 'string', description: 'New name' },
           role: { type: 'string', description: 'New role/function title' },
           systemPrompt: { type: 'string', description: 'New system prompt' },
-          description: { type: 'string', description: 'New description' }
+          description: { type: 'string', description: 'New description' },
+          cycle_gap_ms: { type: 'number', description: 'Override cycle gap in milliseconds (null to reset to room default)' },
+          max_turns: { type: 'number', description: 'Override max turns per cycle (null to reset to room default)' }
         },
         required: ['workerId']
       }
@@ -438,8 +443,15 @@ export async function executeQueenTool(
         if (!systemPrompt) return { content: 'Error: systemPrompt is required for quoroom_create_worker. Provide a "systemPrompt" string describing this worker\'s role and instructions.', isError: true }
         const role = args.role && args.role !== args.name ? String(args.role) : undefined
         const description = args.description ? String(args.description) : undefined
-        queries.createWorker(db, { name, role, systemPrompt, description, roomId })
-        return { content: `Created worker "${name}"${role ? ` (${role})` : ''}.` }
+        // Apply role preset defaults (explicit args override preset)
+        const preset = role ? WORKER_ROLE_PRESETS[role] : undefined
+        const cycleGapMs = args.cycle_gap_ms != null ? Number(args.cycle_gap_ms) : (preset?.cycleGapMs ?? null)
+        const maxTurns = args.max_turns != null ? Number(args.max_turns) : (preset?.maxTurns ?? null)
+        queries.createWorker(db, { name, role, systemPrompt, description, cycleGapMs, maxTurns, roomId })
+        const presetNote = preset && (cycleGapMs || maxTurns)
+          ? ` [${role} preset: ${cycleGapMs ? `${cycleGapMs / 1000}s cycle` : ''}${cycleGapMs && maxTurns ? ', ' : ''}${maxTurns ? `${maxTurns} turns` : ''}]`
+          : ''
+        return { content: `Created worker "${name}"${role ? ` (${role})` : ''}${presetNote}.` }
       }
 
       case 'quoroom_update_worker': {
@@ -451,6 +463,8 @@ export async function executeQueenTool(
         if (args.role !== undefined) updates.role = String(args.role)
         if (args.systemPrompt !== undefined) updates.systemPrompt = String(args.systemPrompt)
         if (args.description !== undefined) updates.description = String(args.description)
+        if (args.cycle_gap_ms !== undefined) updates.cycleGapMs = args.cycle_gap_ms === null ? null : Number(args.cycle_gap_ms)
+        if (args.max_turns !== undefined) updates.maxTurns = args.max_turns === null ? null : Number(args.max_turns)
         queries.updateWorker(db, wId, updates)
         return { content: `Updated worker "${w.name}".` }
       }

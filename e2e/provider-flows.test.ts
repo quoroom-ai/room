@@ -1,6 +1,6 @@
 /**
- * E2E: Provider connect/disconnect, Ollama setup, and wallet onramp flows.
- * Uses route interception to mock server responses — no real CLI or Ollama needed.
+ * E2E: Provider connect/disconnect and wallet onramp flows.
+ * Uses route interception to mock server responses — no real CLI needed.
  */
 
 import { test, expect, type APIRequestContext, type Page } from '@playwright/test'
@@ -210,81 +210,6 @@ test('provider disconnect sends POST to correct endpoint', async ({ page, reques
   )
   await page.locator('button').filter({ hasText: /^Disconnect$/ }).first().click()
   await disconnectReq
-})
-
-// ─── Ollama Setup (Success) ──────────────────────────────────────────
-
-test('ollama model selection triggers start and ensure-model', async ({ page, request }) => {
-  const roomName = uniqueRoomName('Ollama OK')
-  const roomId = await createRoomApi(request, roomName)
-
-  // Mock Ollama endpoints
-  await page.route('**/api/ollama/start', async (route) => {
-    await route.fulfill({ json: { available: true, status: 'running' } })
-  })
-  await page.route('**/api/ollama/ensure-model', async (route) => {
-    await route.fulfill({ json: { ok: true, status: 'ready', model: 'qwen3:8b' } })
-  })
-
-  await openRoomSettings(page, roomId, roomName)
-
-  // Find the Queen Model select and pick an Ollama model
-  const ollamaStartReq = page.waitForRequest(
-    (req) => req.method() === 'POST' && new URL(req.url()).pathname === '/api/ollama/start'
-  )
-  const ensureModelReq = page.waitForRequest(
-    (req) => req.method() === 'POST' && new URL(req.url()).pathname === '/api/ollama/ensure-model'
-  )
-
-  // Use the setup guide button to apply an Ollama model
-  await page.locator('button').filter({ hasText: /Setup guide/ }).first().click()
-  await expect(page.getByRole('heading', { name: 'Room Setup Flow' })).toBeVisible({ timeout: 5000 })
-  await page.locator('button').filter({ hasText: 'Free Ollama' }).first().click()
-  await page.getByRole('button', { name: 'Next' }).click()
-  await page.getByRole('button', { name: 'Next' }).click()
-  await page.getByRole('button', { name: 'Apply and Continue' }).click()
-
-  await ollamaStartReq
-  await ensureModelReq
-})
-
-// ─── Ollama Setup (Failure) ──────────────────────────────────────────
-
-test('ollama failure shows error feedback', async ({ page, request }) => {
-  const roomName = uniqueRoomName('Ollama Fail')
-  const roomId = await createRoomApi(request, roomName)
-
-  // Mock Ollama start failure
-  await page.route('**/api/ollama/start', async (route) => {
-    await route.fulfill({ json: { available: false, status: 'install_failed' } })
-  })
-
-  await openRoomSettings(page, roomId, roomName)
-
-  // Open setup guide and apply Ollama path
-  await page.locator('button').filter({ hasText: /Setup guide/ }).first().click()
-  await expect(page.getByRole('heading', { name: 'Room Setup Flow' })).toBeVisible({ timeout: 5000 })
-  await page.locator('button').filter({ hasText: 'Free Ollama' }).first().click()
-  await page.getByRole('button', { name: 'Next' }).click()
-  await page.getByRole('button', { name: 'Next' }).click()
-  await page.getByRole('button', { name: 'Apply and Continue' }).click()
-
-  // Modal should close but settings panel should show error feedback
-  await expect(page.getByRole('heading', { name: 'Room Setup Flow' })).not.toBeVisible({ timeout: 10000 })
-
-  // Verify the Ollama start request was made
-  const ollamaStarted = await page.evaluate(async () => {
-    // Poll briefly for feedback text to appear in the UI
-    for (let i = 0; i < 10; i++) {
-      const el = document.querySelector('[class*="text-status-error"], [class*="text-status-warning"]')
-      if (el?.textContent?.toLowerCase().includes('ollama')) return true
-      await new Promise(r => setTimeout(r, 500))
-    }
-    return false
-  })
-  // Ollama failure feedback may appear as a warning or error in the queen model section.
-  // The exact message depends on timeout behavior, so we just verify the request was made.
-  expect(ollamaStarted || true).toBeTruthy()
 })
 
 // ─── Wallet Onramp URL ───────────────────────────────────────────────

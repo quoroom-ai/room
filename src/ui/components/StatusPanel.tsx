@@ -23,6 +23,12 @@ interface StatusData {
 }
 
 
+function formatTokens(n: number): string {
+  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`
+  if (n >= 1_000) return `${(n / 1_000).toFixed(1)}K`
+  return String(n)
+}
+
 const cardClass =
   'w-full text-left p-3 bg-surface-secondary rounded-lg shadow-sm hover:bg-surface-hover transition-colors cursor-pointer'
 
@@ -146,11 +152,20 @@ export function StatusPanel({ onNavigate, advancedMode, roomId }: StatusPanelPro
     120000
   )
 
+  const { data: tokenUsage, refresh: refreshTokenUsage } = usePolling<{
+    total: { inputTokens: number; outputTokens: number; cycles: number }
+    today: { inputTokens: number; outputTokens: number; cycles: number }
+  } | null>(
+    () => roomId ? api.rooms.usage(roomId).catch(() => null) : Promise.resolve(null),
+    60000
+  )
+
   useEffect(() => {
     if (!roomId) return
     return wsClient.subscribe(`room:${roomId}`, (event: WsMessage) => {
       void refreshActivity()
       void refreshQueenStatus()
+      void refreshTokenUsage()
       if (ROOM_BALANCE_EVENT_TYPES.has(event.type)) {
         void refreshWallet()
         void refreshRevenueSummary()
@@ -166,6 +181,7 @@ export function StatusPanel({ onNavigate, advancedMode, roomId }: StatusPanelPro
     refreshOnChainBalance,
     refreshQueenStatus,
     refreshRevenueSummary,
+    refreshTokenUsage,
     refreshWallet,
     roomId,
   ])
@@ -515,12 +531,42 @@ export function StatusPanel({ onNavigate, advancedMode, roomId }: StatusPanelPro
         {lastRunCard}
         {walletCard}
         {networkCard}
+        {usageCard}
         {renderMainSection()}
       </div>
     )
   }
 
-  const cards = [queenCard, memoryCard, workersCard, tasksCard, watchesCard, lastRunCard, walletCard, networkCard].filter(Boolean)
+  const usage = tokenUsage ?? { total: { inputTokens: 0, outputTokens: 0, cycles: 0 }, today: { inputTokens: 0, outputTokens: 0, cycles: 0 }, isApiModel: false }
+  const hasTokenData = usage.total.inputTokens > 0 || usage.total.outputTokens > 0
+  const usageCard = (
+    <div key="usage" className={cardClass}>
+      <div className="flex items-center justify-between mb-1">
+        <span className="text-sm font-medium text-text-secondary">Token Usage</span>
+        <span className="text-sm text-text-muted">{usage.isApiModel ? 'API' : 'Subscription'}</span>
+      </div>
+      {!usage.isApiModel && !hasTokenData ? (
+        <div className="text-sm text-text-muted">Tracked by provider</div>
+      ) : (
+        <>
+          {usage.today.inputTokens > 0 || usage.today.outputTokens > 0 ? (
+            <div className="text-sm text-text-muted mb-0.5">
+              <span className="text-text-secondary">Today:</span>{' '}
+              <span className="text-interactive">{formatTokens(usage.today.inputTokens)}</span> in{' / '}
+              <span className="text-interactive">{formatTokens(usage.today.outputTokens)}</span> out
+            </div>
+          ) : null}
+          <div className="text-sm text-text-muted">
+            {formatTokens(usage.total.inputTokens)} in{' / '}
+            {formatTokens(usage.total.outputTokens)} out
+            <span className="text-text-muted ml-1">({usage.total.cycles} cycles)</span>
+          </div>
+        </>
+      )}
+    </div>
+  )
+
+  const cards = [queenCard, memoryCard, workersCard, tasksCard, watchesCard, lastRunCard, walletCard, networkCard, usageCard].filter(Boolean)
 
   return (
     <div ref={containerRef} className="p-4 flex flex-col gap-3 min-h-full overflow-x-hidden">

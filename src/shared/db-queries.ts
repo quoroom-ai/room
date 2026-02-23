@@ -155,10 +155,10 @@ export function createWorker(db: Database.Database, input: CreateWorkerInput): W
   }
   const result = db
     .prepare(
-      `INSERT INTO workers (name, role, system_prompt, description, model, is_default, room_id, agent_state)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
+      `INSERT INTO workers (name, role, system_prompt, description, model, is_default, cycle_gap_ms, max_turns, room_id, agent_state)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
     )
-    .run(input.name, input.role ?? null, input.systemPrompt, input.description ?? null, input.model ?? null, input.isDefault ? 1 : 0, input.roomId ?? null, input.agentState ?? 'idle')
+    .run(input.name, input.role ?? null, input.systemPrompt, input.description ?? null, input.model ?? null, input.isDefault ? 1 : 0, input.cycleGapMs ?? null, input.maxTurns ?? null, input.roomId ?? null, input.agentState ?? 'idle')
   return getWorker(db, result.lastInsertRowid as number)!
 }
 
@@ -178,14 +178,15 @@ export function getWorkerCount(db: Database.Database): number {
 }
 
 export function updateWorker(db: Database.Database, id: number, updates: Partial<{
-  name: string; role: string | null; systemPrompt: string; description: string; model: string; isDefault: boolean; roomId: number | null; agentState: string
+  name: string; role: string | null; systemPrompt: string; description: string; model: string; isDefault: boolean; cycleGapMs: number | null; maxTurns: number | null; roomId: number | null; agentState: string
 }>): void {
   if (updates.isDefault === true) {
     db.prepare('UPDATE workers SET is_default = 0 WHERE is_default = 1').run()
   }
   const fieldMap: Record<string, string> = {
     name: 'name', role: 'role', systemPrompt: 'system_prompt', description: 'description',
-    model: 'model', isDefault: 'is_default', roomId: 'room_id', agentState: 'agent_state'
+    model: 'model', isDefault: 'is_default', cycleGapMs: 'cycle_gap_ms', maxTurns: 'max_turns',
+    roomId: 'room_id', agentState: 'agent_state'
   }
   const fields: string[] = []
   const values: unknown[] = []
@@ -228,6 +229,8 @@ function mapWorkerRow(row: Record<string, unknown>): Worker {
     model: row.model as string | null,
     isDefault: (row.is_default as number) === 1,
     taskCount: (row.task_count as number) ?? 0,
+    cycleGapMs: (row.cycle_gap_ms as number | null) ?? null,
+    maxTurns: (row.max_turns as number | null) ?? null,
     roomId: (row.room_id as number | null) ?? null,
     agentState: ((row.agent_state as string) ?? 'idle') as Worker['agentState'],
     votesCast: (row.votes_cast as number) ?? 0,
@@ -2037,6 +2040,8 @@ function mapWorkerCycleRow(row: Record<string, unknown>): WorkerCycle {
     status: row.status as string,
     errorMessage: row.error_message as string | null,
     durationMs: row.duration_ms as number | null,
+    inputTokens: row.input_tokens as number | null,
+    outputTokens: row.output_tokens as number | null,
   }
 }
 
@@ -2063,14 +2068,19 @@ export function getWorkerCycle(db: Database.Database, id: number): WorkerCycle |
   return row ? mapWorkerCycleRow(row) : null
 }
 
-export function completeWorkerCycle(db: Database.Database, cycleId: number, errorMessage?: string): void {
+export function completeWorkerCycle(
+  db: Database.Database,
+  cycleId: number,
+  errorMessage?: string,
+  usage?: { inputTokens: number; outputTokens: number }
+): void {
   const cycle = getWorkerCycle(db, cycleId)
   if (!cycle) return
   const status = errorMessage ? 'failed' : 'completed'
   const durationMs = Date.now() - new Date(cycle.startedAt).getTime()
   db.prepare(
-    "UPDATE worker_cycles SET finished_at = datetime('now','localtime'), status = ?, error_message = ?, duration_ms = ? WHERE id = ?"
-  ).run(status, errorMessage ?? null, durationMs, cycleId)
+    "UPDATE worker_cycles SET finished_at = datetime('now','localtime'), status = ?, error_message = ?, duration_ms = ?, input_tokens = ?, output_tokens = ? WHERE id = ?"
+  ).run(status, errorMessage ?? null, durationMs, usage?.inputTokens ?? null, usage?.outputTokens ?? null, cycleId)
 }
 
 export function listRoomCycles(db: Database.Database, roomId: number, limit: number = 20): WorkerCycle[] {
@@ -2086,6 +2096,29 @@ export function cleanupStaleCycles(db: Database.Database): number {
     "UPDATE worker_cycles SET status = 'failed', error_message = 'Server restarted', finished_at = datetime('now','localtime') WHERE status = 'running'"
   ).run()
   return result.changes
+}
+
+export interface TokenUsageSummary {
+  inputTokens: number
+  outputTokens: number
+  cycles: number
+}
+
+export function getRoomTokenUsage(db: Database.Database, roomId: number): TokenUsageSummary {
+  const row = db.prepare(
+    `SELECT COALESCE(SUM(input_tokens), 0) as input_tokens, COALESCE(SUM(output_tokens), 0) as output_tokens, COUNT(*) as cycles
+     FROM worker_cycles WHERE room_id = ? AND status = 'completed' AND (input_tokens IS NOT NULL OR output_tokens IS NOT NULL)`
+  ).get(roomId) as { input_tokens: number; output_tokens: number; cycles: number }
+  return { inputTokens: row.input_tokens, outputTokens: row.output_tokens, cycles: row.cycles }
+}
+
+export function getRoomTokenUsageToday(db: Database.Database, roomId: number): TokenUsageSummary {
+  const row = db.prepare(
+    `SELECT COALESCE(SUM(input_tokens), 0) as input_tokens, COALESCE(SUM(output_tokens), 0) as output_tokens, COUNT(*) as cycles
+     FROM worker_cycles WHERE room_id = ? AND status = 'completed' AND (input_tokens IS NOT NULL OR output_tokens IS NOT NULL)
+     AND started_at >= date('now','localtime')`
+  ).get(roomId) as { input_tokens: number; output_tokens: number; cycles: number }
+  return { inputTokens: row.input_tokens, outputTokens: row.output_tokens, cycles: row.cycles }
 }
 
 export function insertCycleLogs(

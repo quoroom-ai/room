@@ -1112,7 +1112,7 @@ export function RoomSettingsPanel({ roomId }: RoomSettingsPanelProps): React.JSX
                     </div>
                   )}
                 </div>,
-                'LLM provider for the queen. Selecting an Ollama model will auto-install and start it if needed.'
+                'LLM provider for the queen. Subscription models (Claude, Codex) or pay-per-use API keys.'
               )}
 
               {row(
@@ -1128,7 +1128,7 @@ export function RoomSettingsPanel({ roomId }: RoomSettingsPanelProps): React.JSX
                   <span className="font-medium text-text-secondary">Setup outcomes:</span>{' '}
                   Subscription models usually give best quality with lowest setup friction.
                   API models are good for strict key-based billing.
-                  Ollama is free and fully self-hosted, but quality and speed depend on local/server hardware.
+                  API models are good for strict key-based billing with per-token pricing.
                 </p>
               </div>
 
@@ -1561,7 +1561,7 @@ export function RoomSettingsPanel({ roomId }: RoomSettingsPanelProps): React.JSX
                   options={workerModelOptions}
                   disabled={!hasWorkerModelLoaded}
                 />,
-                'Choose worker model. "Use queen model" inherits whatever queen uses; Ollama worker models run on stations.'
+                'Choose worker model. "Use queen model" inherits whatever queen uses; API models use their own key.'
               )}
             </div>
           </div>

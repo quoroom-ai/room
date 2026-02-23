@@ -39,6 +39,7 @@ export interface AgentExecutionResult {
   durationMs: number
   sessionId: string | null
   timedOut: boolean
+  usage?: { inputTokens: number; outputTokens: number }
 }
 
 const DEFAULT_HTTP_TIMEOUT_MS = 60_000
@@ -240,6 +241,7 @@ async function executeOpenAiWithTools(options: AgentExecutionOptions): Promise<A
   ]
 
   let finalOutput = ''
+  let totalInputTokens = 0, totalOutputTokens = 0
 
   for (let turn = 0; turn < maxTurns; turn++) {
     const controller = new AbortController()
@@ -256,14 +258,21 @@ async function executeOpenAiWithTools(options: AgentExecutionOptions): Promise<A
       })
       json = await response.json() as Record<string, unknown>
       if (!response.ok) {
-        return { output: `OpenAI API ${response.status}: ${extractApiError(json)}`, exitCode: 1, durationMs: Date.now() - startTime, sessionId: null, timedOut: false }
+        return { output: `OpenAI API ${response.status}: ${extractApiError(json)}`, exitCode: 1, durationMs: Date.now() - startTime, sessionId: null, timedOut: false, usage: { inputTokens: totalInputTokens, outputTokens: totalOutputTokens } }
       }
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err)
       const timedOut = msg.toLowerCase().includes('aborted') || msg.toLowerCase().includes('timeout')
-      return { output: `Error: ${msg}`, exitCode: 1, durationMs: Date.now() - startTime, sessionId: null, timedOut }
+      return { output: `Error: ${msg}`, exitCode: 1, durationMs: Date.now() - startTime, sessionId: null, timedOut, usage: { inputTokens: totalInputTokens, outputTokens: totalOutputTokens } }
     } finally {
       clearTimeout(timer)
+    }
+
+    // Accumulate token usage
+    const usage = json.usage as { prompt_tokens?: number; completion_tokens?: number } | undefined
+    if (usage) {
+      totalInputTokens += usage.prompt_tokens ?? 0
+      totalOutputTokens += usage.completion_tokens ?? 0
     }
 
     const choices = json.choices as Array<Record<string, unknown>> | undefined
@@ -299,7 +308,7 @@ async function executeOpenAiWithTools(options: AgentExecutionOptions): Promise<A
     }
   }
 
-  return { output: finalOutput || 'Actions completed.', exitCode: 0, durationMs: Date.now() - startTime, sessionId: null, timedOut: false }
+  return { output: finalOutput || 'Actions completed.', exitCode: 0, durationMs: Date.now() - startTime, sessionId: null, timedOut: false, usage: { inputTokens: totalInputTokens, outputTokens: totalOutputTokens } }
 }
 
 // ─── Anthropic multi-turn tool-call loop ────────────────────────────────────
@@ -347,6 +356,7 @@ async function executeAnthropicWithTools(options: AgentExecutionOptions): Promis
     }
   ]
   let finalOutput = ''
+  let totalInputTokens = 0, totalOutputTokens = 0
 
   for (let turn = 0; turn < maxTurns; turn++) {
     const controller = new AbortController()
@@ -373,14 +383,21 @@ async function executeAnthropicWithTools(options: AgentExecutionOptions): Promis
       })
       json = await response.json() as Record<string, unknown>
       if (!response.ok) {
-        return { output: `Anthropic API ${response.status}: ${extractApiError(json)}`, exitCode: 1, durationMs: Date.now() - startTime, sessionId: null, timedOut: false }
+        return { output: `Anthropic API ${response.status}: ${extractApiError(json)}`, exitCode: 1, durationMs: Date.now() - startTime, sessionId: null, timedOut: false, usage: { inputTokens: totalInputTokens, outputTokens: totalOutputTokens } }
       }
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err)
       const timedOut = msg.toLowerCase().includes('aborted') || msg.toLowerCase().includes('timeout')
-      return { output: `Error: ${msg}`, exitCode: 1, durationMs: Date.now() - startTime, sessionId: null, timedOut }
+      return { output: `Error: ${msg}`, exitCode: 1, durationMs: Date.now() - startTime, sessionId: null, timedOut, usage: { inputTokens: totalInputTokens, outputTokens: totalOutputTokens } }
     } finally {
       clearTimeout(timer)
+    }
+
+    // Accumulate token usage
+    const usage = json.usage as { input_tokens?: number; output_tokens?: number } | undefined
+    if (usage) {
+      totalInputTokens += usage.input_tokens ?? 0
+      totalOutputTokens += usage.output_tokens ?? 0
     }
 
     const stopReason = json.stop_reason as string | undefined
@@ -418,7 +435,7 @@ async function executeAnthropicWithTools(options: AgentExecutionOptions): Promis
     }
   }
 
-  return { output: finalOutput || 'Actions completed.', exitCode: 0, durationMs: Date.now() - startTime, sessionId: null, timedOut: false }
+  return { output: finalOutput || 'Actions completed.', exitCode: 0, durationMs: Date.now() - startTime, sessionId: null, timedOut: false, usage: { inputTokens: totalInputTokens, outputTokens: totalOutputTokens } }
 }
 
 async function executeOpenAiApi(options: AgentExecutionOptions): Promise<AgentExecutionResult> {
@@ -459,13 +476,15 @@ async function executeOpenAiApi(options: AgentExecutionOptions): Promise<AgentEx
         timedOut: false
       }
     }
+    const apiUsage = json.usage as { prompt_tokens?: number; completion_tokens?: number } | undefined
     const output = extractOpenAiText(json)
     return {
       output,
       exitCode: 0,
       durationMs: Date.now() - startTime,
       sessionId: null,
-      timedOut: false
+      timedOut: false,
+      usage: apiUsage ? { inputTokens: apiUsage.prompt_tokens ?? 0, outputTokens: apiUsage.completion_tokens ?? 0 } : undefined
     }
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err)
@@ -519,13 +538,15 @@ async function executeAnthropicApi(options: AgentExecutionOptions): Promise<Agen
         timedOut: false
       }
     }
+    const apiUsage = json.usage as { input_tokens?: number; output_tokens?: number } | undefined
     const output = extractAnthropicText(json)
     return {
       output,
       exitCode: 0,
       durationMs: Date.now() - startTime,
       sessionId: null,
-      timedOut: false
+      timedOut: false,
+      usage: apiUsage ? { inputTokens: apiUsage.input_tokens ?? 0, outputTokens: apiUsage.output_tokens ?? 0 } : undefined
     }
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err)

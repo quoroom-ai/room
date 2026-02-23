@@ -392,6 +392,18 @@ export function registerRoomRoutes(router: Router): void {
     return { data: cycles }
   })
 
+  router.get('/api/rooms/:id/usage', (ctx) => {
+    const roomId = Number(ctx.params.id)
+    const total = queries.getRoomTokenUsage(ctx.db, roomId)
+    const today = queries.getRoomTokenUsageToday(ctx.db, roomId)
+    // Include model mode so UI knows if tokens are tracked
+    const room = queries.getRoom(ctx.db, roomId)
+    const queenWorker = room?.queenWorkerId ? queries.getWorker(ctx.db, room.queenWorkerId) : null
+    const model = queenWorker?.model ?? room?.workerModel ?? 'claude'
+    const isApiModel = model.startsWith('openai') || model.startsWith('anthropic') || model.startsWith('claude-api')
+    return { data: { total, today, isApiModel } }
+  })
+
   router.get('/api/cycles/:id/logs', (ctx) => {
     const cycleId = Number(ctx.params.id)
     const afterSeq = ctx.query.afterSeq ? Number(ctx.query.afterSeq) : undefined

@@ -27,6 +27,8 @@ CREATE TABLE IF NOT EXISTS workers (
     model TEXT,
     is_default INTEGER NOT NULL DEFAULT 0,
     task_count INTEGER NOT NULL DEFAULT 0,
+    cycle_gap_ms INTEGER,
+    max_turns INTEGER,
     room_id INTEGER,
     agent_state TEXT NOT NULL DEFAULT 'idle',
     votes_cast INTEGER NOT NULL DEFAULT 0,
@@ -427,7 +429,9 @@ CREATE TABLE IF NOT EXISTS worker_cycles (
     finished_at DATETIME,
     status TEXT NOT NULL DEFAULT 'running',
     error_message TEXT,
-    duration_ms INTEGER
+    duration_ms INTEGER,
+    input_tokens INTEGER,
+    output_tokens INTEGER
 );
 CREATE INDEX IF NOT EXISTS idx_worker_cycles_room ON worker_cycles(room_id, started_at DESC);
 CREATE INDEX IF NOT EXISTS idx_worker_cycles_status ON worker_cycles(status);

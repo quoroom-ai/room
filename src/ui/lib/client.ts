@@ -412,6 +412,12 @@ export const api = {
         workers?: Array<{ name: string; state: string }>; stations?: Array<{ name: string; status: string; tier: string }>;
         online?: boolean; registeredAt?: string;
       }>>('GET', `/api/rooms/${id}/network`),
+    usage: (id: number) =>
+      request<{
+        total: { inputTokens: number; outputTokens: number; cycles: number }
+        today: { inputTokens: number; outputTokens: number; cycles: number }
+        isApiModel: boolean
+      }>('GET', `/api/rooms/${id}/usage`),
   },
 
   // ─── Goals ───────────────────────────────────────────────

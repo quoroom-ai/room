@@ -318,7 +318,7 @@ export async function executeTask(
     }
   }
 
-  // ─── Local path: Claude CLI or standalone Ollama → use concurrency slot ──────
+  // ─── Local path: Claude CLI or API model → use concurrency slot ──────
   await acquireSlot(getMaxConcurrentTasks(db, task.roomId))
 
   runningTasks.add(taskId)

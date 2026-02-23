@@ -11,7 +11,7 @@ This is the most typical keeper path in current code:
 2. Create a room (`POST /api/rooms`) from sidebar `+ New Room`.
 3. Open room `Settings` and set:
    - autonomy mode (`auto` or `semi`)
-   - queen model/provider (Claude/Codex/API/Ollama)
+   - queen model/provider (Claude/Codex/OpenAI API/Anthropic API)
 4. Use `Overview` + `Chat` to observe and interact with queen.
 5. In `semi` mode, create/update Workers, Tasks, Goals, Skills, Watches.
 6. Track Decisions/Votes and Messages (escalations + room messages).
@@ -25,7 +25,7 @@ After creating a room:
 1. User is routed to Room Settings automatically.
 2. A setup popup appears once for that newly created room.
 3. Popup guides keeper through:
-- choose setup path (Claude sub / Codex sub / OpenAI API / Anthropic API / Ollama free)
+- choose setup path (Claude sub / Codex sub / OpenAI API / Anthropic API)
 - review required prerequisites and likely outcome
 - apply selected model path directly
 4. Keeper can reopen the same setup popup later via Room Settings -> Queen -> "Setup guide".
@@ -66,17 +66,9 @@ When configuring a new room, model/provider choice changes reliability, cost, an
 - Outcome:
   - Key-based Anthropic workflow, explicit credential management.
 
-5. Free Ollama path (`model=ollama:*`)
-- Keeper action:
-  - Select Ollama model; runtime auto-start/install is attempted.
-  - Retry setup if install/start fails.
-- Outcome:
-  - No subscription, no paid API key required.
-  - Quality/speed depend on machine/server resources.
-
 Important:
 - If subscription is detected in runtime (Claude or Codex connected), that path should be recommended first.
-- If no subscription is detected, explicitly guide user toward API-key path or Ollama free path.
+- If no subscription is detected, explicitly guide user toward API-key path.
 
 ## 2) Full User Flow Catalog (Functional)
 
@@ -163,7 +155,7 @@ Browser flow automation added:
   - `src/ui/lib/client.ts` no longer exposes removed local `/api/stations` mutation routes.
 
 ## High (Remaining)
-1. Provider/Ollama/onramp flows are not covered by Playwright E2E.
+1. Provider/onramp flows are not covered by Playwright E2E.
 - Evidence:
   - Routes exist (`src/server/routes/providers.ts`, `src/server/routes/status.ts`, `src/server/routes/wallet.ts`) but no dedicated E2E spec.
 - Impact:
@@ -181,7 +173,6 @@ Browser flow automation added:
 - Provider connect/install/disconnect lifecycle.
 - Archive room with active cloud stations (assert cancellation happened).
 - Wallet onramp URL/redirect behavior.
-- Ollama start/ensure-model failure and success paths.
 
 2. Add explicit user-visible error states for destructive actions.
 - Archive, station actions, provider sessions, credential validation.
@@ -192,5 +183,5 @@ Browser flow automation added:
 ## 6) Notes For Agents
 
 - Current test baseline is green and archive/station mismatch is fixed in this branch.
-- Next stability wins are in provider/onramp/ollama E2E coverage and reducing silent UI catches.
+- Next stability wins are in provider/onramp E2E coverage and reducing silent UI catches.
 - Setup UX now includes a post-create guided popup and should be treated as the primary keeper onboarding path for room model selection.

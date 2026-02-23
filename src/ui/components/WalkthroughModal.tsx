@@ -7,7 +7,7 @@ const isCloud = APP_MODE === 'cloud'
 const steps = [
   {
     title: 'You are the Keeper',
-    body: 'Your room is a swarm of AI agents. A Queen is created automatically when you start — pick her brain in Settings: Claude, Codex, OpenAI, or a free local model via Ollama.',
+    body: 'Your room is a swarm of AI agents. A Queen is created automatically when you start — pick her brain in Settings: Claude, Codex, OpenAI, or Anthropic API.',
   },
   {
     title: 'The Queen leads',
@@ -16,14 +16,14 @@ const steps = [
   {
     title: 'Workers multiply',
     body: isCloud
-      ? "The Queen spawns workers as needed. They share your server's resources, so more workers means more load. Workers can use the Queen's model or run on a separate free Ollama model."
-      : "The Queen spawns workers as needed. They share your machine resources, so more workers means more load. Workers can use the Queen's model or run on a separate free Ollama model.",
+      ? "The Queen spawns workers as needed. They share your server's resources, so more workers means more load. Workers can use the Queen's model or run on a separate API model."
+      : "The Queen spawns workers as needed. They share your machine resources, so more workers means more load. Workers can use the Queen's model or run on a separate API model.",
   },
   {
     title: 'Need more power? Rent stations',
     body: isCloud
       ? 'Stations add extra compute to your room — workers go to stations while the Queen stays on your server.'
-      : 'Workers can run on rented cloud stations with free Ollama models. This offloads compute from your machine — the Queen stays local, workers go remote.',
+      : 'Workers can run on rented cloud stations. This offloads compute from your machine — the Queen stays local, workers go remote.',
   },
   {
     title: 'Democracy in the swarm',

@@ -18,7 +18,9 @@ const EXTERNALS = [
   'better-sqlite3',
   'sqlite-vec',
   '@huggingface/transformers',
-  'onnxruntime-node'
+  'onnxruntime-node',
+  'playwright',
+  'playwright-core'
 ]
 
 const COMMON = {

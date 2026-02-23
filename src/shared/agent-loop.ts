@@ -12,6 +12,7 @@ import { fetchPublicRooms, getRoomCloudId, listCloudStations, type PublicRoom, t
 import { resolveApiKeyForModel } from './model-provider'
 import { createCycleLogBuffer, type CycleLogEntryCallback } from './console-log-buffer'
 import { QUEEN_TOOL_DEFINITIONS, executeQueenTool } from './queen-tools'
+import { WORKER_ROLE_PRESETS } from './constants'
 
 interface LoopState {
   running: boolean
@@ -102,7 +103,7 @@ export async function startAgentLoop(
       }
 
       try {
-        await runCycle(db, roomId, currentWorker, currentRoom.queenMaxTurns, options)
+        await runCycle(db, roomId, currentWorker, currentWorker.maxTurns ?? currentRoom.queenMaxTurns, options)
       } catch (err) {
         if (!loop.running) break
 
@@ -143,7 +144,7 @@ export async function startAgentLoop(
       if (!loop.running) break
 
       // Configurable sleep between cycles (token burn safeguard)
-      const gap = currentRoom.queenCycleGapMs
+      const gap = currentWorker.cycleGapMs ?? currentRoom.queenCycleGapMs
       try {
         const abort = new AbortController()
         loop.abort = abort
@@ -289,7 +290,9 @@ export async function runCycle(
     // 2. BUILD PROMPT
     const skillContent = loadSkillsForAgent(db, roomId, status.room.goal ?? '')
 
+    const rolePreset = worker.role ? WORKER_ROLE_PRESETS[worker.role] : undefined
     const systemPrompt = [
+      rolePreset?.systemPromptPrefix ? `${rolePreset.systemPromptPrefix}\n\n` : '',
       worker.systemPrompt,
       skillContent ? `\n\n# Active Skills\n\n${skillContent}` : ''
     ].join('')
@@ -557,8 +560,11 @@ export async function runCycle(
 
     // 4. PERSIST
     logBuffer.addSynthetic('system', 'Cycle completed')
+    if (result.usage && (result.usage.inputTokens > 0 || result.usage.outputTokens > 0)) {
+      logBuffer.addSynthetic('system', `Tokens: ${result.usage.inputTokens} in / ${result.usage.outputTokens} out`)
+    }
     logBuffer.flush()
-    queries.completeWorkerCycle(db, cycle.id)
+    queries.completeWorkerCycle(db, cycle.id, undefined, result.usage)
     options?.onCycleLifecycle?.('completed', cycle.id, roomId)
 
     queries.logRoomActivity(db, roomId, 'system',

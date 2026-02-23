@@ -15,6 +15,8 @@ export function registerWorkerRoutes(router: Router): void {
       description: body.description as string | undefined,
       role: body.role as string | undefined,
       isDefault: body.isDefault as boolean | undefined,
+      cycleGapMs: body.cycleGapMs != null ? Number(body.cycleGapMs) : undefined,
+      maxTurns: body.maxTurns != null ? Number(body.maxTurns) : undefined,
       roomId: body.roomId as number | undefined,
       agentState: body.agentState as AgentState | undefined
     })

@@ -198,6 +198,30 @@ export const CHATGPT_DEFAULTS_BY_PLAN = {
 } as const
 export type ChatGptPlan = keyof typeof CHATGPT_DEFAULTS_BY_PLAN
 
+export interface WorkerRolePreset {
+  cycleGapMs?: number
+  maxTurns?: number
+  systemPromptPrefix?: string
+}
+
+export const WORKER_ROLE_PRESETS: Record<string, WorkerRolePreset> = {
+  guardian: {
+    cycleGapMs: 60_000,
+    maxTurns: 5,
+    systemPromptPrefix: 'Monitor and observe. Do not spawn workers or make purchases. Focus on detecting anomalies in tasks, stations, and worker activity.'
+  },
+  analyst: {
+    cycleGapMs: 300_000,
+    maxTurns: 15,
+    systemPromptPrefix: 'Perform deep analysis. Work to completion on a task, then pause. Prefer depth over frequency.'
+  },
+  writer: {
+    cycleGapMs: 300_000,
+    maxTurns: 20,
+    systemPromptPrefix: 'Produce high-quality written output. Minimize interruptions between drafting sessions.'
+  },
+}
+
 export const DEFAULT_ROOM_CONFIG = {
   threshold: 'majority' as const,
   timeoutMinutes: 60,
