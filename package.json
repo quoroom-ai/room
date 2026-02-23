@@ -1,6 +1,6 @@
 {
   "name": "quoroom",
-  "version": "0.1.20",
+  "version": "0.1.21",
   "description": "Autonomous AI agent collective engine — Queen, Workers, Quorum",
   "main": "./out/mcp/server.js",
   "bin": {
