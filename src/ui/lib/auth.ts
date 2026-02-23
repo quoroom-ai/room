@@ -4,6 +4,7 @@ const DEFAULT_PORT = 3700
 const CLOUD_TOKEN_STORAGE_KEY = 'quoroom_cloud_token'
 const CLOUD_TOKEN_QUERY_KEY = 'token'
 const CLOUD_MODE_FLAG_KEY = 'quoroom_cloud_mode'
+const LOCAL_HOSTNAMES = new Set(['localhost', '127.0.0.1', '::1', '[::1]'])
 
 export type AppMode = 'local' | 'cloud'
 
@@ -13,8 +14,7 @@ function normalizeApiBase(url: string): string {
 
 export function isLocalHost(): boolean {
   if (typeof location === 'undefined') return true
-  const host = location.hostname
-  return host === 'localhost' || host === '127.0.0.1' || host === '::1' || host === '[::1]'
+  return LOCAL_HOSTNAMES.has(location.hostname)
 }
 
 function detectAppMode(envValue: string | undefined): AppMode {
@@ -43,7 +43,7 @@ export function getApiBase(): string {
   if (APP_MODE === 'cloud') return ''
   // On localhost — use same-origin URLs (Vite proxy or local server).
   const host = location.hostname
-  if (host === 'localhost' || host === '127.0.0.1' || host === '::1' || host === '[::1]') return ''
+  if (LOCAL_HOSTNAMES.has(host)) return ''
   // Fallback for unusual local setups where UI origin differs from API origin.
   const savedPort = storageGet('quoroom_port') || String(DEFAULT_PORT)
   return `http://127.0.0.1:${savedPort}`
@@ -112,22 +112,69 @@ async function fetchCloudToken(): Promise<string> {
 }
 
 async function fetchHandshakeToken(): Promise<string> {
-  const controller = new AbortController()
-  const timeout = setTimeout(() => controller.abort(), 5000)
-  try {
-    const res = await fetch(`${API_BASE}/api/auth/handshake`, {
-      cache: 'no-store',
-      signal: controller.signal,
-    })
-    if (!res.ok) throw new Error('Failed to fetch')
-    const data = await res.json() as { token?: unknown }
-    if (typeof data.token !== 'string' || data.token.length === 0) {
-      throw new Error('Invalid auth token response')
+  const rawPort = (storageGet('quoroom_port') || String(DEFAULT_PORT)).trim()
+  const port = /^\d+$/.test(rawPort) ? rawPort : String(DEFAULT_PORT)
+  const candidates: string[] = [`${API_BASE}/api/auth/handshake`]
+
+  // Localhost can resolve to IPv6 first on some setups while server binds IPv4.
+  // Try both loopback variants before failing startup.
+  if (isLocalHost()) {
+    const localUrls = [
+      `http://127.0.0.1:${port}/api/auth/handshake`,
+      `http://localhost:${port}/api/auth/handshake`,
+    ]
+    for (const url of localUrls) {
+      if (!candidates.includes(url)) candidates.push(url)
     }
-    return data.token
-  } finally {
-    clearTimeout(timeout)
   }
+
+  let lastError = ''
+
+  for (const url of candidates) {
+    const controller = new AbortController()
+    const timeout = setTimeout(() => controller.abort(), 5000)
+    try {
+      const res = await fetch(url, {
+        cache: 'no-store',
+        signal: controller.signal,
+      })
+
+      if (!res.ok) {
+        const bodyText = await res.text().catch(() => '')
+        if (bodyText) {
+          try {
+            const parsed = JSON.parse(bodyText) as { error?: unknown }
+            if (typeof parsed.error === 'string' && parsed.error.trim()) {
+              lastError = parsed.error.trim()
+            } else {
+              lastError = `HTTP ${res.status}`
+            }
+          } catch {
+            lastError = bodyText.slice(0, 180)
+          }
+        } else {
+          lastError = `HTTP ${res.status}`
+        }
+        continue
+      }
+
+      const data = await res.json() as { token?: unknown }
+      if (typeof data.token !== 'string' || data.token.length === 0) {
+        lastError = 'Invalid auth token response'
+        continue
+      }
+      return data.token
+    } catch (err) {
+      lastError = err instanceof Error ? err.message : 'Failed to fetch'
+    } finally {
+      clearTimeout(timeout)
+    }
+  }
+
+  if (APP_MODE === 'local' && (!lastError || lastError === 'Failed to fetch')) {
+    throw new Error(`Could not reach local server on port ${port}. Run "quoroom serve" and retry.`)
+  }
+  throw new Error(lastError || 'Failed to fetch')
 }
 
 function requestToken(forceRefresh = false): Promise<string> {

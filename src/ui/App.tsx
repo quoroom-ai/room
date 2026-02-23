@@ -91,17 +91,24 @@ function formatRoomModel(model: string | null | undefined): string {
 }
 
 async function probeLocalServer(port: string): Promise<boolean> {
-  try {
-    const controller = new AbortController()
-    const timeout = setTimeout(() => controller.abort(), 3000)
-    const res = await fetch(`http://localhost:${port}/api/status`, { signal: controller.signal })
-    clearTimeout(timeout)
-    if (res.ok) {
-      window.location.href = `http://localhost:${port}`
-      return true
+  const origins = [`http://localhost:${port}`, `http://127.0.0.1:${port}`]
+
+  for (const origin of origins) {
+    try {
+      const controller = new AbortController()
+      const timeout = setTimeout(() => controller.abort(), 3000)
+      const res = await fetch(`${origin}/api/status`, { signal: controller.signal })
+      clearTimeout(timeout)
+      if (res.ok) {
+        const currentOrigin = window.location.origin.replace(/\/+$/, '')
+        if (currentOrigin !== origin) {
+          window.location.href = `${origin}${window.location.pathname}${window.location.search}${window.location.hash}`
+        }
+        return true
+      }
+    } catch {
+      // Try next loopback origin.
     }
-  } catch {
-    // Server not reachable
   }
   return false
 }

@@ -27,7 +27,7 @@ const TIMEOUT_MS = 10 * 60 * 1000  // 10 min max experiment time
 
 const DEFAULT_GOAL = 'Build a plan to launch an AI consulting service. Research market rates online. Store findings in memory. Create sub-goals for pricing and outreach. Message the keeper with your strategy and budget needs. Propose collaborations to other rooms. Report progress every cycle.'
 
-const MODELS = [
+const ALL_MODELS = [
   { label: 'claude', model: 'claude', type: 'cli' },
   { label: 'codex', model: 'codex', type: 'cli' },
   { label: 'anth-api', model: 'anthropic:claude-sonnet-4-6', type: 'api', keyEnv: 'ANTHROPIC_API_KEY', credName: 'anthropic_api_key' },
@@ -57,6 +57,16 @@ function getArg(name) {
 const numCycles = parseInt(getArg('--cycles') || '3', 10)
 const goal = getArg('--goal') || DEFAULT_GOAL
 const keepDb = args.includes('--keep-db')
+const modelFilter = getArg('--models')  // e.g. "api" for API-only, "cli" for CLI-only, or comma-separated labels
+
+const MODELS = modelFilter
+  ? ALL_MODELS.filter(m => {
+    if (modelFilter === 'api') return m.type === 'api'
+    if (modelFilter === 'cli') return m.type === 'cli'
+    const labels = modelFilter.split(',')
+    return labels.some(l => m.label.includes(l) || m.model.includes(l))
+  })
+  : ALL_MODELS
 
 // ─── Load API keys from cloud/.env ───────────────────────────────────────────
 
