@@ -277,7 +277,7 @@ export const QUEEN_TOOL_DEFINITIONS: ToolDef[] = [
           },
           queenMaxTurns: {
             type: 'number',
-            description: 'Max tool-call turns per queen cycle (1–20)'
+            description: 'Max tool-call turns per queen cycle (1–50)'
           }
         }
       }
@@ -536,7 +536,7 @@ export async function executeQueenTool(
       case 'quoroom_configure_room': {
         const updates: Parameters<typeof queries.updateRoom>[2] = {}
         if (args.queenCycleGapMs != null) updates.queenCycleGapMs = Math.max(10_000, Number(args.queenCycleGapMs))
-        if (args.queenMaxTurns != null) updates.queenMaxTurns = Math.max(1, Math.min(20, Number(args.queenMaxTurns)))
+        if (args.queenMaxTurns != null) updates.queenMaxTurns = Math.max(1, Math.min(50, Number(args.queenMaxTurns)))
         if (Object.keys(updates).length > 0) {
           queries.updateRoom(db, roomId, updates)
           return { content: `Room configured: ${JSON.stringify(updates)}` }
