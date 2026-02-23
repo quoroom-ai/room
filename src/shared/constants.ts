@@ -183,18 +183,18 @@ export const ERC8004_REPUTATION_REGISTRY = {
 }
 
 export const QUEEN_DEFAULTS_BY_PLAN = {
-  none: { queenCycleGapMs: 30 * 60 * 1000, queenMaxTurns: 30 }, // 30 min gap, 30 turns
-  pro:  { queenCycleGapMs: 15 * 60 * 1000, queenMaxTurns: 30 }, // 15 min gap, 30 turns
-  max:  { queenCycleGapMs:  1 * 60 * 1000, queenMaxTurns: 30 }, // 1 min gap, 30 turns
-  api:  { queenCycleGapMs:  5 * 60 * 1000, queenMaxTurns: 30 }, // 5 min gap, 30 turns
+  none: { queenCycleGapMs: 10 * 60 * 1000, queenMaxTurns: 30 }, // 10 min gap, 30 turns
+  pro:  { queenCycleGapMs:  5 * 60 * 1000, queenMaxTurns: 30 }, // 5 min gap, 30 turns
+  max:  { queenCycleGapMs:      30 * 1000, queenMaxTurns: 30 }, // 30s gap, 30 turns
+  api:  { queenCycleGapMs:  2 * 60 * 1000, queenMaxTurns: 30 }, // 2 min gap, 30 turns
 } as const
 export type ClaudePlan = keyof typeof QUEEN_DEFAULTS_BY_PLAN
 
 export const CHATGPT_DEFAULTS_BY_PLAN = {
-  none: { queenCycleGapMs: 30 * 60 * 1000, queenMaxTurns: 30 }, // 30 min gap, 30 turns
-  plus: { queenCycleGapMs: 15 * 60 * 1000, queenMaxTurns: 30 }, // 15 min gap, 30 turns
-  pro:  { queenCycleGapMs:  5 * 60 * 1000, queenMaxTurns: 30 }, // 5 min gap, 30 turns
-  api:  { queenCycleGapMs:  5 * 60 * 1000, queenMaxTurns: 30 }, // 5 min gap, 30 turns
+  none: { queenCycleGapMs: 10 * 60 * 1000, queenMaxTurns: 30 }, // 10 min gap, 30 turns
+  plus: { queenCycleGapMs:  5 * 60 * 1000, queenMaxTurns: 30 }, // 5 min gap, 30 turns
+  pro:  { queenCycleGapMs:  2 * 60 * 1000, queenMaxTurns: 30 }, // 2 min gap, 30 turns
+  api:  { queenCycleGapMs:  2 * 60 * 1000, queenMaxTurns: 30 }, // 2 min gap, 30 turns
 } as const
 export type ChatGptPlan = keyof typeof CHATGPT_DEFAULTS_BY_PLAN
 
@@ -206,18 +206,18 @@ export interface WorkerRolePreset {
 
 export const WORKER_ROLE_PRESETS: Record<string, WorkerRolePreset> = {
   guardian: {
-    cycleGapMs: 60_000,
-    maxTurns: 5,
+    cycleGapMs: 30_000,
+    maxTurns: 15,
     systemPromptPrefix: 'Monitor and observe. Do not spawn workers or make purchases. Focus on detecting anomalies in tasks, stations, and worker activity.'
   },
   analyst: {
-    cycleGapMs: 300_000,
-    maxTurns: 15,
+    cycleGapMs: 120_000,
+    maxTurns: 30,
     systemPromptPrefix: 'Perform deep analysis. Work to completion on a task, then pause. Prefer depth over frequency.'
   },
   writer: {
-    cycleGapMs: 300_000,
-    maxTurns: 20,
+    cycleGapMs: 120_000,
+    maxTurns: 30,
     systemPromptPrefix: 'Produce high-quality written output. Minimize interruptions between drafting sessions.'
   },
 }
