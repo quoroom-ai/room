@@ -908,7 +908,7 @@ function App(): React.JSX.Element {
         />
       )}
       {showWalkthrough && (
-        <WalkthroughModal installPrompt={installPrompt} onClose={() => {
+        <WalkthroughModal installPrompt={installPrompt} onNavigateToHelp={() => handleTabChange('help')} onClose={() => {
           setShowWalkthrough(false)
           if (contactPromptNeeded) {
             setShowContactPrompt(true)

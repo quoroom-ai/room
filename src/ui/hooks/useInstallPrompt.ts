@@ -30,8 +30,7 @@ export function useInstallPrompt(): InstallPrompt {
       setIsManualInstallPlatform(false)
       return
     }
-    // In dev mode, SW is unregistered so beforeinstallprompt never fires — pretend manual install
-    setIsManualInstallPlatform(isSafari || import.meta.env.DEV)
+    setIsManualInstallPlatform(isSafari)
 
     const onPrompt = (e: Event) => {
       e.preventDefault()

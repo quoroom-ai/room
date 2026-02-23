@@ -39,9 +39,10 @@ const steps = [
 interface WalkthroughModalProps {
   onClose: () => void
   installPrompt: InstallPrompt
+  onNavigateToHelp: () => void
 }
 
-export function WalkthroughModal({ onClose, installPrompt }: WalkthroughModalProps): React.JSX.Element {
+export function WalkthroughModal({ onClose, installPrompt, onNavigateToHelp }: WalkthroughModalProps): React.JSX.Element {
   const [step, setStep] = useState(0)
   const isLast = step === steps.length - 1
 
@@ -77,14 +78,6 @@ export function WalkthroughModal({ onClose, installPrompt }: WalkthroughModalPro
           {steps[step].body}
         </p>
 
-        {isLast && !installPrompt.isInstalled && !installPrompt.canInstall && installPrompt.isManualInstallPlatform && (
-          <p className="text-xs text-text-muted mb-4">
-            {/iphone|ipad|ipod/.test(navigator.userAgent.toLowerCase())
-              ? 'Tip: tap Share \u2192 "Add to Home Screen" to install Quoroom as an app.'
-              : 'Tip: use File \u2192 Add to Dock to install Quoroom as an app.'}
-          </p>
-        )}
-
         <div className="flex justify-end gap-2">
           {step > 0 && (
             <button
@@ -94,24 +87,39 @@ export function WalkthroughModal({ onClose, installPrompt }: WalkthroughModalPro
               Back
             </button>
           )}
-          {isLast && !installPrompt.isInstalled && installPrompt.canInstall && (
-            <button
-              onClick={async () => {
-                await installPrompt.install()
-                storageSet('quoroom_walkthrough_seen', '1')
-                onClose()
-              }}
-              className="px-4 py-2 text-sm font-medium text-interactive border border-interactive rounded-lg hover:bg-interactive/10 transition-colors"
-            >
-              Install app
-            </button>
-          )}
           <button
             onClick={handleNext}
-            className="px-5 py-2 text-sm font-medium text-text-invert bg-interactive hover:bg-interactive-hover rounded-lg transition-colors"
+            className={isLast && !installPrompt.isInstalled
+              ? 'text-sm text-text-muted hover:text-text-secondary transition-colors'
+              : 'px-5 py-2 text-sm font-medium text-text-invert bg-interactive hover:bg-interactive-hover rounded-lg transition-colors'}
           >
-            {isLast ? 'Got it' : 'Next'}
+            {isLast && !installPrompt.isInstalled ? 'Skip' : isLast ? 'Done' : 'Next'}
           </button>
+          {isLast && !installPrompt.isInstalled && (
+            installPrompt.canInstall ? (
+              <button
+                onClick={async () => {
+                  await installPrompt.install()
+                  storageSet('quoroom_walkthrough_seen', '1')
+                  onClose()
+                }}
+                className="px-5 py-2 text-sm font-medium text-text-invert bg-interactive hover:bg-interactive-hover rounded-lg transition-colors"
+              >
+                Install app
+              </button>
+            ) : (
+              <button
+                onClick={() => {
+                  storageSet('quoroom_walkthrough_seen', '1')
+                  onClose()
+                  onNavigateToHelp()
+                }}
+                className="px-5 py-2 text-sm font-medium text-text-invert bg-interactive hover:bg-interactive-hover rounded-lg transition-colors"
+              >
+                Install app
+              </button>
+            )
+          )}
         </div>
       </div>
     </div>
