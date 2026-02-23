@@ -364,6 +364,9 @@ export async function executeQueenTool(
       case 'quoroom_update_progress': {
         const goalId = Number(args.goalId ?? args.goal_id)
         if (!goalId || isNaN(goalId)) return { content: 'Error: goalId is required for quoroom_update_progress. Provide the numeric goal ID.', isError: true }
+        const goalCheck = queries.getGoal(db, goalId)
+        if (!goalCheck) return { content: `Error: goal #${goalId} not found.`, isError: true }
+        if (goalCheck.roomId !== roomId) return { content: `Error: goal #${goalId} belongs to another room. Your room's goals are shown in the Active Goals section — use those goal IDs.`, isError: true }
         const observation = String(args.observation ?? args.progress ?? args.message ?? args.text ?? '')
         const metricValue = args.metricValue != null ? Number(args.metricValue) : (args.metric_value != null ? Number(args.metric_value) : undefined)
         updateGoalProgress(db, goalId, observation, metricValue, workerId)
@@ -374,6 +377,9 @@ export async function executeQueenTool(
 
       case 'quoroom_create_subgoal': {
         const goalId = Number(args.goalId)
+        const goalCheck = queries.getGoal(db, goalId)
+        if (!goalCheck) return { content: `Error: goal #${goalId} not found.`, isError: true }
+        if (goalCheck.roomId !== roomId) return { content: `Error: goal #${goalId} belongs to another room.`, isError: true }
         const raw = args.descriptions
         const descriptions = Array.isArray(raw) ? raw.map(String) : [String(raw)]
         const subGoals = decomposeGoal(db, goalId, descriptions)
@@ -382,12 +388,18 @@ export async function executeQueenTool(
 
       case 'quoroom_complete_goal': {
         const goalId = Number(args.goalId)
+        const goalCheck = queries.getGoal(db, goalId)
+        if (!goalCheck) return { content: `Error: goal #${goalId} not found.`, isError: true }
+        if (goalCheck.roomId !== roomId) return { content: `Error: goal #${goalId} belongs to another room.`, isError: true }
         completeGoal(db, goalId)
         return { content: `Goal #${goalId} marked as completed.` }
       }
 
       case 'quoroom_abandon_goal': {
         const goalId = Number(args.goalId)
+        const goalCheck = queries.getGoal(db, goalId)
+        if (!goalCheck) return { content: `Error: goal #${goalId} not found.`, isError: true }
+        if (goalCheck.roomId !== roomId) return { content: `Error: goal #${goalId} belongs to another room.`, isError: true }
         const reason = String(args.reason ?? 'No reason given')
         abandonGoal(db, goalId, reason)
         return { content: `Goal #${goalId} abandoned: ${reason}` }

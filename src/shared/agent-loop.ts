@@ -257,6 +257,7 @@ export async function runCycle(
     const recentKeeperAnswers = queries.getRecentKeeperAnswers(db, roomId, worker.id, 5)
     const recentActivity = queries.getRoomActivity(db, roomId, 15)
     const goalUpdates = status.activeGoals.slice(0, 5).map(g => ({
+      id: g.id,
       goal: g.description,
       progress: g.progress,
       status: g.status
@@ -383,7 +384,7 @@ export async function runCycle(
 
     if (goalUpdates.length > 0) {
       contextParts.push(`## Active Goals\n${goalUpdates.map(g =>
-        `- [${Math.round(g.progress * 100)}%] ${g.goal} (${g.status})`
+        `- [#${g.id}] [${Math.round(g.progress * 100)}%] ${g.goal} (${g.status})`
       ).join('\n')}`)
     }
 

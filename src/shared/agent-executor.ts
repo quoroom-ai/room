@@ -425,7 +425,7 @@ async function executeAnthropicWithTools(options: AgentExecutionOptions): Promis
           toolResult = `Error: ${err instanceof Error ? err.message : String(err)}`
         }
       }
-      resultBlocks.push({ type: 'tool_result', id: block.id, content: toolResult } as unknown as AnthropicContentBlock)
+      resultBlocks.push({ type: 'tool_result', tool_use_id: block.id, content: toolResult } as unknown as AnthropicContentBlock)
     }
     messages.push({ role: 'user', content: resultBlocks })
 
