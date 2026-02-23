@@ -169,6 +169,12 @@ export function HelpPanel({ installPrompt, onStartWalkthrough }: HelpPanelProps)
               <p className="text-xs text-text-muted"><span className="font-medium text-text-secondary">Chrome Android</span> — Menu → Add to Home screen</p>
               <p className="text-xs text-text-muted"><span className="font-medium text-text-secondary">Safari iOS</span> — Share → Add to Home Screen</p>
             </div>
+            {APP_MODE !== 'cloud' && (
+              <div className="space-y-0.5 pt-1 border-t border-border-primary">
+                <p className="text-xs text-text-muted font-medium mb-0.5">Uninstall:</p>
+                <p className="text-xs text-text-muted">Run <span className="font-mono text-text-secondary">quoroom uninstall</span> in Terminal to remove Quoroom and all data.</p>
+              </div>
+            )}
           </div>
         </div>
 

@@ -191,6 +191,14 @@ Download from [GitHub Releases](https://github.com/quoroom-ai/room/releases). In
 | Linux x64 | `.deb` | `.tar.gz` |
 | Windows x64 (signed) | `.exe` setup | `.zip` |
 
+### Uninstall
+
+```bash
+quoroom uninstall
+```
+
+Removes Quoroom binaries, all data, and logs. Prompts for confirmation before proceeding.
+
 ---
 
 ## Quick Start
