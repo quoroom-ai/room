@@ -73,12 +73,12 @@ export function TransactionsPanel({ roomId }: TransactionsPanelProps): React.JSX
   )
 
   const { data: summary, refresh: refreshSummary } = usePolling<RevenueSummary | null>(
-    () => roomId ? api.wallet.summary(roomId).catch(() => null) : Promise.resolve(null),
+    () => roomId ? api.wallet.summary(roomId) : Promise.resolve(null),
     60000
   )
 
   const { data: onChainBalance, refresh: refreshOnChainBalance } = usePolling<OnChainBalance | null>(
-    () => roomId && wallet ? api.wallet.balance(roomId).catch(() => null) : Promise.resolve(null),
+    () => roomId && wallet ? api.wallet.balance(roomId) : Promise.resolve(null),
     90000
   )
 

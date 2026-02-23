@@ -602,6 +602,8 @@ export const api = {
       request<OnChainBalance>('GET', `/api/rooms/${roomId}/wallet/balance`),
     onrampUrl: (roomId: number, amount?: number) =>
       request<{ onrampUrl: string }>('GET', `/api/rooms/${roomId}/wallet/onramp-url${qs({ amount })}`),
+    withdraw: (roomId: number, data: { to: string; amount: string; chain?: string; token?: string }) =>
+      request<{ txHash: string }>('POST', `/api/rooms/${roomId}/wallet/withdraw`, data),
   },
 
   // ─── Credentials ──────────────────────────────────────

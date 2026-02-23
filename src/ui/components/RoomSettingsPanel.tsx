@@ -107,6 +107,163 @@ function getErrorMessage(err: unknown): string {
   return err instanceof Error ? err.message : 'Unknown error'
 }
 
+const WITHDRAW_CHAINS = [
+  { value: 'base', label: 'Base' },
+  { value: 'ethereum', label: 'Ethereum' },
+  { value: 'arbitrum', label: 'Arbitrum' },
+  { value: 'optimism', label: 'Optimism' },
+  { value: 'polygon', label: 'Polygon' },
+]
+
+const WITHDRAW_TOKENS = [
+  { value: 'usdc', label: 'USDC' },
+  { value: 'usdt', label: 'USDT' },
+]
+
+type WithdrawStep = 'form' | 'processing' | 'success' | 'error'
+
+function WithdrawModal({ roomId, onChainBalance, onClose, onSuccess }: {
+  roomId: number
+  onChainBalance: OnChainBalance | null
+  onClose: () => void
+  onSuccess: () => void
+}): React.JSX.Element {
+  const [step, setStep] = useState<WithdrawStep>('form')
+  const [to, setTo] = useState('')
+  const [amount, setAmount] = useState('')
+  const [chain, setChain] = useState('base')
+  const [token, setToken] = useState('usdc')
+  const [error, setError] = useState('')
+  const [txHash, setTxHash] = useState('')
+
+  const available = onChainBalance?.byChain[chain]?.[token as 'usdc' | 'usdt'] ?? 0
+
+  async function handleSubmit() {
+    if (!to || !amount) return
+    setStep('processing')
+    try {
+      const result = await api.wallet.withdraw(roomId, { to, amount, chain, token })
+      setTxHash(result.txHash)
+      setStep('success')
+    } catch (e) {
+      setError((e as Error).message || 'Withdraw failed')
+      setStep('error')
+    }
+  }
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/50"
+      onClick={e => { if (e.target === e.currentTarget) onClose() }}
+    >
+      <div className="bg-surface-primary rounded-2xl shadow-2xl w-full max-w-sm mx-4 p-6 relative">
+        <button
+          onClick={onClose}
+          className="absolute top-4 right-4 text-text-muted hover:text-text-secondary text-lg leading-none transition-colors"
+          aria-label="Close"
+        >
+          {'\u2715'}
+        </button>
+        <h2 className="text-lg font-bold text-text-primary mb-4">Withdraw</h2>
+
+        {step === 'form' && (
+          <div className="space-y-3">
+            <div>
+              <label className="text-xs text-text-muted mb-1 block">Recipient address</label>
+              <input
+                type="text"
+                value={to}
+                onChange={e => setTo(e.target.value)}
+                placeholder="0x..."
+                className="w-full text-sm bg-surface-secondary border border-border-primary rounded-lg px-3 py-2 text-text-primary placeholder:text-text-muted focus:outline-none focus:border-interactive"
+              />
+            </div>
+            <div className="flex gap-2">
+              <div className="flex-1">
+                <label className="text-xs text-text-muted mb-1 block">Chain</label>
+                <Select value={chain} onChange={setChain} options={WITHDRAW_CHAINS} />
+              </div>
+              <div className="flex-1">
+                <label className="text-xs text-text-muted mb-1 block">Token</label>
+                <Select value={token} onChange={setToken} options={WITHDRAW_TOKENS} />
+              </div>
+            </div>
+            <div>
+              <div className="flex items-center justify-between mb-1">
+                <label className="text-xs text-text-muted">Amount</label>
+                <button
+                  type="button"
+                  onClick={() => setAmount(available.toString())}
+                  className="text-xs text-interactive hover:text-interactive-hover transition-colors"
+                >
+                  Max: ${available.toFixed(2)}
+                </button>
+              </div>
+              <input
+                type="text"
+                value={amount}
+                onChange={e => setAmount(e.target.value)}
+                placeholder="0.00"
+                className="w-full text-sm bg-surface-secondary border border-border-primary rounded-lg px-3 py-2 text-text-primary placeholder:text-text-muted focus:outline-none focus:border-interactive"
+              />
+            </div>
+            <button
+              onClick={() => { void handleSubmit() }}
+              disabled={!to || !amount || parseFloat(amount) <= 0}
+              className="w-full py-2 text-sm font-medium text-center text-text-invert bg-interactive hover:bg-interactive-hover rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              Withdraw
+            </button>
+          </div>
+        )}
+
+        {step === 'processing' && (
+          <div className="flex flex-col items-center py-6 gap-3">
+            <span className="w-6 h-6 rounded-full border-2 border-border-primary border-t-interactive animate-spin" />
+            <p className="text-sm text-text-secondary">Sending transaction...</p>
+          </div>
+        )}
+
+        {step === 'success' && (
+          <div className="space-y-3">
+            <p className="text-sm text-status-success">Withdrawal sent successfully.</p>
+            <div className="bg-surface-secondary rounded-lg p-3">
+              <div className="text-xs text-text-muted mb-1">Transaction hash</div>
+              <code className="text-xs text-text-primary font-mono break-all">{txHash}</code>
+            </div>
+            <button
+              onClick={onSuccess}
+              className="w-full py-2 text-sm font-medium text-center text-text-primary bg-surface-tertiary hover:bg-surface-hover rounded-lg transition-colors"
+            >
+              Done
+            </button>
+          </div>
+        )}
+
+        {step === 'error' && (
+          <div className="space-y-3">
+            <p className="text-sm text-status-error">{error}</p>
+            <div className="flex gap-2">
+              <button
+                onClick={() => { setError(''); setStep('form') }}
+                className="flex-1 py-2 text-sm font-medium text-center text-text-primary bg-surface-tertiary hover:bg-surface-hover rounded-lg transition-colors"
+              >
+                Try Again
+              </button>
+              <button
+                onClick={onClose}
+                className="flex-1 py-2 text-sm font-medium text-center text-text-secondary bg-surface-tertiary hover:bg-surface-hover rounded-lg transition-colors"
+              >
+                Close
+              </button>
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  )
+}
+
 export function RoomSettingsPanel({ roomId }: RoomSettingsPanelProps): React.JSX.Element {
   const { data: rooms, refresh } = usePolling<Room[]>(() => api.rooms.list(), 60000)
   const { data: wallet, refresh: refreshWallet } = usePolling<Wallet | null>(
@@ -114,13 +271,16 @@ export function RoomSettingsPanel({ roomId }: RoomSettingsPanelProps): React.JSX
     60000
   )
   const { data: revenueSummary, refresh: refreshRevenueSummary } = usePolling<RevenueSummary | null>(
-    () => roomId ? api.wallet.summary(roomId).catch(() => null) : Promise.resolve(null),
+    () => roomId ? api.wallet.summary(roomId) : Promise.resolve(null),
     60000
   )
   const { data: onChainBalance, refresh: refreshOnChainBalance } = usePolling<OnChainBalance | null>(
-    () => roomId && wallet ? api.wallet.balance(roomId).catch(() => null) : Promise.resolve(null),
+    () => roomId && wallet ? api.wallet.balance(roomId) : Promise.resolve(null),
     90000
   )
+  useEffect(() => {
+    if (wallet) refreshOnChainBalance()
+  }, [wallet, refreshOnChainBalance])
   const { data: providerStatus, refresh: refreshProviderStatus } = usePolling<{
     codex: ProviderStatusEntry
     claude: ProviderStatusEntry
@@ -224,6 +384,8 @@ export function RoomSettingsPanel({ roomId }: RoomSettingsPanelProps): React.JSX
   const [archiveError, setArchiveError] = useState<string | null>(null)
   const [showArchiveConfirm, setShowArchiveConfirm] = useState(false)
   const [showCryptoTopUp, setShowCryptoTopUp] = useState(false)
+  const [showWithdraw, setShowWithdraw] = useState(false)
+  const [refreshingBalance, setRefreshingBalance] = useState(false)
   const [showSetupGuide, setShowSetupGuide] = useState(false)
   const [objectivePlaceholderIdx, setObjectivePlaceholderIdx] = useState(0)
   const [pendingSwitches, setPendingSwitches] = useState<Record<string, boolean>>({})
@@ -1545,6 +1707,31 @@ export function RoomSettingsPanel({ roomId }: RoomSettingsPanelProps): React.JSX
                       Top Up with Crypto
                     </button>
                   </div>
+                  <div className="flex gap-2">
+                    <button
+                      onClick={() => {
+                        if (!roomId) return
+                        setRefreshingBalance(true)
+                        Promise.all([
+                          api.wallet.balance(roomId).catch(() => null),
+                          api.wallet.summary(roomId).catch(() => null),
+                        ]).then(() => {
+                          refreshOnChainBalance()
+                          refreshRevenueSummary()
+                        }).finally(() => setRefreshingBalance(false))
+                      }}
+                      disabled={refreshingBalance}
+                      className="flex-1 py-2 text-sm font-medium text-center text-text-secondary bg-surface-tertiary hover:bg-surface-hover rounded-lg transition-colors disabled:opacity-60"
+                    >
+                      {refreshingBalance ? 'Refreshing\u2026' : 'Refresh'}
+                    </button>
+                    <button
+                      onClick={() => setShowWithdraw(true)}
+                      className="flex-1 py-2 text-sm font-medium text-center text-text-secondary bg-surface-tertiary hover:bg-surface-hover rounded-lg transition-colors"
+                    >
+                      Withdraw
+                    </button>
+                  </div>
                 </div>
               )}
             </div>
@@ -1754,6 +1941,19 @@ export function RoomSettingsPanel({ roomId }: RoomSettingsPanelProps): React.JSX
             </div>
           </div>
         </div>
+      )}
+
+      {showWithdraw && wallet && roomId && (
+        <WithdrawModal
+          roomId={roomId}
+          onChainBalance={onChainBalance}
+          onClose={() => setShowWithdraw(false)}
+          onSuccess={() => {
+            setShowWithdraw(false)
+            void refreshOnChainBalance()
+            void refreshRevenueSummary()
+          }}
+        />
       )}
     </div>
   )

@@ -144,6 +144,9 @@ export function StatusPanel({ onNavigate, advancedMode, roomId }: StatusPanelPro
     () => roomId && wallet ? api.wallet.balance(roomId).catch(() => null) : Promise.resolve(null),
     120000
   )
+  useEffect(() => {
+    if (wallet) refreshOnChainBalance()
+  }, [wallet, refreshOnChainBalance])
 
   const { data: networkCount, refresh: refreshNetworkCount } = usePolling<number>(
     () => roomId
