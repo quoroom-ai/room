@@ -22,13 +22,20 @@ LOG_FILE="${LOG_DIR}/server.log"
 mkdir -p "${LOG_DIR}"
 chown "${CONSOLE_USER}" "${LOG_DIR}" 2>/dev/null || true
 
-# Auto-start server if nothing is listening yet.
-if ! lsof -nP -iTCP:"${PORT}" -sTCP:LISTEN >/dev/null 2>&1; then
-  START_CMD="nohup \"${BIN_PATH}\" serve --port ${PORT} >> \"${LOG_FILE}\" 2>&1 &"
-  launchctl asuser "${CONSOLE_UID}" sudo -u "${CONSOLE_USER}" /bin/bash -lc "${START_CMD}" 2>/dev/null \
-    || sudo -u "${CONSOLE_USER}" /bin/bash -lc "${START_CMD}" 2>/dev/null \
-    || true
+# Kill any old quoroom server — the binaries were just overwritten so the old
+# process is running stale code and would die soon anyway.
+OLD_PIDS="$(lsof -nP -iTCP:"${PORT}" -sTCP:LISTEN -t 2>/dev/null || true)"
+if [ -n "${OLD_PIDS}" ]; then
+  kill ${OLD_PIDS} 2>/dev/null || true
+  sleep 1
+  kill -9 ${OLD_PIDS} 2>/dev/null || true
 fi
+
+# Start fresh server.
+START_CMD="nohup \"${BIN_PATH}\" serve --port ${PORT} >> \"${LOG_FILE}\" 2>&1 &"
+launchctl asuser "${CONSOLE_UID}" sudo -u "${CONSOLE_USER}" /bin/bash -lc "${START_CMD}" 2>/dev/null \
+  || sudo -u "${CONSOLE_USER}" /bin/bash -lc "${START_CMD}" 2>/dev/null \
+  || true
 
 # Open dashboard in the logged-in user's browser.
 launchctl asuser "${CONSOLE_UID}" sudo -u "${CONSOLE_USER}" open "${URL}" 2>/dev/null \
