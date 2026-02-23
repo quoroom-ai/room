@@ -517,7 +517,7 @@ export async function runCycle(
     const toolList = `**Goals:** quoroom_set_goal, quoroom_update_progress, quoroom_create_subgoal, quoroom_complete_goal, quoroom_abandon_goal\n**Governance:** quoroom_propose, quoroom_vote\n**Workers:** quoroom_create_worker, quoroom_update_worker\n**Tasks:** quoroom_schedule\n**Memory:** quoroom_remember, quoroom_recall\n**Web:** ${webTools}\n**Comms:** ${commsTools}\n**Settings:** quoroom_configure_room${selfRegulateHint}`
 
     const sendKeeperTool = isCli ? 'quoroom_inbox_send_keeper' : 'quoroom_ask_keeper'
-    contextParts.push(`## Instructions\nBased on the current state, decide what to do next and call the appropriate tools. Available tools:\n\n${toolList}\n\nDo NOT "stand by" or "conserve resources" — every cycle must make progress. If you have results, share them with the keeper using ${sendKeeperTool}. If you need input or a decision, ask the keeper using ${sendKeeperTool}. If goals are stalled, take the next concrete step.\n\n${toolCallInstruction}`)
+    contextParts.push(`## Instructions\nBased on the current state, decide what to do next and call the appropriate tools. Available tools:\n\n${toolList}\n\nDo NOT "stand by" or wait for anyone — every cycle must make progress. Act autonomously: make decisions and execute. Inform the keeper of progress or important updates using ${sendKeeperTool}, but never block on a response. If the keeper hasn't replied, proceed with your best judgment.\n\n${toolCallInstruction}`)
 
     const prompt = contextParts.join('\n\n')
 
