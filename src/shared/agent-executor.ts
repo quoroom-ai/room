@@ -26,6 +26,17 @@ export interface AgentExecutionOptions {
    * Faster for small models (llama3.2) — avoids constrained decoding overhead.
    */
   useJsonActionMode?: boolean
+  /**
+   * Prior conversation messages to prepend (session continuity across cycles).
+   * When set, the current prompt is appended as a "NEW CYCLE" continuation message
+   * rather than starting a fresh conversation.
+   */
+  previousMessages?: Array<{ role: string; content: string }>
+  /**
+   * Called after each turn with the updated messages array so the caller can
+   * persist the session for the next cycle.
+   */
+  onSessionUpdate?: (messages: Array<{ role: string; content: string }>) => void
 }
 
 export interface AgentExecutionResult {
@@ -245,8 +256,14 @@ async function executeOllamaJsonActions(options: AgentExecutionOptions): Promise
   const maxTurns = options.maxTurns ?? 5
   let finalOutput = ''
 
+  // Session continuity: resume from previous messages, append current cycle as new turn
+  const isResume = (options.previousMessages?.length ?? 0) > 0
+  const currentUserMsg = isResume
+    ? `NEW CYCLE. Updated room state:\n${options.prompt}\n\nContinue working toward the goal. Respond with your next JSON action.`
+    : options.prompt
   const messages: Array<{ role: string; content: string }> = [
-    { role: 'user', content: options.prompt }
+    ...(options.previousMessages ?? []),
+    { role: 'user', content: currentUserMsg }
   ]
 
   for (let turn = 0; turn < maxTurns; turn++) {
@@ -256,7 +273,7 @@ async function executeOllamaJsonActions(options: AgentExecutionOptions): Promise
       messages,
       format: 'json',
       stream: true, // streaming so timeout actually cancels inference in ollama
-      options: { temperature: 0.1 }
+      options: { temperature: 0.7 }
     })
 
     let responseText = ''
@@ -309,7 +326,10 @@ async function executeOllamaJsonActions(options: AgentExecutionOptions): Promise
     }
 
     if (!toolName || !options.onToolCall) {
+      // Non-JSON or "done" response — end cycle, save session
+      messages.push({ role: 'assistant', content: responseText })
       finalOutput = responseText
+      options.onSessionUpdate?.(messages)
       break
     }
 
@@ -323,8 +343,11 @@ async function executeOllamaJsonActions(options: AgentExecutionOptions): Promise
 
     finalOutput = `${toolName}: ${toolResult}`
 
-    // For single-action mode (most ollama cycles): one action is enough
-    break
+    // Feed result back so model can chain actions within the same cycle
+    messages.push({ role: 'assistant', content: responseText })
+    messages.push({ role: 'user', content: `Result: ${toolResult}\nNext action? (JSON tool call, or {"done": true} to end cycle)` })
+    options.onSessionUpdate?.(messages)
+    // continue to next turn
   }
 
   return {

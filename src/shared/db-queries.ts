@@ -2114,3 +2114,49 @@ export function pruneOldCycles(db: Database.Database): number {
   deleteAll()
   return ids.length
 }
+
+// ─── Recent resolved decisions (for queen context — don't repeat approved things) ──
+
+export function listRecentDecisions(db: Database.Database, roomId: number, limit: number = 5): QuorumDecision[] {
+  const safeLimit = clampLimit(limit, 5, 50)
+  const rows = db.prepare(
+    `SELECT * FROM quorum_decisions WHERE room_id = ? AND status != 'voting' ORDER BY created_at DESC LIMIT ?`
+  ).all(roomId, safeLimit)
+  return (rows as Record<string, unknown>[]).map(mapDecisionRow)
+}
+
+// ─── Ollama session continuity ───────────────────────────────────────────────
+// Persists the conversation messages array across queen cycles so the model
+// remembers what it thought, decided, and did in previous cycles.
+
+export function getOllamaSession(
+  db: Database.Database,
+  workerId: number
+): { messagesJson: string; turnCount: number; updatedAt: string } | undefined {
+  const row = db.prepare(
+    'SELECT messages_json, turn_count, updated_at FROM ollama_sessions WHERE worker_id = ?'
+  ).get(workerId) as { messages_json: string; turn_count: number; updated_at: string } | undefined
+  if (!row) return undefined
+  return { messagesJson: row.messages_json, turnCount: row.turn_count, updatedAt: row.updated_at }
+}
+
+export function saveOllamaSession(
+  db: Database.Database,
+  workerId: number,
+  roomId: number,
+  messages: Array<{ role: string; content: string }>
+): void {
+  const json = JSON.stringify(messages)
+  db.prepare(
+    `INSERT INTO ollama_sessions (worker_id, room_id, messages_json, turn_count, updated_at)
+     VALUES (?, ?, ?, 1, datetime('now','localtime'))
+     ON CONFLICT(worker_id) DO UPDATE SET
+       messages_json = ?,
+       turn_count = turn_count + 1,
+       updated_at = datetime('now','localtime')`
+  ).run(workerId, roomId, json, json)
+}
+
+export function deleteOllamaSession(db: Database.Database, workerId: number): void {
+  db.prepare('DELETE FROM ollama_sessions WHERE worker_id = ?').run(workerId)
+}

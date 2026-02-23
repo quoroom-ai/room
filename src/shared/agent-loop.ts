@@ -253,7 +253,7 @@ export async function runCycle(
 
     const status = getRoomStatus(db, roomId)
     const pendingEscalations = queries.getPendingEscalations(db, roomId, worker.id)
-    const recentActivity = queries.getRoomActivity(db, roomId, 10)
+    const recentActivity = queries.getRoomActivity(db, roomId, 15)
     const goalUpdates = status.activeGoals.slice(0, 5).map(g => ({
       goal: g.description,
       progress: g.progress,
@@ -321,11 +321,37 @@ export async function runCycle(
       ).join('\n')}`)
     }
 
-    if (status.pendingDecisions > 0) {
-      const decisions = queries.listDecisions(db, roomId, 'voting')
-      contextParts.push(`## Pending Decisions (${decisions.length})\n${decisions.map(d =>
+    // Auto-load room memories so queen can build on what it learned in previous cycles
+    if (isOllama) {
+      const memoryEntities = queries.listEntities(db, roomId).slice(0, 20)
+      if (memoryEntities.length > 0) {
+        const memLines = memoryEntities
+          .map(e => {
+            const obs = queries.getObservations(db, e.id)
+            const content = obs[0]?.content ?? ''
+            return content ? `- **${e.name}**: ${content}` : null
+          })
+          .filter((l): l is string => l !== null)
+        if (memLines.length > 0) {
+          contextParts.push(`## Room Memory (use quoroom_remember to add)\n${memLines.join('\n')}`)
+        }
+      }
+    }
+
+    const votingDecisions = queries.listDecisions(db, roomId, 'voting')
+    if (votingDecisions.length > 0) {
+      contextParts.push(`## Pending Decisions (voting — cast your vote)\n${votingDecisions.map(d =>
         `- #${d.id}: ${d.proposal} (${d.decisionType})`
       ).join('\n')}`)
+    }
+
+    // Show recent resolved decisions so queen knows what's already been decided
+    const recentResolved = queries.listRecentDecisions(db, roomId, 5)
+    if (recentResolved.length > 0) {
+      contextParts.push(`## Recent Decisions (already done — do NOT repeat these)\n${recentResolved.map(d => {
+        const icon = d.status === 'approved' ? '✓' : '✗'
+        return `- ${icon} ${d.status}: "${d.proposal.slice(0, 120)}"`
+      }).join('\n')}`)
     }
 
     if (pendingEscalations.length > 0) {
@@ -334,8 +360,8 @@ export async function runCycle(
       ).join('\n')}`)
     }
 
-    // Ollama: trim activity to 3 most recent; Claude: 10
-    const activitySlice = isOllama ? recentActivity.slice(0, 3) : recentActivity
+    // Ollama: 15 most recent (was 3 — more context for goal tracking); Claude: 10
+    const activitySlice = isOllama ? recentActivity.slice(0, 15) : recentActivity
     if (activitySlice.length > 0) {
       contextParts.push(`## Recent Activity\n${activitySlice.map(a =>
         `- [${a.eventType}] ${a.summary}`
@@ -448,6 +474,25 @@ export async function runCycle(
         }
       : {}
 
+    // Load ollama session for cross-cycle continuity
+    // The model sees its full conversation history and can continue from where it left off
+    let ollamaPreviousMessages: Array<{ role: string; content: string }> = []
+    if (isOllama) {
+      const session = queries.getOllamaSession(db, worker.id)
+      if (session) {
+        // Auto-reset stale sessions (older than 7 days — stale context is harmful)
+        const updatedAt = new Date(session.updatedAt)
+        const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000)
+        if (updatedAt < sevenDaysAgo) {
+          queries.deleteOllamaSession(db, worker.id)
+        } else {
+          try {
+            ollamaPreviousMessages = JSON.parse(session.messagesJson) as Array<{ role: string; content: string }>
+          } catch { /* corrupt session — start fresh */ }
+        }
+      }
+    }
+
     // Ollama: 3 min timeout (streaming cancels on timeout so no backlog); Claude/API: 5 min
     const cycleTimeoutMs = isOllama ? 3 * 60 * 1000 : 5 * 60 * 1000
 
@@ -459,8 +504,16 @@ export async function runCycle(
       timeoutMs: cycleTimeoutMs,
       maxTurns: maxTurns ?? 10,
       onConsoleLog: logBuffer.onConsoleLog,
-      // Ollama: use JSON action mode — avoids slow constrained tool-call decoding
-      ...(isOllama ? { useJsonActionMode: true } : {}),
+      // Ollama: JSON action mode + session continuity
+      ...(isOllama ? {
+        useJsonActionMode: true,
+        previousMessages: ollamaPreviousMessages,
+        onSessionUpdate: (msgs: Array<{ role: string; content: string }>) => {
+          // Keep last 40 messages (20 turns) to prevent context explosion
+          const trimmed = msgs.length > 40 ? msgs.slice(-40) : msgs
+          queries.saveOllamaSession(db, worker.id, roomId, trimmed)
+        }
+      } : {}),
       ...ollamaToolOpts
     })
 
