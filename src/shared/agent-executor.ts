@@ -3,7 +3,7 @@ import { homedir } from 'os'
 import { executeClaudeCode } from './claude-code'
 import type { ExecutionOptions, ExecutionResult, ConsoleLogCallback, ProgressCallback } from './claude-code'
 import { execOnCloudStation } from './cloud-sync'
-import { ensureOllamaModel, ollamaRequest, isOllamaAvailable, listOllamaModels } from './ollama-ensure'
+import { ensureOllamaModel, ollamaRequest, ollamaStreamRequest, isOllamaAvailable, listOllamaModels } from './ollama-ensure'
 import type { OllamaToolDef } from './queen-tools'
 
 export interface AgentExecutionOptions {
@@ -21,6 +21,11 @@ export interface AgentExecutionOptions {
   // Ollama tool-calling support
   toolDefs?: OllamaToolDef[]
   onToolCall?: (name: string, args: Record<string, unknown>) => Promise<string>
+  /**
+   * Use plain JSON output mode instead of native tool-calling API.
+   * Faster for small models (llama3.2) — avoids constrained decoding overhead.
+   */
+  useJsonActionMode?: boolean
 }
 
 export interface AgentExecutionResult {
@@ -37,6 +42,9 @@ export async function executeAgent(options: AgentExecutionOptions): Promise<Agen
   const model = options.model.trim()
   if (model.startsWith('ollama:')) {
     if (options.toolDefs && options.toolDefs.length > 0 && options.onToolCall) {
+      if (options.useJsonActionMode) {
+        return executeOllamaJsonActions(options)
+      }
       return executeOllamaWithTools(options)
     }
     return executeOllama(options)
@@ -194,6 +202,138 @@ async function executeCodex(options: AgentExecutionOptions): Promise<AgentExecut
       })
     })
   })
+}
+
+// ─── Ollama JSON action mode (fast — no constrained tool decoding) ──────────
+// Instead of using the `tools` API (slow constrained JSON decoding for small models),
+// we ask the model to output a JSON action object via plain chat + format:"json".
+// The prompt already lists the available actions; we parse the response and dispatch.
+
+async function executeOllamaJsonActions(options: AgentExecutionOptions): Promise<AgentExecutionResult> {
+  const modelName = options.model.replace(/^ollama:/, '')
+  const startTime = Date.now()
+
+  try {
+    await ensureOllamaModel(modelName)
+  } catch (err) {
+    return {
+      output: `Error: ${err instanceof Error ? err.message : String(err)}`,
+      exitCode: 1,
+      durationMs: Date.now() - startTime,
+      sessionId: null,
+      timedOut: false
+    }
+  }
+
+  // Build a concise action schema from the slim tool defs
+  const toolSchemas = (options.toolDefs ?? []).map(t => {
+    const props = t.function.parameters.properties
+    const required = t.function.parameters.required ?? []
+    const fields = Object.entries(props)
+      .filter(([k]) => required.includes(k))
+      .map(([k, v]) => `"${k}": <${v.type}>`)
+      .join(', ')
+    return `  "${t.function.name}": {${fields}}`
+  }).join('\n')
+
+  const actionSystemPrompt = [
+    options.systemPrompt ?? '',
+    `\nRespond with ONLY a valid JSON object — no explanation, no markdown, no text before or after.\nFormat: {"tool": "<tool_name>", "args": {<args>}}\n\nAvailable tools:\n${toolSchemas}`
+  ].join('\n').trim()
+
+  const timeoutMs = options.timeoutMs ?? 90_000
+  const maxTurns = options.maxTurns ?? 5
+  let finalOutput = ''
+
+  const messages: Array<{ role: string; content: string }> = [
+    { role: 'user', content: options.prompt }
+  ]
+
+  for (let turn = 0; turn < maxTurns; turn++) {
+    const body = JSON.stringify({
+      model: modelName,
+      system: actionSystemPrompt,
+      messages,
+      format: 'json',
+      stream: true, // streaming so timeout actually cancels inference in ollama
+      options: { temperature: 0.1 }
+    })
+
+    let responseText = ''
+    try {
+      // Streaming: cancelling the request mid-stream stops ollama inference
+      // (unlike stream:false where ollama keeps running even after client disconnects)
+      responseText = await ollamaStreamRequest('/api/chat', body, timeoutMs)
+    } catch (err) {
+      const error = err as Error
+      const isTimeout = error.message.includes('timeout') || error.message.includes('aborted')
+      return {
+        output: `Error: ${error.message}`,
+        exitCode: isTimeout ? 124 : 1,
+        durationMs: Date.now() - startTime,
+        sessionId: null,
+        timedOut: isTimeout
+      }
+    }
+
+    // Parse the action from the response
+    let toolName = ''
+    let args: Record<string, unknown> = {}
+    try {
+      // Find JSON object in the response (handles extra whitespace/text)
+      const jsonMatch = responseText.match(/\{[\s\S]*\}/)
+      if (jsonMatch) {
+        const parsed = JSON.parse(jsonMatch[0]) as Record<string, unknown>
+
+        // Format 1 (expected): {"tool": "name", "args": {...}}
+        if (typeof parsed.tool === 'string') {
+          toolName = parsed.tool.trim()
+          args = (parsed.args as Record<string, unknown>) ?? {}
+        }
+        // Format 2 (model fallback): {"<toolName>": {<args>}}
+        // Model uses the tool name directly as the key
+        else {
+          const knownTools = new Set(options.toolDefs?.map(t => t.function.name) ?? [])
+          const foundKey = Object.keys(parsed).find(k => knownTools.has(k))
+          if (foundKey) {
+            toolName = foundKey
+            const rawArgs = parsed[foundKey]
+            args = (typeof rawArgs === 'object' && rawArgs !== null ? rawArgs : {}) as Record<string, unknown>
+          }
+        }
+      }
+    } catch {
+      // Couldn't parse — model responded with non-JSON text
+      finalOutput = responseText
+      break
+    }
+
+    if (!toolName || !options.onToolCall) {
+      finalOutput = responseText
+      break
+    }
+
+    // Execute the action
+    let toolResult: string
+    try {
+      toolResult = await options.onToolCall(toolName, args)
+    } catch (err) {
+      toolResult = `Error: ${err instanceof Error ? err.message : String(err)}`
+    }
+
+    finalOutput = `${toolName}: ${toolResult}`
+
+    // For single-action mode (most ollama cycles): one action is enough
+    break
+  }
+
+  return {
+    output: finalOutput || 'No action taken.',
+    exitCode: 0,
+    durationMs: Date.now() - startTime,
+    sessionId: null,
+    timedOut: false
+  }
 }
 
 // ─── Ollama multi-turn tool-call loop ──────────────────────────────────────

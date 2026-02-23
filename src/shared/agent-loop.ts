@@ -11,7 +11,7 @@ import { detectRateLimit, sleep } from './rate-limit'
 import { fetchPublicRooms, getRoomCloudId, listCloudStations, type PublicRoom, type CloudStation } from './cloud-sync'
 import { resolveApiKeyForModel } from './model-provider'
 import { createCycleLogBuffer, type CycleLogEntryCallback } from './console-log-buffer'
-import { QUEEN_TOOL_DEFINITIONS, executeQueenTool } from './queen-tools'
+import { QUEEN_TOOL_DEFINITIONS, SLIM_QUEEN_TOOL_DEFINITIONS, executeQueenTool } from './queen-tools'
 
 interface LoopState {
   running: boolean
@@ -263,19 +263,25 @@ export async function runCycle(
     const roomTasks = queries.listTasks(db, roomId, 'active').slice(0, 10)
     const unreadMessages = queries.listRoomMessages(db, roomId, 'unread').slice(0, 5)
 
-    // Fetch room's cloud stations (fail silently)
+    // Fetch room's cloud stations — 3s cap so cycles don't hang when cloud is unreachable
     let cloudStations: CloudStation[] = []
     try {
       const cloudRoomId = getRoomCloudId(roomId)
-      cloudStations = await listCloudStations(cloudRoomId)
+      cloudStations = await Promise.race([
+        listCloudStations(cloudRoomId),
+        new Promise<CloudStation[]>(r => setTimeout(() => r([]), 3000))
+      ])
     } catch {
       // Cloud unavailability never affects local operation
     }
 
-    // Cross-room learning — fetch other public rooms from cloud (fail silently)
+    // Cross-room learning — 3s cap
     let publicRooms: PublicRoom[] = []
     try {
-      publicRooms = await fetchPublicRooms()
+      publicRooms = await Promise.race([
+        fetchPublicRooms(),
+        new Promise<PublicRoom[]>(r => setTimeout(() => r([]), 3000))
+      ])
     } catch {
       // Cloud unavailability never affects local operation
     }
@@ -288,6 +294,8 @@ export async function runCycle(
       skillContent ? `\n\n# Active Skills\n\n${skillContent}` : ''
     ].join('')
 
+    const isOllama = model.startsWith('ollama:')
+
     const contextParts: string[] = []
 
     // Identity — always first so agents know their roomId and workerId for MCP tool calls
@@ -296,7 +304,7 @@ export async function runCycle(
     )
 
     const keeperReferralCode = queries.getSetting(db, 'keeper_referral_code')?.trim()
-    if (keeperReferralCode) {
+    if (keeperReferralCode && !isOllama) {
       const encodedKeeperCode = encodeURIComponent(keeperReferralCode)
       contextParts.push(
         `## Keeper Referral\n- Keeper code: ${keeperReferralCode}\n- Invite link: https://quoroom.ai/invite/${encodedKeeperCode}\n- Share link: https://quoroom.ai/share/v2/${encodedKeeperCode}`
@@ -326,8 +334,10 @@ export async function runCycle(
       ).join('\n')}`)
     }
 
-    if (recentActivity.length > 0) {
-      contextParts.push(`## Recent Activity\n${recentActivity.map(a =>
+    // Ollama: trim activity to 3 most recent; Claude: 10
+    const activitySlice = isOllama ? recentActivity.slice(0, 3) : recentActivity
+    if (activitySlice.length > 0) {
+      contextParts.push(`## Recent Activity\n${activitySlice.map(a =>
         `- [${a.eventType}] ${a.summary}`
       ).join('\n')}`)
     }
@@ -338,7 +348,8 @@ export async function runCycle(
       ).join('\n')}`)
     }
 
-    if (roomTasks.length > 0) {
+    // Ollama: skip tasks (reduces prompt size significantly)
+    if (!isOllama && roomTasks.length > 0) {
       contextParts.push(`## Room Tasks\n${roomTasks.map(t =>
         `- #${t.id} "${t.name}" [${t.triggerType}] — ${t.status}`
       ).join('\n')}`)
@@ -350,52 +361,68 @@ export async function runCycle(
       ).join('\n')}`)
     }
 
-    // Station awareness — so queen knows available compute resources
-    if (cloudStations.length > 0) {
-      const activeCount = cloudStations.filter(s => s.status === 'active').length
-      contextParts.push(`## Stations (${activeCount} active)\n${cloudStations.map(s =>
-        `- #${s.id} "${s.stationName}" (${s.tier}) — ${s.status} — $${s.monthlyCost}/mo`
-      ).join('\n')}`)
-    } else {
-      const effectiveWorkerModel = status.room.workerModel === 'queen' ? (worker.model ?? 'claude') : (status.room.workerModel ?? 'claude')
-      if (effectiveWorkerModel.startsWith('ollama:')) {
-        contextParts.push(`## Stations\n⚠ NO ACTIVE STATIONS. Worker model is ${effectiveWorkerModel} — workers CANNOT run without a station.\nRent a station with quoroom_station_create (minimum tier: small at $15/mo) as your FIRST action before creating any tasks or workers.`)
+    // Station awareness — skip for ollama (not relevant, saves tokens)
+    if (!isOllama) {
+      if (cloudStations.length > 0) {
+        const activeCount = cloudStations.filter(s => s.status === 'active').length
+        contextParts.push(`## Stations (${activeCount} active)\n${cloudStations.map(s =>
+          `- #${s.id} "${s.stationName}" (${s.tier}) — ${s.status} — $${s.monthlyCost}/mo`
+        ).join('\n')}`)
+      } else {
+        const effectiveWorkerModel = status.room.workerModel === 'queen' ? (worker.model ?? 'claude') : (status.room.workerModel ?? 'claude')
+        if (effectiveWorkerModel.startsWith('ollama:')) {
+          contextParts.push(`## Stations\n⚠ NO ACTIVE STATIONS. Worker model is ${effectiveWorkerModel} — workers CANNOT run without a station.\nRent a station with quoroom_station_create (minimum tier: small at $15/mo) as your FIRST action before creating any tasks or workers.`)
+        }
       }
-    }
 
-    if (publicRooms.length > 0) {
-      const top3 = publicRooms.slice(0, 3)
-      contextParts.push(
-        `## Public Rooms (cross-room learning)\nOther rooms you can learn strategies from:\n${top3.map((r, i) =>
-          `${i + 1}. "${r.name}" — ${r.earnings} USDC | Goal: ${r.goal ?? 'No goal set'}`
-        ).join('\n')}`
-      )
+      if (publicRooms.length > 0) {
+        const top3 = publicRooms.slice(0, 3)
+        contextParts.push(
+          `## Public Rooms (cross-room learning)\nOther rooms you can learn strategies from:\n${top3.map((r, i) =>
+            `${i + 1}. "${r.name}" — ${r.earnings} USDC | Goal: ${r.goal ?? 'No goal set'}`
+          ).join('\n')}`
+        )
+      }
     }
 
     // Execution settings + rate limit awareness
     const rateLimitEvents = recentActivity.filter(a =>
       a.eventType === 'system' && a.summary.includes('rate limited')
     )
-    const settingsParts = [
-      `- Cycle gap: ${Math.round(status.room.queenCycleGapMs / 1000)}s`,
-      `- Max turns per cycle: ${status.room.queenMaxTurns}`,
-      `- Max concurrent tasks: ${status.room.maxConcurrentTasks}`
-    ]
-    if (rateLimitEvents.length > 0) {
-      settingsParts.push(`- **Rate limits hit recently: ${rateLimitEvents.length}** (in last ${recentActivity.length} events)`)
+    if (!isOllama) {
+      const settingsParts = [
+        `- Cycle gap: ${Math.round(status.room.queenCycleGapMs / 1000)}s`,
+        `- Max turns per cycle: ${status.room.queenMaxTurns}`,
+        `- Max concurrent tasks: ${status.room.maxConcurrentTasks}`
+      ]
+      if (rateLimitEvents.length > 0) {
+        settingsParts.push(`- **Rate limits hit recently: ${rateLimitEvents.length}** (in last ${recentActivity.length} events)`)
+      }
+      contextParts.push(`## Execution Settings\n${settingsParts.join('\n')}`)
     }
-    contextParts.push(`## Execution Settings\n${settingsParts.join('\n')}`)
 
-    const selfRegulateHint = rateLimitEvents.length > 0
+    const selfRegulateHint = (!isOllama && rateLimitEvents.length > 0)
       ? '\n- **Self-regulate**: You are hitting rate limits. Use quoroom_configure_room to increase your cycle gap or reduce max turns to stay within API limits.'
       : ''
-    contextParts.push(`## Instructions\nBased on the current state, decide what to do next. You can:\n- Update goal progress\n- Create sub-goals\n- Propose decisions to the quorum\n- Create new workers\n- Escalate questions\n- Report observations${selfRegulateHint}\n\nRespond with your analysis and any actions you want to take.`)
+
+    const isClaude = model === 'claude' || model.startsWith('claude-')
+    const toolCallInstruction = isClaude
+      ? 'Always call tools to take action — do not just describe what you would do.'
+      : 'IMPORTANT: You MUST call at least one tool in your response. Respond ONLY with a tool call — do not write explanatory text without a tool call.'
+
+    const toolList = isOllama
+      ? '**Goals:** quoroom_set_goal, quoroom_update_progress\n**Governance:** quoroom_propose\n**Workers:** quoroom_create_worker\n**Tasks:** quoroom_schedule\n**Memory:** quoroom_remember\n**Comms:** quoroom_ask_keeper'
+      : `**Goals:** quoroom_set_goal, quoroom_update_progress, quoroom_create_subgoal, quoroom_complete_goal, quoroom_abandon_goal\n**Governance:** quoroom_propose, quoroom_vote\n**Workers:** quoroom_create_worker, quoroom_update_worker\n**Tasks:** quoroom_schedule\n**Memory:** quoroom_remember, quoroom_recall\n**Comms:** quoroom_ask_keeper\n**Settings:** quoroom_configure_room${selfRegulateHint}`
+
+    contextParts.push(`## Instructions\nBased on the current state, decide what to do next and call the appropriate tools. Available tools:\n\n${toolList}\n\n${toolCallInstruction}`)
 
     const prompt = contextParts.join('\n\n')
 
     // 3. EXECUTE
     queries.updateAgentState(db, worker.id, 'acting')
-    logBuffer.addSynthetic('system', `Sending to ${model}...`)
+    const promptTokenEstimate = Math.round(prompt.length / 4)
+    logBuffer.addSynthetic('system', `Sending to ${model}... (~${promptTokenEstimate} tokens)`)
+    logBuffer.flush()
 
     const apiKey = resolveApiKeyForModel(db, roomId, model)
 
@@ -404,9 +431,14 @@ export async function runCycle(
     const needsQueenTools = model.startsWith('ollama:')
       || model === 'openai' || model.startsWith('openai:')
       || model === 'anthropic' || model.startsWith('anthropic:') || model.startsWith('claude-api:')
+
+    // Ollama: use slim tool set (7 tools vs 12) and shorter timeout to fail fast
+    const toolDefs = needsQueenTools
+      ? (isOllama ? SLIM_QUEEN_TOOL_DEFINITIONS : QUEEN_TOOL_DEFINITIONS)
+      : undefined
     const ollamaToolOpts = needsQueenTools
       ? {
-          toolDefs: QUEEN_TOOL_DEFINITIONS,
+          toolDefs,
           onToolCall: async (toolName: string, args: Record<string, unknown>): Promise<string> => {
             logBuffer.addSynthetic('tool_call', `→ ${toolName}(${JSON.stringify(args)})`)
             const result = await executeQueenTool(db, roomId, worker.id, toolName, args)
@@ -416,14 +448,19 @@ export async function runCycle(
         }
       : {}
 
+    // Ollama: 3 min timeout (streaming cancels on timeout so no backlog); Claude/API: 5 min
+    const cycleTimeoutMs = isOllama ? 3 * 60 * 1000 : 5 * 60 * 1000
+
     const result = await executeAgent({
       model,
       prompt,
       systemPrompt,
       apiKey,
-      timeoutMs: 5 * 60 * 1000, // 5 minutes per cycle
+      timeoutMs: cycleTimeoutMs,
       maxTurns: maxTurns ?? 10,
       onConsoleLog: logBuffer.onConsoleLog,
+      // Ollama: use JSON action mode — avoids slow constrained tool-call decoding
+      ...(isOllama ? { useJsonActionMode: true } : {}),
       ...ollamaToolOpts
     })
 

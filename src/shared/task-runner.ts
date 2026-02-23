@@ -543,6 +543,24 @@ function finishRun(
       : `Exit code ${result.exitCode}: ${result.stderr || '(no stderr)'}`
     queries.completeTaskRun(db, runId, output, resultFilePath, errorMsg)
     try { queries.storeTaskResultInMemory(db, taskId, output, false) } catch (err) { console.warn('Non-fatal: memory storage failed:', err) }
+
+    // Auto-pause tasks with terminal errors that won't resolve on retry
+    // (e.g. CLI not installed, missing API key, bad model name)
+    const fullError = (output + ' ' + errorMsg).toLowerCase()
+    const isTerminalError = !result.timedOut && (
+      fullError.includes('failed to spawn') ||
+      fullError.includes('enoent') ||
+      fullError.includes('missing openai api key') ||
+      fullError.includes('missing anthropic api key') ||
+      fullError.includes('missing api key')
+    )
+    if (isTerminalError) {
+      try {
+        queries.updateTask(db, taskId, { status: 'paused' })
+        console.log(`Task ${taskId} auto-paused: terminal error (won't retry): ${errorMsg.slice(0, 100)}`)
+      } catch { /* non-fatal */ }
+    }
+
     onFailed?.(task, errorMsg)
     return { success: false, output, errorMessage: errorMsg, durationMs: result.durationMs, resultFilePath }
   }

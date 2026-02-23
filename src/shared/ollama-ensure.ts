@@ -40,6 +40,70 @@ export function ollamaRequest(path: string, body?: string, timeoutMs: number = 3
   })
 }
 
+/**
+ * Streaming ollama request — reads NDJSON line by line and accumulates the full response.
+ * Destroying the request mid-stream cancels ollama inference (unlike non-streaming mode).
+ * Returns the accumulated content when done=true or on timeout.
+ */
+export function ollamaStreamRequest(path: string, body: string, timeoutMs: number = 300_000): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const bodyBuf = Buffer.from(body)
+    const options: http.RequestOptions = {
+      hostname: '127.0.0.1',
+      port: 11434,
+      path,
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Content-Length': bodyBuf.byteLength }
+    }
+
+    let settled = false
+    let content = ''
+    let lineBuffer = ''
+
+    const finish = (result: string | Error): void => {
+      if (settled) return
+      settled = true
+      req.destroy()
+      if (result instanceof Error) reject(result)
+      else resolve(result)
+    }
+
+    const timer = setTimeout(() => finish(new Error('Ollama request timeout')), timeoutMs)
+
+    const req = http.request(options, (res) => {
+      if (!res.statusCode || res.statusCode < 200 || res.statusCode >= 300) {
+        clearTimeout(timer)
+        finish(new Error(`Ollama HTTP ${res.statusCode}`))
+        return
+      }
+
+      res.on('data', (chunk: Buffer) => {
+        lineBuffer += chunk.toString()
+        const lines = lineBuffer.split('\n')
+        lineBuffer = lines.pop() ?? ''
+
+        for (const line of lines) {
+          const trimmed = line.trim()
+          if (!trimmed) continue
+          try {
+            const evt = JSON.parse(trimmed) as { message?: { content?: string }; done?: boolean; error?: string }
+            if (evt.error) { clearTimeout(timer); finish(new Error(evt.error)); return }
+            if (evt.message?.content) content += evt.message.content
+            if (evt.done) { clearTimeout(timer); finish(content); return }
+          } catch { /* ignore malformed lines */ }
+        }
+      })
+
+      res.on('end', () => { clearTimeout(timer); finish(content) })
+      res.on('error', (err) => { clearTimeout(timer); finish(err) })
+    })
+
+    req.on('error', (err) => { clearTimeout(timer); finish(err) })
+    req.write(bodyBuf)
+    req.end()
+  })
+}
+
 // ─── Availability checks ────────────────────────────────────────────────────
 
 export async function isOllamaAvailable(): Promise<boolean> {

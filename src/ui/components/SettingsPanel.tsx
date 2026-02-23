@@ -545,7 +545,7 @@ export function SettingsPanel({ advancedMode, onAdvancedModeChange, installPromp
 
   const contactsSection = (
     <div>
-      <h3 className="text-sm font-semibold text-text-primary mb-2">Notification Contacts</h3>
+      <h3 className="text-sm font-semibold text-text-primary mb-2">Queen Communications</h3>
       <div className="bg-surface-secondary rounded-lg p-3 space-y-4 shadow-sm">
         <div className="space-y-2">
           <div className="flex items-center justify-between text-sm">
@@ -612,7 +612,7 @@ export function SettingsPanel({ advancedMode, onAdvancedModeChange, installPromp
 
         <div className="border-t border-border-secondary pt-3 space-y-2">
           <div className="flex items-center justify-between text-sm">
-            <span className="text-text-secondary">Telegram</span>
+            <span className="text-text-secondary">Telegram <span className="text-text-muted font-normal">(preferred)</span></span>
             <span className={contacts?.telegram.verified ? 'text-status-success' : 'text-text-muted'}>
               {telegramStatusText}
             </span>
@@ -675,6 +675,7 @@ export function SettingsPanel({ advancedMode, onAdvancedModeChange, installPromp
             {contactFeedback.text}
           </p>
         )}
+        <p className="text-xs text-text-muted leading-tight">How queens reach you when you're not at your computer.</p>
       </div>
     </div>
   )

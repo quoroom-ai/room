@@ -1,6 +1,6 @@
 import type Database from 'better-sqlite3'
 import * as queries from './db-queries'
-import { propose, vote } from './quorum'
+import { propose, vote, tally } from './quorum'
 import { updateGoalProgress, decomposeGoal, completeGoal, abandonGoal, setRoomObjective } from './goals'
 import type { DecisionType, VoteValue } from './types'
 
@@ -27,6 +27,119 @@ export interface OllamaToolDef {
 }
 
 // ─── All queen tool definitions ─────────────────────────────────────────────
+
+/**
+ * Slim tool set for small local models (ollama/llama3.2) — only the most essential tools.
+ * Fewer tools + simpler schemas = much faster responses from small models.
+ */
+export const SLIM_QUEEN_TOOL_DEFINITIONS: OllamaToolDef[] = [
+  {
+    type: 'function',
+    function: {
+      name: 'quoroom_set_goal',
+      description: 'Set the room objective.',
+      parameters: {
+        type: 'object',
+        properties: {
+          description: { type: 'string', description: 'The objective' }
+        },
+        required: ['description']
+      }
+    }
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'quoroom_update_progress',
+      description: 'Log progress on a goal.',
+      parameters: {
+        type: 'object',
+        properties: {
+          goalId: { type: 'number', description: 'Goal ID' },
+          observation: { type: 'string', description: 'What was achieved' },
+          metricValue: { type: 'number', description: '0.0 to 1.0 completion' }
+        },
+        required: ['goalId', 'observation']
+      }
+    }
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'quoroom_propose',
+      description: 'Create a quorum proposal.',
+      parameters: {
+        type: 'object',
+        properties: {
+          proposal: { type: 'string', description: 'Proposal text' },
+          decisionType: { type: 'string', description: 'Decision type', enum: ['strategy', 'resource', 'personnel', 'low_impact'] }
+        },
+        required: ['proposal', 'decisionType']
+      }
+    }
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'quoroom_create_worker',
+      description: 'Create a new agent worker. Required: name and systemPrompt. Do NOT pass worker_id or room_id.',
+      parameters: {
+        type: 'object',
+        properties: {
+          name: { type: 'string', description: 'Worker name' },
+          systemPrompt: { type: 'string', description: 'Worker instructions' },
+          role: { type: 'string', description: 'Optional job title' }
+        },
+        required: ['name', 'systemPrompt']
+      }
+    }
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'quoroom_schedule',
+      description: 'Create a recurring or one-time task.',
+      parameters: {
+        type: 'object',
+        properties: {
+          name: { type: 'string', description: 'Task name' },
+          prompt: { type: 'string', description: 'Task instructions' },
+          cronExpression: { type: 'string', description: 'Cron schedule, e.g. "0 9 * * *"' }
+        },
+        required: ['name', 'prompt']
+      }
+    }
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'quoroom_remember',
+      description: 'Store a memory.',
+      parameters: {
+        type: 'object',
+        properties: {
+          name: { type: 'string', description: 'Memory label' },
+          content: { type: 'string', description: 'What to remember' }
+        },
+        required: ['name', 'content']
+      }
+    }
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'quoroom_ask_keeper',
+      description: 'Send a question to the human operator.',
+      parameters: {
+        type: 'object',
+        properties: {
+          question: { type: 'string', description: 'Question for keeper' }
+        },
+        required: ['question']
+      }
+    }
+  }
+]
 
 export const QUEEN_TOOL_DEFINITIONS: OllamaToolDef[] = [
   // ── Goals ──────────────────────────────────────────────────────────────
@@ -151,14 +264,14 @@ export const QUEEN_TOOL_DEFINITIONS: OllamaToolDef[] = [
     type: 'function',
     function: {
       name: 'quoroom_create_worker',
-      description: 'Create a new named agent worker with a system prompt that defines its personality and capabilities.',
+      description: 'Create a new agent worker. REQUIRED: name (string, e.g. "Alice") and systemPrompt (string, the agent\'s instructions). Do NOT pass worker_id or room_id — this creates a NEW worker.',
       parameters: {
         type: 'object',
         properties: {
-          name: { type: 'string', description: 'Name for the worker (e.g. "Research Agent", "Code Reviewer")' },
-          systemPrompt: { type: 'string', description: 'The system prompt defining this worker\'s personality, role, and constraints' },
-          role: { type: 'string', description: 'Optional role/function title (e.g. "Chief of Staff")' },
-          description: { type: 'string', description: 'Optional short description of what this worker does' }
+          name: { type: 'string', description: 'The worker\'s name, e.g. "Alice" or "Research Agent"' },
+          systemPrompt: { type: 'string', description: 'Full instructions for this worker — personality, goals, constraints. E.g. "You are a research agent. Your job is to..."' },
+          role: { type: 'string', description: 'Optional job title, e.g. "Chief of Staff"' },
+          description: { type: 'string', description: 'Optional one-line summary of what this worker does' }
         },
         required: ['name', 'systemPrompt']
       }
@@ -339,16 +452,28 @@ export async function executeQueenTool(
 
       // ── Quorum ───────────────────────────────────────────────────────
       case 'quoroom_propose': {
+        // Tolerate common small-model arg name variations
+        const proposalText = String(args.proposal ?? args.text ?? args.description ?? args.content ?? args.idea ?? '').trim()
+        if (!proposalText) return { content: 'Error: proposal text is required. Provide a "proposal" string.', isError: true }
+        const decisionType = String(args.decisionType ?? args.type ?? args.impact ?? args.category ?? 'low_impact') as DecisionType
         const decision = propose(db, {
           roomId,
           proposerId: workerId,
-          proposal: String(args.proposal ?? ''),
-          decisionType: String(args.decisionType ?? 'low_impact') as DecisionType
+          proposal: proposalText,
+          decisionType
         })
         if (decision.status === 'approved') {
-          return { content: `Proposal auto-approved: "${args.proposal}"` }
+          return { content: `Proposal auto-approved: "${proposalText}"` }
         }
-        return { content: `Proposal #${decision.id} created: "${args.proposal}" (${decision.threshold} threshold, voting open)` }
+        // Auto-cast queen's YES vote so proposals don't deadlock in small rooms
+        try {
+          vote(db, decision.id, workerId, 'yes')
+          const resolved = tally(db, decision.id)
+          if (resolved === 'approved') {
+            return { content: `Proposal approved: "${proposalText}"` }
+          }
+        } catch { /* non-fatal if already voted */ }
+        return { content: `Proposal #${decision.id} created and voted YES: "${proposalText}" (waiting for others)` }
       }
 
       case 'quoroom_vote': {
@@ -368,9 +493,12 @@ export async function executeQueenTool(
 
       // ── Workers ──────────────────────────────────────────────────────
       case 'quoroom_create_worker': {
-        const name = String(args.name ?? '')
-        const systemPrompt = String(args.systemPrompt ?? '')
-        const role = args.role ? String(args.role) : undefined
+        // Tolerate common model hallucinations for arg names
+        const name = String(args.name ?? args.workerName ?? args.type ?? args.role ?? '').trim()
+        const systemPrompt = String(args.systemPrompt ?? args.system_prompt ?? args.instructions ?? args.prompt ?? '').trim()
+        if (!name) return { content: 'Error: name is required for quoroom_create_worker. Provide a "name" string.', isError: true }
+        if (!systemPrompt) return { content: 'Error: systemPrompt is required for quoroom_create_worker. Provide a "systemPrompt" string describing this worker\'s role and instructions.', isError: true }
+        const role = args.role && args.role !== args.name ? String(args.role) : undefined
         const description = args.description ? String(args.description) : undefined
         queries.createWorker(db, { name, role, systemPrompt, description, roomId })
         return { content: `Created worker "${name}"${role ? ` (${role})` : ''}.` }
@@ -398,6 +526,15 @@ export async function executeQueenTool(
         const taskWorkerId = args.workerId ? Number(args.workerId) : undefined
         const maxTurns = args.maxTurns ? Number(args.maxTurns) : undefined
         const triggerType: 'cron' | 'once' | 'manual' = cronExpression ? 'cron' : scheduledAt ? 'once' : 'manual'
+
+        // Validate workerId belongs to this room — prevents cross-room assignment
+        if (taskWorkerId) {
+          const taskWorker = queries.getWorker(db, taskWorkerId)
+          if (!taskWorker || taskWorker.roomId !== roomId) {
+            return { content: `Error: Worker #${taskWorkerId} does not belong to this room. Use a workerId from this room (see Room Workers section), or omit workerId to use the default.`, isError: true }
+          }
+        }
+
         queries.createTask(db, {
           name,
           prompt,

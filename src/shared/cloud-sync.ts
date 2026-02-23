@@ -17,9 +17,6 @@ import { getMachineId } from './telemetry'
 function getCloudApi(): string {
   return (process.env.QUOROOM_CLOUD_API ?? 'https://quoroom.ai/api').replace(/\/$/, '')
 }
-function getCloudMasterToken(): string {
-  return (process.env.QUOROOM_CLOUD_API_KEY ?? '').trim()
-}
 const TOKEN_FILE_NAME = 'cloud-room-tokens.json'
 
 type CloudTokenStore = Record<string, string>
@@ -58,6 +55,11 @@ function getRoomToken(roomId: string): string | undefined {
   return loadTokenStore()[roomId]
 }
 
+export function getStoredCloudRoomToken(roomId: string): string | null {
+  const token = getRoomToken(roomId)
+  return typeof token === 'string' && token.trim() ? token : null
+}
+
 function setRoomToken(roomId: string, token: string): void {
   loadTokenStore()[roomId] = token
   saveTokenStore()
@@ -72,9 +74,8 @@ function clearRoomToken(roomId: string): void {
 
 function cloudHeaders(roomId?: string, extra: Record<string, string> = {}): Record<string, string> {
   const roomToken = roomId ? getRoomToken(roomId) : undefined
-  const token = roomToken || getCloudMasterToken()
-  if (!token) return extra
-  return { ...extra, 'X-Room-Token': token }
+  if (!roomToken) return extra
+  return { ...extra, 'X-Room-Token': roomToken }
 }
 
 export interface CloudRegistration {
