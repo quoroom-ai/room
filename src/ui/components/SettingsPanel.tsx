@@ -28,7 +28,6 @@ interface ServerStatus {
   dbPath?: string
   claude?: { available: boolean; version?: string }
   codex?: { available: boolean; version?: string }
-  ollama?: { available: boolean; models: Array<{ name: string; size: number }> }
   resources?: { cpuCount: number; loadAvg1m: number; loadAvg5m: number; memTotalGb: number; memFreeGb: number; memUsedPct: number }
   updateInfo?: UpdateInfo | null
 }
@@ -220,7 +219,7 @@ export function SettingsPanel({ advancedMode, onAdvancedModeChange, installPromp
     }).catch(() => setNotifications(true))
 
     Promise.all([
-      api.status.getParts(['providers', 'ollama', 'resources']),
+      api.status.getParts(['providers', 'resources']),
       api.status.getParts(['storage', 'update']),
     ])
       .then(([runtime, meta]) => setServerStatus({ ...runtime, ...meta }))
@@ -750,21 +749,6 @@ export function SettingsPanel({ advancedMode, onAdvancedModeChange, installPromp
             </span>
           </span>
         </div>
-        <div className="flex items-center justify-between text-sm">
-          <span className="text-text-secondary">Ollama</span>
-          <span className={serverStatus?.ollama?.available ? 'text-status-success' : 'text-text-muted'}>
-            {serverStatus === null
-              ? '...'
-              : serverStatus.ollama?.available
-                ? `${serverStatus.ollama.models.length} model${serverStatus.ollama.models.length !== 1 ? 's' : ''}`
-                : 'Not running'}
-          </span>
-        </div>
-        {serverStatus?.ollama?.available && serverStatus.ollama.models.length > 0 && (
-          <div className="text-xs text-text-muted pl-2 leading-tight">
-            {serverStatus.ollama.models.map(m => m.name).join(' \u00B7 ')}
-          </div>
-        )}
         {serverStatus?.resources && (
           <div className="flex items-center justify-between text-sm">
             <span className="text-text-secondary">Load</span>

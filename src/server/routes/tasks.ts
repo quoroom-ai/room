@@ -1,3 +1,4 @@
+import crypto from 'node:crypto'
 import type { Router } from '../router'
 import type { Task, TriggerType } from '../../shared/types'
 import * as queries from '../../shared/db-queries'
@@ -25,11 +26,16 @@ export function registerTaskRoutes(router: Router): void {
       ? timeoutMinutesRaw
       : (typeof timeoutMinutesRaw === 'string' ? Number.parseInt(timeoutMinutesRaw, 10) : undefined)
 
+    const triggerType = (body.triggerType as TriggerType | undefined) || 'manual'
+    const webhookToken = triggerType === 'webhook'
+      ? crypto.randomBytes(16).toString('hex')
+      : undefined
+
     const task = queries.createTask(ctx.db, {
       name: (body.name as string | undefined) || body.prompt.slice(0, 50),
       prompt: body.prompt,
       description: body.description as string | undefined,
-      triggerType: (body.triggerType as TriggerType | undefined) || 'manual',
+      triggerType,
       cronExpression: body.cronExpression as string | undefined,
       scheduledAt: body.scheduledAt as string | undefined,
       workerId: body.workerId as number | undefined,
@@ -39,7 +45,8 @@ export function registerTaskRoutes(router: Router): void {
       allowedTools: body.allowedTools as string | undefined,
       disallowedTools: body.disallowedTools as string | undefined,
       sessionContinuity: body.sessionContinuity as boolean | undefined,
-      roomId: body.roomId as number | undefined
+      roomId: body.roomId as number | undefined,
+      webhookToken
     })
     eventBus.emit('tasks', 'task:created', task)
     return { status: 201, data: task }
@@ -63,6 +70,14 @@ export function registerTaskRoutes(router: Router): void {
     if (!task) return { status: 404, error: 'Task not found' }
 
     const body = ctx.body as Record<string, unknown> || {}
+
+    // Regenerate webhook token on request
+    if (body.regenerateWebhookToken) {
+      const newToken = crypto.randomBytes(16).toString('hex')
+      queries.updateTask(ctx.db, id, { webhookToken: newToken })
+      delete body.regenerateWebhookToken
+    }
+
     queries.updateTask(ctx.db, id, body)
     const updated = queries.getTask(ctx.db, id)
     if (updated) eventBus.emit('tasks', 'task:updated', updated)

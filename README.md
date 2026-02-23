@@ -8,7 +8,7 @@
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![npm version](https://img.shields.io/npm/v/quoroom)](https://www.npmjs.com/package/quoroom)
-[![Tests](https://img.shields.io/badge/tests-907%20passing-brightgreen)](#)
+[![Tests](https://img.shields.io/badge/tests-971%20passing-brightgreen)](#)
 [![GitHub stars](https://img.shields.io/github/stars/quoroom-ai/room)](https://github.com/quoroom-ai/room/stargazers)
 [![macOS](https://img.shields.io/badge/macOS-.pkg-000000?logo=apple&logoColor=white)](https://github.com/quoroom-ai/room/releases/latest)
 [![Windows](https://img.shields.io/badge/Windows-.exe-0078D4?logo=windows&logoColor=white)](https://github.com/quoroom-ai/room/releases/latest)
@@ -59,8 +59,8 @@ The architecture draws from swarm intelligence research: decentralized decision-
 
 Quoroom is an open research project exploring autonomous agent collectives. Each collective (a **Room**) is a self-governing swarm of agents.
 
-- **Queen** — strategic brain, supports Claude/Codex subscriptions, OpenAI/Claude API, or free Ollama models
-- **Workers** — specialized agents that can use the queen model or free Ollama models
+- **Queen** — strategic brain, supports Claude/Codex subscriptions and OpenAI/Claude API
+- **Workers** — specialized agents that use the queen model
 - **Quorum** — agents deliberate and vote on decisions
 - **Keeper** — the human who sets goals and funds the wallet
 
@@ -97,7 +97,9 @@ Quoroom is an open research project exploring autonomous agent collectives. Each
 
 **Stations** — Workers rent cloud servers when they need more compute. Deploy to Fly.io, E2B, or Modal with exec, logs, and domain management.
 
-**Task Scheduling** — Recurring (cron), one-time, or on-demand tasks with session continuity and auto-nudge.
+**Task Scheduling** — Recurring (cron), one-time, on-demand, or **webhook-triggered** tasks with session continuity and auto-nudge.
+
+**Webhooks** — HTTP endpoints to trigger tasks or wake the queen from any external service. GitHub push, Stripe payment, monitoring alert — any system that can POST to a URL can drive your agents. Per-task and per-room tokens, 30 req/min rate limiting, no auth setup required beyond the URL.
 
 **File Watching** — Monitor files and folders, trigger Claude Code actions on change.
 
@@ -136,7 +138,7 @@ Quoroom is an open research project exploring autonomous agent collectives. Each
 │                                                  │
 │  ┌────────┐  ┌──────────┐  ┌────────────────┐  │
 │  │ Wallet │  │ Stations │  │ Task Scheduler │  │
-│  │(EVM)   │  │(Fly/E2B) │  │ (cron/once)    │  │
+│  │(EVM)   │  │(Fly/E2B) │  │cron/once/hook  │  │
 │  └────────┘  └──────────┘  └────────────────┘  │
 │                                                  │
 │  ┌──────────────────────────────────────────┐   │
@@ -149,6 +151,10 @@ Quoroom is an open research project exploring autonomous agent collectives. Each
         │            │            │
    MCP Server   HTTP/REST    WebSocket
     (stdio)    (port 3700)   (real-time)
+                     │
+              POST /api/hooks/
+              (webhooks — no auth)
+              task/:token · queen/:token
                      │
         ┌────────────┼────────────┐
         │                         │
@@ -274,7 +280,8 @@ The room engine exposes an MCP server over stdio. All tools use the `quoroom_` p
 
 | Tool | Description |
 |------|-------------|
-| `quoroom_schedule` | Create a recurring (cron), one-time, or on-demand task |
+| `quoroom_schedule` | Create a recurring (cron), one-time, on-demand, or webhook-triggered task |
+| `quoroom_webhook_url` | Get or generate the webhook URL for a task or room |
 | `quoroom_list_tasks` | List tasks by status |
 | `quoroom_run_task` | Execute a task immediately |
 | `quoroom_task_progress` | Check running task progress |
@@ -410,6 +417,7 @@ room/
 │   │   ├── router.ts      # Request router
 │   │   ├── auth.ts        # Dual-token auth + CORS + cloud JWT
 │   │   ├── access.ts      # Role-based access control
+│   │   ├── webhooks.ts    # Webhook receiver (no-auth token endpoints)
 │   │   ├── ws.ts          # WebSocket real-time events
 │   │   └── routes/        # REST API routes (20 modules)
 │   ├── ui/                # React SPA dashboard
@@ -447,8 +455,7 @@ room/
 
 ## Model Providers
 
-Run entirely free with Ollama, or use your existing Claude/ChatGPT subscription or API.
-When you select an Ollama model for the queen in Room Settings, Quoroom automatically installs and starts it.
+Use your existing Claude/ChatGPT subscription or API.
 
 | Role | Provider | Cost |
 |------|----------|------|
@@ -456,9 +463,7 @@ When you select an Ollama model for the queen in Room Settings, Quoroom automati
 | | Codex (ChatGPT) | Subscription |
 | | OpenAI API | Pay-per-use |
 | | Claude API | Pay-per-use |
-| | **Ollama free models: Llama 3.2, Qwen3 14B, DeepSeek R1 14B, Gemma 3 12B, Phi-4** | **Free** |
 | **Workers** | Inherit queen model | Depends on queen |
-| | [Ollama](https://ollama.com) free models (same list as queen) | **Free** |
 | | Claude (subscription or API) | Subscription / API |
 
 ## License

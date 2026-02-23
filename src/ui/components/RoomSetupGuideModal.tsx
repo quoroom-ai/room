@@ -1,7 +1,6 @@
 import { useMemo, useState } from 'react'
-import { FREE_OLLAMA_MODEL_OPTIONS } from '@shared/ollama-models'
 
-type SetupPathId = 'claude_sub' | 'codex_sub' | 'openai_api' | 'anthropic_api' | 'ollama_free'
+type SetupPathId = 'claude_sub' | 'codex_sub' | 'openai_api' | 'anthropic_api'
 
 interface ProviderSignal {
   installed: boolean
@@ -36,8 +35,6 @@ interface RoomSetupGuideModalProps {
   onApplyModel: (model: string) => Promise<void>
   onClose: () => void
 }
-
-const OLLAMA_DEFAULT = FREE_OLLAMA_MODEL_OPTIONS[0]?.value ?? 'ollama:qwen3:8b'
 
 const PATHS: SetupPath[] = [
   {
@@ -80,16 +77,6 @@ const PATHS: SetupPath[] = [
     setup: 'Add your Anthropic API key — Quoroom validates it automatically.',
     outcome: 'Strong Claude-family behavior without subscription login.',
   },
-  {
-    id: 'ollama_free',
-    title: 'Free Ollama',
-    model: OLLAMA_DEFAULT,
-    summary: 'No subscription and no API keys required.',
-    bestFor: 'Zero-cost local model path and experimentation.',
-    tradeoff: 'Lower quality than top hosted models; uses local/server CPU/GPU.',
-    setup: 'Fully automatic — Quoroom installs Ollama and downloads the model.',
-    outcome: 'Fully self-hosted setup path with no provider account.',
-  },
 ]
 
 function pickRecommendedPath(
@@ -113,7 +100,7 @@ function pickRecommendedPath(
     if (queenAuth.provider === 'anthropic_api') return 'anthropic_api'
   }
   // 5. Fallback
-  return 'ollama_free'
+  return 'claude_sub'
 }
 
 function getPathStatus(
@@ -141,9 +128,6 @@ function getPathStatus(
       if (queenAuth?.provider === 'anthropic_api' && queenAuth.ready) return { label: 'API key ready', ready: true }
       if (queenAuth?.provider === 'anthropic_api' && (queenAuth.hasCredential || queenAuth.hasEnvKey)) return { label: 'API key ready', ready: true }
       return { label: 'no API key', ready: false }
-    case 'ollama_free':
-      if (queenAuth?.provider === 'ollama' && queenAuth.ready) return { label: 'available', ready: true }
-      return { label: 'auto-installed on first run', ready: false }
   }
 }
 
@@ -293,7 +277,6 @@ export function RoomSetupGuideModal({
                   {selectedPath.id === 'claude_sub' && ' Connect via Room Settings \u2192 Queen \u2192 Status \u2192 Connect.'}
                   {selectedPath.id === 'codex_sub' && ' Connect via Room Settings \u2192 Queen \u2192 Status \u2192 Connect.'}
                   {(selectedPath.id === 'openai_api' || selectedPath.id === 'anthropic_api') && ' Add API key in Room Settings \u2192 Queen \u2192 API key.'}
-                  {selectedPath.id === 'ollama_free' && ' Ollama will be auto-installed on first run.'}
                 </p>
               )
             })()}
@@ -314,11 +297,6 @@ export function RoomSetupGuideModal({
             {(selectedPath.id === 'claude_sub' || selectedPath.id === 'codex_sub') && !getPathStatus(selectedPath.id, claude, codex, queenAuth)?.ready && (
               <p className="text-xs text-status-warning">
                 Next step: connect via Room Settings {'\u2192'} Queen {'\u2192'} Status {'\u2192'} Connect.
-              </p>
-            )}
-            {selectedPath.id === 'ollama_free' && !getPathStatus(selectedPath.id, claude, codex, queenAuth)?.ready && (
-              <p className="text-xs text-status-warning">
-                First run may take time while Ollama starts and model is installed.
               </p>
             )}
             {error && <p className="text-xs text-status-error">{error}</p>}

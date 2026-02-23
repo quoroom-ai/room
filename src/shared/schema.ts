@@ -46,12 +46,13 @@ CREATE TABLE IF NOT EXISTS rooms (
     visibility TEXT NOT NULL DEFAULT 'private',
     autonomy_mode TEXT NOT NULL DEFAULT 'auto',
     max_concurrent_tasks INTEGER NOT NULL DEFAULT 3,
-    worker_model TEXT NOT NULL DEFAULT 'ollama:llama3.2',
+    worker_model TEXT NOT NULL DEFAULT 'claude',
     queen_cycle_gap_ms INTEGER NOT NULL DEFAULT 1800000,
     queen_max_turns INTEGER NOT NULL DEFAULT 3,
     queen_quiet_from TEXT,
     queen_quiet_until TEXT,
     config TEXT,
+    webhook_token TEXT,
     queen_nickname TEXT,
     chat_session_id TEXT,
     referred_by_code TEXT,
@@ -133,6 +134,7 @@ CREATE TABLE IF NOT EXISTS tasks (
     cron_expression TEXT,
     trigger_type TEXT NOT NULL DEFAULT 'cron',
     trigger_config TEXT,
+    webhook_token TEXT,
     executor TEXT NOT NULL DEFAULT 'claude_code',
     status TEXT NOT NULL DEFAULT 'active',
     last_run DATETIME,
@@ -443,7 +445,7 @@ CREATE INDEX IF NOT EXISTS idx_cycle_logs_seq ON cycle_logs(cycle_id, seq);
 
 -- Agent session continuity (persists conversation history across queen cycles for all model types)
 -- session_id: for CLI models (claude/codex) — passed as --resume to continue the native session
--- messages_json: for API/ollama models — full conversation turns array (no system prompt), stored as JSON
+-- messages_json: for API models — full conversation turns array (no system prompt), stored as JSON
 CREATE TABLE IF NOT EXISTS agent_sessions (
     worker_id INTEGER PRIMARY KEY REFERENCES workers(id) ON DELETE CASCADE,
     session_id TEXT,

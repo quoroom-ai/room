@@ -16,7 +16,8 @@ export const DEFAULTS = {
 export const TRIGGER_TYPES = {
   CRON: 'cron',
   ONCE: 'once',
-  MANUAL: 'manual'
+  MANUAL: 'manual',
+  WEBHOOK: 'webhook'
 } as const
 
 export const TASK_STATUSES = {

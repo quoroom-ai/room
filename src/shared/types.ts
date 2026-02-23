@@ -85,6 +85,7 @@ export interface Task {
   cronExpression: string | null
   triggerType: TriggerType
   triggerConfig: string | null
+  webhookToken: string | null
   scheduledAt: string | null
   executor: string
   status: TaskStatus
@@ -114,6 +115,7 @@ export interface CreateTaskInput {
   cronExpression?: string
   triggerType?: TriggerType
   triggerConfig?: string
+  webhookToken?: string
   scheduledAt?: string
   executor?: string
   maxRuns?: number
@@ -230,6 +232,7 @@ export interface Room {
   queenNickname: string | null
   chatSessionId: string | null
   referredByCode: string | null
+  webhookToken: string | null
   createdAt: string
   updatedAt: string
 }

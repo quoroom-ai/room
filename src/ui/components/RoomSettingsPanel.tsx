@@ -14,7 +14,6 @@ import { PromptDialog } from './PromptDialog'
 import { ConfirmDialog } from './ConfirmDialog'
 import { RoomSetupGuideModal } from './RoomSetupGuideModal'
 import type { Room, Wallet, RevenueSummary, OnChainBalance } from '@shared/types'
-import { FREE_OLLAMA_MODEL_OPTIONS } from '@shared/ollama-models'
 import { OBJECTIVE_PLACEHOLDERS } from '../lib/objective-placeholders'
 
 interface RoomSettingsPanelProps {
@@ -25,7 +24,7 @@ interface QueenStatus {
   running: boolean
   model: string | null
   auth: {
-    provider: 'claude_subscription' | 'codex_subscription' | 'openai_api' | 'anthropic_api' | 'ollama'
+    provider: 'claude_subscription' | 'codex_subscription' | 'openai_api' | 'anthropic_api'
     mode: 'subscription' | 'api'
     credentialName: string | null
     envVar: string | null
@@ -594,8 +593,6 @@ export function RoomSettingsPanel({ roomId }: RoomSettingsPanelProps): React.JSX
       setQueenAuth(prev => ({ ...prev, [room.id]: { provider: 'openai_api', mode: 'api', credentialName: 'openai_api_key', envVar: 'OPENAI_API_KEY', hasCredential: false, hasEnvKey: false, ready: false } }))
     } else if (model.startsWith('anthropic:')) {
       setQueenAuth(prev => ({ ...prev, [room.id]: { provider: 'anthropic_api', mode: 'api', credentialName: 'anthropic_api_key', envVar: 'ANTHROPIC_API_KEY', hasCredential: false, hasEnvKey: false, ready: false } }))
-    } else if (model.startsWith('ollama:')) {
-      setQueenAuth(prev => ({ ...prev, [room.id]: { provider: 'ollama', mode: 'subscription', credentialName: null, envVar: null, hasCredential: false, hasEnvKey: false, ready: false } }))
     } else {
       setQueenAuth(prev => ({ ...prev, [room.id]: { provider: 'claude_subscription', mode: 'subscription', credentialName: null, envVar: null, hasCredential: false, hasEnvKey: false, ready: true } }))
     }
@@ -610,33 +607,11 @@ export function RoomSettingsPanel({ roomId }: RoomSettingsPanelProps): React.JSX
         setQueenModel(prev => ({ ...prev, [room.id]: q.model ?? null }))
         setQueenAuth(prev => ({ ...prev, [room.id]: q.auth }))
       }
-      if (!model.startsWith('ollama:')) {
-        setQueenModelSetup(null)
-        setQueenModelFeedback(prev => ({ ...prev, [room.id]: null }))
-      } else {
-        const modelName = model.replace('ollama:', '')
-        setQueenModelSetup({ roomId: room.id, phase: 'starting', startedAt: Date.now() })
-        setQueenModelFeedback(prev => ({ ...prev, [room.id]: { kind: 'info', text: 'Starting Ollama...' } }))
-        const startResult = await api.ollama.start()
-        if (!startResult.available) {
-          throw new Error(`Ollama unavailable (${startResult.status})`)
-        }
-        setQueenModelSetup({ roomId: room.id, phase: 'installing', startedAt: Date.now() })
-        setQueenModelFeedback(prev => ({ ...prev, [room.id]: { kind: 'info', text: `Installing ${modelName}...` } }))
-        await api.ollama.ensureModel(model)
-        setQueenModelFeedback(prev => ({ ...prev, [room.id]: { kind: 'success', text: `${modelName} is ready.` } }))
-        const refreshed = await api.rooms.queenStatus(room.id).catch(() => null)
-        if (refreshed) {
-          setQueenModel(prev => ({ ...prev, [room.id]: refreshed.model ?? null }))
-          setQueenAuth(prev => ({ ...prev, [room.id]: refreshed.auth }))
-        }
-      }
+      setQueenModelSetup(null)
+      setQueenModelFeedback(prev => ({ ...prev, [room.id]: null }))
     } catch (e) {
       console.error('Failed to update queen model:', e)
-      const rawMessage = e instanceof Error ? e.message : 'Failed to update queen model'
-      const message = rawMessage.includes('Ollama unavailable')
-        ? 'Ollama failed to start in time. Check installation and run `ollama serve`, then try again.'
-        : rawMessage
+      const message = e instanceof Error ? e.message : 'Failed to update queen model'
       if (!persistedModel) {
         // Revert only when model save itself failed.
         setQueenModel(prev => ({ ...prev, [room.id]: prevModel }))
@@ -840,20 +815,12 @@ export function RoomSettingsPanel({ roomId }: RoomSettingsPanelProps): React.JSX
   const hasQueenModelLoaded = Object.prototype.hasOwnProperty.call(queenModel, room.id)
   const isQueenModelBusy = queenModelBusyRoomId === room.id
   const queenModelValue = hasQueenModelLoaded ? (queenModel[room.id] ?? 'claude') : '__loading__'
-  const queenModelSetupActive = isQueenModelBusy && queenModelSetup?.roomId === room.id && queenModelValue.startsWith('ollama:')
-  const queenModelSetupElapsedMs = queenModelSetupActive ? Math.max(0, queenModelSetupTick - queenModelSetup.startedAt) : 0
-  const queenModelSetupEstimateMs = queenModelSetup?.phase === 'starting' ? 30_000 : 180_000
-  const queenModelSetupPct = queenModelSetupActive
-    ? Math.min(95, Math.max(6, Math.round((queenModelSetupElapsedMs / queenModelSetupEstimateMs) * 100)))
-    : 0
-  const queenModelSetupLabel = queenModelSetup?.phase === 'starting' ? 'Starting Ollama' : `Installing ${queenModelValue.replace('ollama:', '')}`
-  const elapsedSeconds = Math.floor(queenModelSetupElapsedMs / 1000)
-  const elapsedMinutes = Math.floor(elapsedSeconds / 60)
-  const elapsedRemainderSeconds = elapsedSeconds % 60
-  const elapsedText = `${elapsedMinutes}:${String(elapsedRemainderSeconds).padStart(2, '0')}`
+  const queenModelSetupActive = false
+  const queenModelSetupPct = 0
+  const queenModelSetupLabel = ''
+  const elapsedText = '0:00'
   const showQueenSubscriptionStatus = activeQueenAuth?.provider === 'claude_subscription'
     || activeQueenAuth?.provider === 'codex_subscription'
-    || (activeQueenAuth?.provider === 'ollama' && !activeQueenAuth.ready && !isQueenModelBusy)
   const queenSubscriptionProvider: 'codex' | 'claude' | null = activeQueenAuth?.provider === 'codex_subscription'
     ? 'codex'
     : activeQueenAuth?.provider === 'claude_subscription'
@@ -880,20 +847,25 @@ export function RoomSettingsPanel({ roomId }: RoomSettingsPanelProps): React.JSX
     { value: 'claude-sonnet-4-6', label: 'Sonnet (subscription)' },
     { value: 'claude-haiku-4-5-20251001', label: 'Haiku (subscription)' },
     { value: 'codex', label: 'Codex (ChatGPT subscription)' },
-    { value: 'openai:gpt-4o-mini', label: 'OpenAI API' },
-    { value: 'anthropic:claude-3-5-sonnet-latest', label: 'Claude API' },
-    ...FREE_OLLAMA_MODEL_OPTIONS.map((model) => ({ value: model.value, label: `${model.label} (Ollama, free)` })),
+    { value: 'openai:gpt-4o-mini', label: 'GPT-4o mini (API)' },
+    { value: 'openai:gpt-4o', label: 'GPT-4o (API)' },
+    { value: 'anthropic:claude-haiku-4-5-20251001', label: 'Haiku (API)' },
+    { value: 'anthropic:claude-sonnet-4-6', label: 'Sonnet (API)' },
+    { value: 'anthropic:claude-opus-4-6', label: 'Opus (API)' },
   ]
   if (!hasQueenModelLoaded) {
     queenModelOptions.unshift({ value: '__loading__', label: 'Loading...' })
   } else if (!queenModelOptions.some((option) => option.value === queenModelValue)) {
-    queenModelOptions.unshift({ value: queenModelValue, label: `Current: ${queenModelValue}` })
+    // Unknown model — show a cleaned-up label instead of the raw value
+    const unknownLabel = queenModelValue.includes(':')
+      ? queenModelValue.split(':').slice(1).join(':')
+      : queenModelValue
+    queenModelOptions.unshift({ value: queenModelValue, label: `Current: ${unknownLabel}` })
   }
   const hasWorkerModelLoaded = typeof room.workerModel === 'string' && room.workerModel.trim().length > 0
   const workerModelValue = hasWorkerModelLoaded ? room.workerModel : '__loading__'
   const workerModelOptions = [
     { value: 'queen', label: 'Use queen model' },
-    ...FREE_OLLAMA_MODEL_OPTIONS.map((model) => ({ value: model.value, label: `${model.label} (Ollama)` })),
   ]
   if (!hasWorkerModelLoaded) {
     workerModelOptions.unshift({ value: '__loading__', label: 'Loading...' })
@@ -918,18 +890,14 @@ export function RoomSettingsPanel({ roomId }: RoomSettingsPanelProps): React.JSX
     ? 'Claude subscription'
     : recommendedQueenModel === 'codex'
       ? 'Codex subscription'
-      : queenModelValue.startsWith('ollama:')
-        ? 'Free Ollama path'
-        : activeQueenAuth?.mode === 'api'
+      : activeQueenAuth?.mode === 'api'
           ? 'API key path'
           : 'Choose a setup path'
   const recommendationHint = recommendedQueenModel
     ? 'Subscription detected. Most cost-effective and stable option for autonomous loops.'
     : activeQueenAuth?.mode === 'api'
       ? 'API model selected. Add and validate API key below to avoid queen auth failures.'
-      : queenModelValue.startsWith('ollama:')
-        ? 'Free setup path selected. First run can be slower while Ollama starts and model files are prepared.'
-        : 'No subscription detected yet. Use API key models or free Ollama. Subscriptions auto-connect when available.'
+      : 'No subscription detected yet. Use API key models. Subscriptions auto-connect when available.'
 
   function row(label: string, children: React.ReactNode, description?: string): React.JSX.Element {
     return (
@@ -1221,7 +1189,6 @@ export function RoomSettingsPanel({ roomId }: RoomSettingsPanelProps): React.JSX
                               : 'Codex auth status unknown'
                           : 'Codex CLI not installed'
                       )}
-                      {activeQueenAuth.provider === 'ollama' && 'Ollama unavailable'}
                     </span>
                     {queenSubscriptionProvider && !queenSubscriptionStatus?.installed && (
                       <button
@@ -1248,15 +1215,6 @@ export function RoomSettingsPanel({ roomId }: RoomSettingsPanelProps): React.JSX
                           Disconnect
                         </button>
                       </>
-                    )}
-                    {activeQueenAuth.provider === 'ollama' && queenModelValue.startsWith('ollama:') && (
-                      <button
-                        onClick={() => { void handleSetQueenModel(room, queenModelValue) }}
-                        disabled={isQueenModelBusy}
-                        className="text-xs px-2 py-1 rounded-lg border border-border-primary text-text-secondary hover:bg-surface-hover disabled:opacity-50"
-                      >
-                        Retry setup
-                      </button>
                     )}
                   </div>
                 )

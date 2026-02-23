@@ -2,14 +2,12 @@ import type Database from 'better-sqlite3'
 import { execSync } from 'node:child_process'
 import * as queries from './db-queries'
 import { checkClaudeCliAvailable } from './claude-code'
-import { isOllamaAvailable } from './ollama-ensure'
 
 export type ModelProvider =
   | 'claude_subscription'
   | 'codex_subscription'
   | 'openai_api'
   | 'anthropic_api'
-  | 'ollama'
 
 export interface ModelAuthStatus {
   provider: ModelProvider
@@ -28,7 +26,6 @@ export function normalizeModel(model: string | null | undefined): string {
 
 export function getModelProvider(model: string | null | undefined): ModelProvider {
   const normalized = normalizeModel(model)
-  if (normalized.startsWith('ollama:')) return 'ollama'
   if (normalized === 'codex' || normalized.startsWith('codex:')) return 'codex_subscription'
   if (normalized === 'openai' || normalized.startsWith('openai:')) return 'openai_api'
   if (normalized === 'anthropic' || normalized.startsWith('anthropic:') || normalized.startsWith('claude-api:')) {
@@ -51,8 +48,6 @@ export async function getModelAuthStatus(db: Database.Database, roomId: number, 
     ready = checkClaudeCliAvailable().available
   } else if (provider === 'codex_subscription') {
     ready = checkCodexCliAvailable()
-  } else if (provider === 'ollama') {
-    ready = await cachedIsOllamaAvailable()
   }
 
   return {
@@ -129,16 +124,3 @@ function checkCodexCliAvailable(): boolean {
   }
 }
 
-let ollamaCache: { value: boolean; at: number } | null = null
-const OLLAMA_CACHE_MS = 30_000
-
-async function cachedIsOllamaAvailable(): Promise<boolean> {
-  if (ollamaCache && Date.now() - ollamaCache.at < OLLAMA_CACHE_MS) return ollamaCache.value
-  const available = await isOllamaAvailable()
-  ollamaCache = { value: available, at: Date.now() }
-  return available
-}
-
-export function invalidateOllamaCache(): void {
-  ollamaCache = null
-}

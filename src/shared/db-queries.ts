@@ -242,8 +242,8 @@ function mapWorkerRow(row: Record<string, unknown>): Worker {
 export function createTask(db: Database.Database, input: CreateTaskInput): Task {
   const result = db
     .prepare(
-      `INSERT INTO tasks (name, description, prompt, cron_expression, trigger_type, trigger_config, scheduled_at, executor, max_runs, worker_id, session_continuity, timeout_minutes, max_turns, allowed_tools, disallowed_tools, room_id)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+      `INSERT INTO tasks (name, description, prompt, cron_expression, trigger_type, trigger_config, webhook_token, scheduled_at, executor, max_runs, worker_id, session_continuity, timeout_minutes, max_turns, allowed_tools, disallowed_tools, room_id)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
     )
     .run(
       input.name,
@@ -252,6 +252,7 @@ export function createTask(db: Database.Database, input: CreateTaskInput): Task 
       input.cronExpression ?? null,
       input.triggerType ?? 'cron',
       input.triggerConfig ?? null,
+      input.webhookToken ?? null,
       input.scheduledAt ?? null,
       input.executor ?? 'claude_code',
       input.maxRuns ?? null,
@@ -273,6 +274,11 @@ export function getTask(db: Database.Database, id: number): Task | null {
   return row ? mapTaskRow(row) : null
 }
 
+export function getTaskByWebhookToken(db: Database.Database, token: string): Task | null {
+  const row = db.prepare('SELECT * FROM tasks WHERE webhook_token = ?').get(token) as Record<string, unknown> | undefined
+  return row ? mapTaskRow(row) : null
+}
+
 export function listTasks(db: Database.Database, roomId?: number, status?: string): Task[] {
   if (roomId != null && status) {
     const rows = db.prepare('SELECT * FROM tasks WHERE room_id = ? AND status = ? ORDER BY created_at DESC').all(roomId, status)
@@ -290,7 +296,7 @@ export function listTasks(db: Database.Database, roomId?: number, status?: strin
 
 export function updateTask(db: Database.Database, id: number, updates: Partial<{
   name: string; description: string; prompt: string; cronExpression: string
-  triggerType: TriggerType; triggerConfig: string; scheduledAt: string; executor: string
+  triggerType: TriggerType; triggerConfig: string; webhookToken: string | null; scheduledAt: string; executor: string
   status: TaskStatus; lastRun: string; lastResult: string; errorCount: number
   maxRuns: number; runCount: number; memoryEntityId: number
   workerId: number | null; sessionContinuity: boolean; sessionId: string | null
@@ -301,7 +307,7 @@ export function updateTask(db: Database.Database, id: number, updates: Partial<{
   const fieldMap: Record<string, string> = {
     name: 'name', description: 'description', prompt: 'prompt',
     cronExpression: 'cron_expression', triggerType: 'trigger_type',
-    triggerConfig: 'trigger_config', scheduledAt: 'scheduled_at',
+    triggerConfig: 'trigger_config', webhookToken: 'webhook_token', scheduledAt: 'scheduled_at',
     executor: 'executor', status: 'status',
     lastRun: 'last_run', lastResult: 'last_result', errorCount: 'error_count',
     maxRuns: 'max_runs', runCount: 'run_count', memoryEntityId: 'memory_entity_id',
@@ -809,6 +815,7 @@ function mapTaskRow(row: Record<string, unknown>): Task {
     cronExpression: row.cron_expression as string | null,
     triggerType: row.trigger_type as TriggerType,
     triggerConfig: row.trigger_config as string | null,
+    webhookToken: row.webhook_token as string | null,
     scheduledAt: row.scheduled_at as string | null,
     executor: row.executor as string,
     status: row.status as TaskStatus,
@@ -1047,6 +1054,7 @@ function mapRoomRow(row: Record<string, unknown>): Room {
     queenNickname: (row.queen_nickname as string | null) ?? null,
     chatSessionId: (row.chat_session_id as string | null) ?? null,
     referredByCode: (row.referred_by_code as string | null) ?? null,
+    webhookToken: (row.webhook_token as string | null) ?? null,
     createdAt: row.created_at as string,
     updatedAt: row.updated_at as string
   }
@@ -1081,6 +1089,11 @@ export function getRoom(db: Database.Database, id: number): Room | null {
   return row ? mapRoomRow(row) : null
 }
 
+export function getRoomByWebhookToken(db: Database.Database, token: string): Room | null {
+  const row = db.prepare('SELECT * FROM rooms WHERE webhook_token = ?').get(token) as Record<string, unknown> | undefined
+  return row ? mapRoomRow(row) : null
+}
+
 export function listRooms(db: Database.Database, status?: string): Room[] {
   if (status) {
     const rows = db.prepare('SELECT * FROM rooms WHERE status = ? ORDER BY created_at DESC').all(status)
@@ -1091,7 +1104,7 @@ export function listRooms(db: Database.Database, status?: string): Room[] {
 }
 
 export function updateRoom(db: Database.Database, id: number, updates: Partial<{
-  name: string; queenWorkerId: number | null; goal: string | null; status: string; visibility: string; autonomyMode: string; maxConcurrentTasks: number; workerModel: string; queenCycleGapMs: number; queenMaxTurns: number; queenQuietFrom: string | null; queenQuietUntil: string | null; config: RoomConfig; referredByCode: string | null; queenNickname: string
+  name: string; queenWorkerId: number | null; goal: string | null; status: string; visibility: string; autonomyMode: string; maxConcurrentTasks: number; workerModel: string; queenCycleGapMs: number; queenMaxTurns: number; queenQuietFrom: string | null; queenQuietUntil: string | null; config: RoomConfig; referredByCode: string | null; queenNickname: string; webhookToken: string | null
 }>): void {
   const fieldMap: Record<string, string> = {
     name: 'name', queenWorkerId: 'queen_worker_id', goal: 'goal',
@@ -1099,7 +1112,8 @@ export function updateRoom(db: Database.Database, id: number, updates: Partial<{
     maxConcurrentTasks: 'max_concurrent_tasks', workerModel: 'worker_model',
     queenCycleGapMs: 'queen_cycle_gap_ms', queenMaxTurns: 'queen_max_turns',
     queenQuietFrom: 'queen_quiet_from', queenQuietUntil: 'queen_quiet_until',
-    config: 'config', referredByCode: 'referred_by_code', queenNickname: 'queen_nickname'
+    config: 'config', referredByCode: 'referred_by_code', queenNickname: 'queen_nickname',
+    webhookToken: 'webhook_token'
   }
   const fields: string[] = []
   const values: unknown[] = []
@@ -2145,7 +2159,7 @@ export function listRecentDecisions(db: Database.Database, roomId: number, limit
 // ─── Agent session continuity (all model types) ──────────────────────────────
 // Persists cross-cycle session state for every queen model:
 //   - CLI models (claude/codex): session_id string for --resume
-//   - API/ollama models: messages_json conversation turns array
+//   - API models (openai/anthropic): messages_json conversation turns array
 
 export function getAgentSession(
   db: Database.Database,

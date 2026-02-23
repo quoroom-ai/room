@@ -1,6 +1,5 @@
 import os from 'node:os'
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
-import { isOllamaAvailable, listOllamaModels } from '../../shared/ollama-ensure'
 import { getMcpDatabase } from '../db'
 import * as queries from '../../shared/db-queries'
 
@@ -10,7 +9,7 @@ export function registerResourceTools(server: McpServer): void {
     {
       title: 'Get Local Resources',
       description:
-        'Get current local machine resource usage: CPU load, RAM usage, and Ollama status. '
+        'Get current local machine resource usage: CPU load and RAM usage. '
         + 'Use this to decide if the room needs to rent a cloud station for extra compute. '
         + 'If CPU load > number of CPUs or RAM used > 85%, consider proposing a station rental to the quorum.',
       inputSchema: {}
@@ -24,10 +23,6 @@ export function registerResourceTools(server: McpServer): void {
       const free = os.freemem()
       const cpuCount = os.cpus().length
       const memUsedPct = Math.round((1 - free / total) * 100)
-
-      // Ollama
-      const ollamaAvailable = await isOllamaAvailable()
-      const ollamaModels = ollamaAvailable ? await listOllamaModels() : []
 
       // Running task count
       let runningTasks = 0
@@ -66,10 +61,6 @@ export function registerResourceTools(server: McpServer): void {
             tasks: {
               running: runningTasks,
               maxConcurrent: maxConcurrentTasks,
-            },
-            ollama: {
-              available: ollamaAvailable,
-              models: ollamaModels.map(m => m.name),
             },
           }, null, 2)
         }]

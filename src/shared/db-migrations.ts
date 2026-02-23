@@ -13,15 +13,6 @@ function upsertSetting(database: Database.Database, key: string, value: string):
 export function runMigrations(database: Database.Database, log: (msg: string) => void = console.log): void {
   database.exec(SCHEMA)
 
-  // Migrate: drop old ollama_sessions table (replaced by unified agent_sessions)
-  const hasOllamaSessions = (database.prepare(
-    `SELECT name FROM sqlite_master WHERE type='table' AND name='ollama_sessions'`
-  ).get() as { name: string } | undefined)?.name
-  if (hasOllamaSessions) {
-    database.exec('DROP TABLE IF EXISTS ollama_sessions')
-    log('Migrated: dropped ollama_sessions (replaced by agent_sessions)')
-  }
-
   // Keeper-level referral code (global, one per keeper)
   if (!database.prepare('SELECT value FROM settings WHERE key = ?').get('keeper_referral_code')) {
     const code = randomBytes(6).toString('base64url').slice(0, 10)
@@ -54,6 +45,52 @@ export function runMigrations(database: Database.Database, log: (msg: string) =>
       database.prepare(`UPDATE rooms SET queen_nickname = ? WHERE id = ?`).run(nickname, room.id)
     }
     log(`Migrated: assigned queen nicknames to ${roomsWithoutNickname.length} room(s)`)
+  }
+
+  // Add webhook_token to tasks
+  const hasTaskWebhookToken = (database.prepare(
+    `SELECT name FROM pragma_table_info('tasks') WHERE name='webhook_token'`
+  ).get() as { name: string } | undefined)?.name
+  if (!hasTaskWebhookToken) {
+    database.exec(`ALTER TABLE tasks ADD COLUMN webhook_token TEXT`)
+    log('Migrated: added webhook_token column to tasks')
+  }
+  const hasTaskWebhookIndex = (database.prepare(
+    `SELECT name FROM sqlite_master WHERE type='index' AND name='idx_tasks_webhook_token'`
+  ).get() as { name: string } | undefined)?.name
+  if (!hasTaskWebhookIndex) {
+    database.exec(`CREATE UNIQUE INDEX IF NOT EXISTS idx_tasks_webhook_token ON tasks(webhook_token) WHERE webhook_token IS NOT NULL`)
+  }
+
+  // Add webhook_token to rooms
+  const hasRoomWebhookToken = (database.prepare(
+    `SELECT name FROM pragma_table_info('rooms') WHERE name='webhook_token'`
+  ).get() as { name: string } | undefined)?.name
+  if (!hasRoomWebhookToken) {
+    database.exec(`ALTER TABLE rooms ADD COLUMN webhook_token TEXT`)
+    log('Migrated: added webhook_token column to rooms')
+  }
+  const hasRoomWebhookIndex = (database.prepare(
+    `SELECT name FROM sqlite_master WHERE type='index' AND name='idx_rooms_webhook_token'`
+  ).get() as { name: string } | undefined)?.name
+  if (!hasRoomWebhookIndex) {
+    database.exec(`CREATE UNIQUE INDEX IF NOT EXISTS idx_rooms_webhook_token ON rooms(webhook_token) WHERE webhook_token IS NOT NULL`)
+  }
+
+  // Migrate ollama models → 'claude' (ollama removed in v0.1.12+)
+  const ollamaWorkers = database
+    .prepare(`SELECT id FROM workers WHERE model LIKE 'ollama:%'`)
+    .all() as { id: number }[]
+  if (ollamaWorkers.length > 0) {
+    database.prepare(`UPDATE workers SET model = 'claude' WHERE model LIKE 'ollama:%'`).run()
+    log(`Migrated: reset ${ollamaWorkers.length} ollama worker model(s) to 'claude'`)
+  }
+  const ollamaRooms = database
+    .prepare(`SELECT id FROM rooms WHERE worker_model LIKE 'ollama:%'`)
+    .all() as { id: number }[]
+  if (ollamaRooms.length > 0) {
+    database.prepare(`UPDATE rooms SET worker_model = 'claude' WHERE worker_model LIKE 'ollama:%'`).run()
+    log(`Migrated: reset ${ollamaRooms.length} room worker_model(s) to 'claude'`)
   }
 
   log('Database schema initialized')

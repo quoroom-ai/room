@@ -2,7 +2,7 @@ import { join } from 'path'
 import { writeFileSync, mkdirSync, existsSync } from 'fs'
 import { executeClaudeCode } from './claude-code'
 import type { ConsoleLogCallback, ExecutionOptions, ExecutionResult } from './claude-code'
-import { executeAgent, executeOllamaOnStation, executeApiOnStation } from './agent-executor'
+import { executeApiOnStation } from './agent-executor'
 import { resolveApiKeyForModel } from './model-provider'
 import { getRoomCloudId, listCloudStations } from './cloud-sync'
 import * as queries from './db-queries'
@@ -262,9 +262,9 @@ export async function executeTask(
     console.warn('Non-fatal: worker resolution failed:', err)
   }
 
-  // ─── Station path: Ollama / API-key models in a room → bypass local concurrency limiter ──────
+  // ─── Station path: API-key models in a room → bypass local concurrency limiter ──────
   // Station tasks are remote calls, not local processes — no slot needed.
-  const isStationModel = model?.startsWith('ollama:') || model?.startsWith('openai:') || model?.startsWith('anthropic:') || model?.startsWith('claude-api:')
+  const isStationModel = model?.startsWith('openai:') || model?.startsWith('anthropic:') || model?.startsWith('claude-api:')
   if (isStationModel && task.roomId) {
     runningTasks.add(taskId)
     try {
@@ -272,19 +272,10 @@ export async function executeTask(
       const stations = await listCloudStations(cloudRoomId)
       const activeStations = stations.filter(s => s.status === 'active')
 
-      // Ollama requires a station; API models can fall through to local path
-      if (activeStations.length === 0 && model?.startsWith('ollama:')) {
-        const run = queries.createTaskRun(db, taskId)
-        const errorMsg = 'No active station available. Ollama workers require a station. Rent one with quoroom_station_create (minimum tier: small).'
-        queries.completeTaskRun(db, run.id, '', undefined, errorMsg)
-        onFailed?.(task, errorMsg)
-        return { success: false, output: '', errorMessage: errorMsg, durationMs: Date.now() - startTime }
-      }
-
       if (activeStations.length > 0) {
         const run = queries.createTaskRun(db, taskId)
         try {
-          // Round-robin: distribute across active stations
+          // Round-robin: distribute across eligible stations
           const station = activeStations[run.id % activeStations.length]
 
           // Augment prompt with learned context + memory
@@ -302,22 +293,13 @@ export async function executeTask(
           } catch (err) { console.warn('Non-fatal: memory injection failed:', err) }
 
           const timeoutMs = task.timeoutMinutes != null ? task.timeoutMinutes * 60 * 1000 : undefined
-
           const stationModel = model as string
-          let agentResult
-          if (stationModel.startsWith('ollama:')) {
-            agentResult = await executeOllamaOnStation(cloudRoomId, station.id, {
-              model: stationModel, prompt: augmentedPrompt, systemPrompt, timeoutMs,
-            })
-          } else {
-            // API key model on station
-            const apiKey = resolveApiKeyForModel(db, task.roomId, stationModel)
-            agentResult = await executeApiOnStation(cloudRoomId, station.id, {
-              model: stationModel, prompt: augmentedPrompt, systemPrompt, timeoutMs, apiKey,
-            })
-          }
+          const apiKey = resolveApiKeyForModel(db, task.roomId, stationModel)
+          const agentResult = await executeApiOnStation(cloudRoomId, station.id, {
+            model: stationModel, prompt: augmentedPrompt, systemPrompt, timeoutMs, apiKey,
+          })
 
-          const result = ollamaResultToExecutionResult(agentResult)
+          const result = agentResultToExecutionResult(agentResult)
           return finishRun(db, run.id, taskId, task, result, resultsDir, onComplete, onFailed)
         } catch (err) {
           const errorMsg = err instanceof Error ? err.message : String(err)
@@ -397,19 +379,6 @@ export async function executeTask(
     const consoleLog = createConsoleLogBuffer(db, run.id, onConsoleLogEntry)
     let lastProgressUpdate = 0
 
-    // Local Ollama (standalone tasks without a room — room tasks use stations above)
-    if (model?.startsWith('ollama:')) {
-      const agentResult = await executeAgent({
-        model,
-        prompt: augmentedPrompt,
-        systemPrompt,
-        timeoutMs,
-      })
-      consoleLog.flush()
-      const result = ollamaResultToExecutionResult(agentResult)
-      return finishRun(db, run.id, taskId, task, result, resultsDir, onComplete, onFailed)
-    }
-
     const execOptions: ExecutionOptions = {
       systemPrompt,
       model,
@@ -486,7 +455,7 @@ export async function executeTask(
   }
 }
 
-function ollamaResultToExecutionResult(result: { output: string; exitCode: number; durationMs: number; sessionId: string | null; timedOut: boolean }): ExecutionResult {
+function agentResultToExecutionResult(result: { output: string; exitCode: number; durationMs: number; sessionId: string | null; timedOut: boolean }): ExecutionResult {
   return {
     stdout: result.output,
     stderr: '',

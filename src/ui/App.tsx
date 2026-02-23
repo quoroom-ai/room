@@ -85,9 +85,7 @@ function formatRoomModel(model: string | null | undefined): string {
     ? 'OpenAI'
     : provider === 'anthropic'
       ? 'Anthropic'
-      : provider === 'ollama'
-        ? 'Ollama'
-        : provider
+      : provider
   return `${providerLabel}/${modelName}`
 }
 
@@ -517,7 +515,7 @@ function App(): React.JSX.Element {
       case 'transactions':
         return <TransactionsPanel roomId={selectedRoomId} />
       case 'stations':
-        return <StationsPanel roomId={selectedRoomId} autonomyMode={autonomyMode} />
+        return <StationsPanel roomId={selectedRoomId} autonomyMode={autonomyMode} queenModel={selectedRoom ? (queenModels[selectedRoom.id] ?? null) : null} workerModel={selectedRoom?.workerModel ?? null} />
       case 'room-settings':
         return <RoomSettingsPanel roomId={selectedRoomId} />
       case 'watches':

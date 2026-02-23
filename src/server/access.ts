@@ -48,8 +48,6 @@ const AUTO_MODE_USER_WHITELIST = [
   /^POST \/api\/rooms\/\d+\/credentials$/,       // manage credentials
   /^DELETE \/api\/credentials\/\d+$/,            // delete credential
   /^POST \/api\/status\/simulate-update$/,       // dev: simulate update notification
-  /^POST \/api\/ollama\/start$/,                 // start Ollama server
-  /^POST \/api\/ollama\/ensure-model$/,          // ensure Ollama model is installed
   /^POST \/api\/providers\/(codex|claude)\/connect$/, // request provider auth flow
   /^POST \/api\/providers\/(codex|claude)\/install$/, // install provider CLI
   /^POST \/api\/providers\/(codex|claude)\/disconnect$/, // disconnect provider auth

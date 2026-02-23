@@ -242,7 +242,6 @@ export function StationsPanel({ roomId, autonomyMode }: StationsPanelProps): Rea
         </div>
       </div>
 
-
       {actionError && (
         <div className="px-3 py-2 text-sm text-status-warning bg-status-warning-bg rounded-lg">
           {actionError}

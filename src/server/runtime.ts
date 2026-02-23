@@ -52,7 +52,7 @@ function getResultsDir(): string {
 
 interface QueueTaskOptions {
   allowInactive: boolean
-  source: 'manual' | 'cron' | 'once'
+  source: 'manual' | 'cron' | 'once' | 'webhook'
 }
 
 function queueTaskExecution(

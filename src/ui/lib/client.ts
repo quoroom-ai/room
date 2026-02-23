@@ -390,7 +390,7 @@ export const api = {
         running: boolean
         model: string | null
         auth: {
-          provider: 'claude_subscription' | 'codex_subscription' | 'openai_api' | 'anthropic_api' | 'ollama'
+          provider: 'claude_subscription' | 'codex_subscription' | 'openai_api' | 'anthropic_api'
           mode: 'subscription' | 'api'
           credentialName: string | null
           envVar: string | null
@@ -504,13 +504,12 @@ export const api = {
         dbPath?: string
         claude: { available: boolean; version?: string }
         codex: { available: boolean; version?: string }
-        ollama: { available: boolean; models: Array<{ name: string; size: number }> }
         resources: { cpuCount: number; loadAvg1m: number; loadAvg5m: number; memTotalGb: number; memFreeGb: number; memUsedPct: number }
         deploymentMode?: 'local' | 'cloud'
-        pending?: { claude?: boolean; codex?: boolean; ollama?: boolean }
+        pending?: { claude?: boolean; codex?: boolean }
         updateInfo?: { latestVersion: string; releaseUrl: string; assets: { mac: string | null; windows: string | null; linux: string | null } } | null
       }>('GET', '/api/status'),
-    getParts: (parts: Array<'storage' | 'providers' | 'ollama' | 'resources' | 'update'>) =>
+    getParts: (parts: Array<'storage' | 'providers' | 'resources' | 'update'>) =>
       request<{
         version: string
         uptime: number
@@ -518,10 +517,9 @@ export const api = {
         dbPath?: string
         claude?: { available: boolean; version?: string }
         codex?: { available: boolean; version?: string }
-        ollama?: { available: boolean; models: Array<{ name: string; size: number }> }
         resources?: { cpuCount: number; loadAvg1m: number; loadAvg5m: number; memTotalGb: number; memFreeGb: number; memUsedPct: number }
         deploymentMode?: 'local' | 'cloud'
-        pending?: { claude?: boolean; codex?: boolean; ollama?: boolean }
+        pending?: { claude?: boolean; codex?: boolean }
         updateInfo?: { latestVersion: string; releaseUrl: string; assets: { mac: string | null; windows: string | null; linux: string | null } } | null
       }>('GET', `/api/status${qs({ parts: parts.join(',') })}`),
     checkUpdate: () =>
@@ -584,14 +582,6 @@ export const api = {
         ok: true
         session: ProviderInstallSession
       }>('POST', `/api/providers/install-sessions/${encodeURIComponent(sessionId)}/cancel`),
-  },
-
-  // ─── Ollama ──────────────────────────────────────────
-  ollama: {
-    start: () =>
-      request<{ available: boolean; status: 'running' | 'install_failed' | 'start_failed' }>('POST', '/api/ollama/start'),
-    ensureModel: (model: string) =>
-      request<{ ok: true; status: 'ready' | 'pulled'; model: string }>('POST', '/api/ollama/ensure-model', { model }),
   },
 
   // ─── Wallet ───────────────────────────────────────────

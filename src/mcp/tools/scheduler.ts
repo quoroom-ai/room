@@ -1,14 +1,28 @@
 import { join, dirname } from 'path'
 import { homedir } from 'os'
-import { readFileSync } from 'fs'
+import { readFileSync, existsSync } from 'fs'
+import { randomBytes } from 'crypto'
 import { request as httpRequest } from 'http'
 import { z } from 'zod'
 import cron from 'node-cron'
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
 import { getMcpDatabase } from '../db'
 import * as queries from '../../shared/db-queries'
-import { APP_NAME, TASK_STATUSES } from '../../shared/constants'
+import { APP_NAME, TASK_STATUSES, TRIGGER_TYPES } from '../../shared/constants'
 import { executeTask, isTaskRunning } from '../../shared/task-runner'
+
+function getServerPort(): number | null {
+  try {
+    const dbPath = process.env.QUOROOM_DB_PATH
+    const dataDir = process.env.QUOROOM_DATA_DIR || (dbPath ? dirname(dbPath) : join(homedir(), `.${APP_NAME.toLowerCase()}`))
+    const portFile = join(dataDir, 'api.port')
+    if (existsSync(portFile)) {
+      const port = parseInt(readFileSync(portFile, 'utf-8').trim(), 10)
+      return Number.isFinite(port) && port > 0 ? port : null
+    }
+  } catch { /* non-fatal */ }
+  return null
+}
 
 export function generateTaskName(prompt: string): string {
   const cleaned = prompt.replace(/^(please |can you |i want you to |i need you to )/i, '').trim()
@@ -23,8 +37,8 @@ export function registerSchedulerTools(server: McpServer): void {
     {
       title: 'Schedule Task',
       description:
-        'Create a task — recurring (cron), one-time (specific datetime), or on-demand (manual trigger). '
-        + 'Provide cronExpression for recurring, scheduledAt for one-time, or neither for on-demand. '
+        'Create a task — recurring (cron), one-time (specific datetime), on-demand (manual trigger), or webhook-triggered. '
+        + 'Provide cronExpression for recurring, scheduledAt for one-time, triggerType="webhook" for HTTP-triggered tasks, or neither for on-demand. '
         + 'RESPONSE STYLE: After calling this tool, confirm to the user in 1 short sentence. '
         + 'Do NOT add notes, tips, caveats, or advice. Do NOT mention task IDs, cron syntax, session continuity, workers, timeouts, Electron, or internal tool names.',
       inputSchema: {
@@ -81,18 +95,24 @@ export function registerSchedulerTools(server: McpServer): void {
           + 'Example: "WebFetch" to force WebSearch-only (avoids slow URL fetches). '
           + '"Edit,Write" to make a task read-only.'
         ),
+        triggerType: z.enum(['cron', 'once', 'manual', 'webhook']).optional().describe(
+          'Override the trigger type. "webhook": task runs when an external service POSTs to its webhook URL. '
+          + 'Usually inferred automatically — only set this explicitly for webhook tasks.'
+        ),
         roomId: z.number().int().positive().optional().describe(
           'Assign this task to a room by ID. When set, the task is scoped to that room.'
         )
       }
     },
-    async ({ name, prompt, cronExpression, scheduledAt, description, maxRuns, workerId, sessionContinuity, timeout, maxTurns, allowedTools, disallowedTools, roomId }) => {
+    async ({ name, prompt, cronExpression, scheduledAt, description, maxRuns, workerId, sessionContinuity, timeout, maxTurns, allowedTools, disallowedTools, triggerType: triggerTypeInput, roomId }) => {
       const db = getMcpDatabase()
 
       // Auto-determine trigger type
-      let triggerType: 'cron' | 'once' | 'manual' = 'manual'
-      if (cronExpression) triggerType = 'cron'
-      if (scheduledAt) triggerType = 'once'
+      let triggerType: 'cron' | 'once' | 'manual' | 'webhook' = triggerTypeInput ?? 'manual'
+      if (!triggerTypeInput) {
+        if (cronExpression) triggerType = 'cron'
+        else if (scheduledAt) triggerType = 'once'
+      }
 
       // Auto-generate name if not provided
       const taskName = (name || generateTaskName(prompt) || 'Untitled task').trim()
@@ -141,13 +161,18 @@ export function registerSchedulerTools(server: McpServer): void {
         }
       }
 
-      queries.createTask(db, {
+      const webhookToken = triggerType === TRIGGER_TYPES.WEBHOOK
+        ? randomBytes(16).toString('hex')
+        : undefined
+
+      const task = queries.createTask(db, {
         name: taskName,
         prompt,
         cronExpression: cronExpression ?? undefined,
         scheduledAt: scheduledAt ?? undefined,
         triggerType,
         triggerConfig: JSON.stringify({ source: process.env.QUOROOM_SOURCE || 'claude-desktop' }),
+        webhookToken,
         description,
         executor: 'claude_code',
         maxRuns: maxRuns ?? undefined,
@@ -160,14 +185,25 @@ export function registerSchedulerTools(server: McpServer): void {
         roomId: roomId ?? undefined
       })
 
-      if (triggerType === 'cron') {
+      if (triggerType === TRIGGER_TYPES.WEBHOOK) {
+        const port = getServerPort()
+        const webhookUrl = port
+          ? `http://localhost:${port}/api/hooks/task/${webhookToken}`
+          : `/api/hooks/task/${webhookToken}`
+        return {
+          content: [{
+            type: 'text' as const,
+            text: `Created webhook task "${taskName}" (id: ${task.id}).\nWebhook URL: ${webhookUrl}\nTrigger it with: curl -X POST ${webhookUrl}`
+          }]
+        }
+      } else if (triggerType === TRIGGER_TYPES.CRON) {
         return {
           content: [{
             type: 'text' as const,
             text: `Scheduled recurring task "${taskName}".`
           }]
         }
-      } else if (triggerType === 'once') {
+      } else if (triggerType === TRIGGER_TYPES.ONCE) {
         return {
           content: [{
             type: 'text' as const,
@@ -561,6 +597,79 @@ export function registerSchedulerTools(server: McpServer): void {
           text: `Session cleared for "${task.name}".`
         }]
       }
+    }
+  )
+
+  server.registerTool(
+    'quoroom_webhook_url',
+    {
+      title: 'Get Webhook URL',
+      description: 'Get the webhook URL for a task or room. '
+        + 'For tasks: use the URL to trigger the task from external services (GitHub, Stripe, monitoring tools, etc.). '
+        + 'For rooms: use the URL to inject a message and immediately wake the queen.',
+      inputSchema: {
+        taskId: z.number().int().positive().optional().describe('Task ID to get the webhook URL for'),
+        roomId: z.number().int().positive().optional().describe('Room ID to get the queen-wake webhook URL for'),
+        generateIfMissing: z.boolean().optional().describe('If the task/room has no webhook token, generate one. Default: false.')
+      }
+    },
+    async ({ taskId, roomId, generateIfMissing }) => {
+      const db = getMcpDatabase()
+      const port = getServerPort()
+
+      if (taskId) {
+        const task = queries.getTask(db, taskId)
+        if (!task) {
+          return { content: [{ type: 'text' as const, text: `No task found with id ${taskId}.` }] }
+        }
+        let token = task.webhookToken
+        if (!token && generateIfMissing) {
+          token = randomBytes(16).toString('hex')
+          queries.updateTask(db, taskId, { webhookToken: token })
+        }
+        if (!token) {
+          return {
+            content: [{ type: 'text' as const, text: `Task "${task.name}" has no webhook token. Pass generateIfMissing: true to create one.` }]
+          }
+        }
+        const url = port
+          ? `http://localhost:${port}/api/hooks/task/${token}`
+          : `/api/hooks/task/${token}`
+        return {
+          content: [{
+            type: 'text' as const,
+            text: `Webhook URL for task "${task.name}":\n${url}\n\nTrigger: curl -X POST ${url}\nWith payload: curl -X POST ${url} -H "Content-Type: application/json" -d '{"message":"triggered by github"}'`
+          }]
+        }
+      }
+
+      if (roomId) {
+        const room = queries.getRoom(db, roomId)
+        if (!room) {
+          return { content: [{ type: 'text' as const, text: `No room found with id ${roomId}.` }] }
+        }
+        let token = room.webhookToken
+        if (!token && generateIfMissing) {
+          token = randomBytes(16).toString('hex')
+          queries.updateRoom(db, roomId, { webhookToken: token })
+        }
+        if (!token) {
+          return {
+            content: [{ type: 'text' as const, text: `Room "${room.name}" has no webhook token. Pass generateIfMissing: true to create one.` }]
+          }
+        }
+        const url = port
+          ? `http://localhost:${port}/api/hooks/queen/${token}`
+          : `/api/hooks/queen/${token}`
+        return {
+          content: [{
+            type: 'text' as const,
+            text: `Queen-wake webhook URL for room "${room.name}":\n${url}\n\nTrigger: curl -X POST ${url} -H "Content-Type: application/json" -d '{"message":"your event description here"}'`
+          }]
+        }
+      }
+
+      return { content: [{ type: 'text' as const, text: 'Provide either taskId or roomId.' }] }
     }
   )
 }

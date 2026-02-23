@@ -5,23 +5,23 @@ import { updateGoalProgress, decomposeGoal, completeGoal, abandonGoal, setRoomOb
 import type { DecisionType, VoteValue } from './types'
 import { webFetch, webSearch, browserAction, type BrowserAction } from './web-tools'
 
-// ─── Ollama tool definition format (compatible with OpenAI format) ──────────
+// ─── Tool definition format (OpenAI-compatible) ─────────────────────────────
 
-export interface OllamaToolProperty {
+export interface ToolProperty {
   type: string
   description: string
   enum?: string[]
   items?: { type: string }
 }
 
-export interface OllamaToolDef {
+export interface ToolDef {
   type: 'function'
   function: {
     name: string
     description: string
     parameters: {
       type: 'object'
-      properties: Record<string, OllamaToolProperty>
+      properties: Record<string, ToolProperty>
       required?: string[]
     }
   }
@@ -29,148 +29,7 @@ export interface OllamaToolDef {
 
 // ─── All queen tool definitions ─────────────────────────────────────────────
 
-/**
- * Slim tool set for small local models (ollama/llama3.2) — only the most essential tools.
- * Fewer tools + simpler schemas = much faster responses from small models.
- */
-export const SLIM_QUEEN_TOOL_DEFINITIONS: OllamaToolDef[] = [
-  {
-    type: 'function',
-    function: {
-      name: 'quoroom_set_goal',
-      description: 'Set the room objective.',
-      parameters: {
-        type: 'object',
-        properties: {
-          description: { type: 'string', description: 'The objective' }
-        },
-        required: ['description']
-      }
-    }
-  },
-  {
-    type: 'function',
-    function: {
-      name: 'quoroom_update_progress',
-      description: 'Log progress on a goal.',
-      parameters: {
-        type: 'object',
-        properties: {
-          goalId: { type: 'number', description: 'Goal ID' },
-          observation: { type: 'string', description: 'What was achieved' },
-          metricValue: { type: 'number', description: '0.0 to 1.0 completion' }
-        },
-        required: ['goalId', 'observation']
-      }
-    }
-  },
-  {
-    type: 'function',
-    function: {
-      name: 'quoroom_propose',
-      description: 'Create a quorum proposal.',
-      parameters: {
-        type: 'object',
-        properties: {
-          proposal: { type: 'string', description: 'Proposal text' },
-          decisionType: { type: 'string', description: 'Decision type', enum: ['strategy', 'resource', 'personnel', 'low_impact'] }
-        },
-        required: ['proposal', 'decisionType']
-      }
-    }
-  },
-  {
-    type: 'function',
-    function: {
-      name: 'quoroom_create_worker',
-      description: 'Create a new agent worker. Required: name and systemPrompt. Do NOT pass worker_id or room_id.',
-      parameters: {
-        type: 'object',
-        properties: {
-          name: { type: 'string', description: 'Worker name' },
-          systemPrompt: { type: 'string', description: 'Worker instructions' },
-          role: { type: 'string', description: 'Optional job title' }
-        },
-        required: ['name', 'systemPrompt']
-      }
-    }
-  },
-  {
-    type: 'function',
-    function: {
-      name: 'quoroom_schedule',
-      description: 'Create a recurring or one-time task.',
-      parameters: {
-        type: 'object',
-        properties: {
-          name: { type: 'string', description: 'Task name' },
-          prompt: { type: 'string', description: 'Task instructions' },
-          cronExpression: { type: 'string', description: 'Cron schedule, e.g. "0 9 * * *"' }
-        },
-        required: ['name', 'prompt']
-      }
-    }
-  },
-  {
-    type: 'function',
-    function: {
-      name: 'quoroom_remember',
-      description: 'Store a memory.',
-      parameters: {
-        type: 'object',
-        properties: {
-          name: { type: 'string', description: 'Memory label' },
-          content: { type: 'string', description: 'What to remember' }
-        },
-        required: ['name', 'content']
-      }
-    }
-  },
-  {
-    type: 'function',
-    function: {
-      name: 'quoroom_ask_keeper',
-      description: 'Send a question to the human operator.',
-      parameters: {
-        type: 'object',
-        properties: {
-          question: { type: 'string', description: 'Question for keeper' }
-        },
-        required: ['question']
-      }
-    }
-  },
-  {
-    type: 'function',
-    function: {
-      name: 'quoroom_web_search',
-      description: 'Search the web. Returns top 5 results with title, URL, and snippet.',
-      parameters: {
-        type: 'object',
-        properties: {
-          query: { type: 'string', description: 'Search query' }
-        },
-        required: ['query']
-      }
-    }
-  },
-  {
-    type: 'function',
-    function: {
-      name: 'quoroom_web_fetch',
-      description: 'Fetch any URL and return its content as clean text. Use to read articles, docs, pricing pages.',
-      parameters: {
-        type: 'object',
-        properties: {
-          url: { type: 'string', description: 'Full URL (https://...)' }
-        },
-        required: ['url']
-      }
-    }
-  }
-]
-
-export const QUEEN_TOOL_DEFINITIONS: OllamaToolDef[] = [
+export const QUEEN_TOOL_DEFINITIONS: ToolDef[] = [
   // ── Goals ──────────────────────────────────────────────────────────────
   {
     type: 'function',

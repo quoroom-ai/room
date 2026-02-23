@@ -11,8 +11,7 @@ import { detectRateLimit, sleep } from './rate-limit'
 import { fetchPublicRooms, getRoomCloudId, listCloudStations, type PublicRoom, type CloudStation } from './cloud-sync'
 import { resolveApiKeyForModel } from './model-provider'
 import { createCycleLogBuffer, type CycleLogEntryCallback } from './console-log-buffer'
-import { QUEEN_TOOL_DEFINITIONS, SLIM_QUEEN_TOOL_DEFINITIONS, executeQueenTool } from './queen-tools'
-import { getOllamaModelMinTier, isTierSufficient } from './ollama-models'
+import { QUEEN_TOOL_DEFINITIONS, executeQueenTool } from './queen-tools'
 
 interface LoopState {
   running: boolean
@@ -295,13 +294,11 @@ export async function runCycle(
       skillContent ? `\n\n# Active Skills\n\n${skillContent}` : ''
     ].join('')
 
-    const isOllama = model.startsWith('ollama:')
     const isCli = model === 'claude' || model.startsWith('claude-') || model === 'codex'
-    // isApi = openai:* or anthropic:* — uses messages_json like ollama but with larger context window
 
     // ─── Load agent session ────────────────────────────────────────────────────
     // Group A (CLI): load sessionId for --resume
-    // Group B (API) + Group C (ollama): load messages_json for previousMessages
+    // Group B (API): load messages_json for previousMessages
     let resumeSessionId: string | undefined
     let previousMessages: Array<{ role: string; content: string }> | undefined
 
@@ -324,8 +321,8 @@ export async function runCycle(
     // ─── Context compression (OpenClaw pattern) ────────────────────────────────
     // When the session history grows large, compress it into a summary before the
     // next cycle instead of blindly trimming old messages.
-    const COMPRESS_THRESHOLD = isOllama ? 12 : 30
-    const MAX_MESSAGES = isOllama ? 16 : 40
+    const COMPRESS_THRESHOLD = 30
+    const MAX_MESSAGES = 40
     const apiKeyEarly = resolveApiKeyForModel(db, roomId, model)
 
     if (!isCli && previousMessages && previousMessages.length >= COMPRESS_THRESHOLD) {
@@ -457,34 +454,7 @@ export async function runCycle(
       )
       contextParts.push(`## Stations (${activeStations.length} active)\n${stationLines.join('\n')}`)
 
-      // Tier compatibility warnings
-      const tierWarnings: string[] = []
-      const queenModel = worker.model
-      if (queenModel?.startsWith('ollama:')) {
-        const minTier = getOllamaModelMinTier(queenModel)
-        if (minTier && activeStations.length > 0 && !activeStations.some(s => isTierSufficient(s.tier, minTier))) {
-          const tierList = [...new Set(activeStations.map(s => s.tier))].join(', ')
-          tierWarnings.push(`⚠ QUEEN TIER MISMATCH: Your model ${queenModel} requires ${minTier}. Active stations: ${tierList} — YOU will fail to run. Use quoroom_station_create to rent a ${minTier} station, or change your model with quoroom_update_worker.`)
-        }
       }
-      const effectiveWorkerModel = status.room.workerModel === 'queen' ? queenModel : status.room.workerModel
-      if (effectiveWorkerModel?.startsWith('ollama:') && effectiveWorkerModel !== queenModel) {
-        const minTier = getOllamaModelMinTier(effectiveWorkerModel)
-        if (minTier && activeStations.length > 0 && !activeStations.some(s => isTierSufficient(s.tier, minTier))) {
-          const tierList = [...new Set(activeStations.map(s => s.tier))].join(', ')
-          tierWarnings.push(`⚠ WORKER TIER MISMATCH: Worker model ${effectiveWorkerModel} requires ${minTier}. Active stations: ${tierList} — workers CANNOT run. Use quoroom_station_create to rent a ${minTier} station, or use quoroom_configure_room to switch workers to ollama:llama3.2.`)
-        }
-      }
-      if (tierWarnings.length > 0) {
-        contextParts.push(`## Station Compatibility Warnings\n${tierWarnings.join('\n')}`)
-      }
-    } else {
-      const effectiveWorkerModel = status.room.workerModel === 'queen' ? (worker.model ?? 'claude') : (status.room.workerModel ?? 'claude')
-      if (effectiveWorkerModel.startsWith('ollama:')) {
-        const minTier = getOllamaModelMinTier(effectiveWorkerModel) ?? 'small'
-        contextParts.push(`## Stations\n⚠ NO ACTIVE STATIONS. Worker model is ${effectiveWorkerModel} — workers CANNOT run without a station.\nRent a station with quoroom_station_create (minimum tier: ${minTier}) as your FIRST action before creating any tasks or workers.`)
-      }
-    }
 
     if (publicRooms.length > 0) {
       const top3 = publicRooms.slice(0, 3)
@@ -518,9 +488,7 @@ export async function runCycle(
       ? 'Always call tools to take action — do not just describe what you would do.'
       : 'IMPORTANT: You MUST call at least one tool in your response. Respond ONLY with a tool call — do not write explanatory text without a tool call.'
 
-    const toolList = isOllama
-      ? '**Goals:** quoroom_set_goal, quoroom_update_progress\n**Governance:** quoroom_propose\n**Workers:** quoroom_create_worker\n**Tasks:** quoroom_schedule\n**Memory:** quoroom_remember\n**Web:** quoroom_web_search, quoroom_web_fetch\n**Comms:** quoroom_ask_keeper'
-      : `**Goals:** quoroom_set_goal, quoroom_update_progress, quoroom_create_subgoal, quoroom_complete_goal, quoroom_abandon_goal\n**Governance:** quoroom_propose, quoroom_vote\n**Workers:** quoroom_create_worker, quoroom_update_worker\n**Tasks:** quoroom_schedule\n**Memory:** quoroom_remember, quoroom_recall\n**Web:** quoroom_web_search, quoroom_web_fetch, quoroom_browser\n**Comms:** quoroom_ask_keeper\n**Settings:** quoroom_configure_room${selfRegulateHint}`
+    const toolList = `**Goals:** quoroom_set_goal, quoroom_update_progress, quoroom_create_subgoal, quoroom_complete_goal, quoroom_abandon_goal\n**Governance:** quoroom_propose, quoroom_vote\n**Workers:** quoroom_create_worker, quoroom_update_worker\n**Tasks:** quoroom_schedule\n**Memory:** quoroom_remember, quoroom_recall\n**Web:** quoroom_web_search, quoroom_web_fetch, quoroom_browser\n**Comms:** quoroom_ask_keeper\n**Settings:** quoroom_configure_room${selfRegulateHint}`
 
     contextParts.push(`## Instructions\nBased on the current state, decide what to do next and call the appropriate tools. Available tools:\n\n${toolList}\n\n${toolCallInstruction}`)
 
@@ -536,17 +504,12 @@ export async function runCycle(
 
     // For non-Claude models: provide queen tools so they can take real actions
     // (Claude uses MCP natively; codex doesn't support tool calling)
-    const needsQueenTools = model.startsWith('ollama:')
-      || model === 'openai' || model.startsWith('openai:')
+    const needsQueenTools = model === 'openai' || model.startsWith('openai:')
       || model === 'anthropic' || model.startsWith('anthropic:') || model.startsWith('claude-api:')
 
-    // Ollama: use slim tool set (7 tools vs 12) to fit small context windows
-    const toolDefs = needsQueenTools
-      ? (isOllama ? SLIM_QUEEN_TOOL_DEFINITIONS : QUEEN_TOOL_DEFINITIONS)
-      : undefined
-    const ollamaToolOpts = needsQueenTools
+    const apiToolOpts = needsQueenTools
       ? {
-          toolDefs,
+          toolDefs: QUEEN_TOOL_DEFINITIONS,
           onToolCall: async (toolName: string, args: Record<string, unknown>): Promise<string> => {
             logBuffer.addSynthetic('tool_call', `→ ${toolName}(${JSON.stringify(args)})`)
             const result = await executeQueenTool(db, roomId, worker.id, toolName, args)
@@ -556,29 +519,24 @@ export async function runCycle(
         }
       : {}
 
-    // Ollama: 10 min timeout for large models on CPU (e.g. qwen3:14b ~5 tok/s); others: 5 min
-    const cycleTimeoutMs = isOllama ? 10 * 60 * 1000 : 5 * 60 * 1000
-
     const result = await executeAgent({
       model,
       prompt,
       systemPrompt,
       apiKey,
-      timeoutMs: cycleTimeoutMs,
+      timeoutMs: 5 * 60 * 1000,
       maxTurns: maxTurns ?? 10,
       onConsoleLog: logBuffer.onConsoleLog,
       // CLI models: pass resumeSessionId for native --resume
       resumeSessionId,
-      // API/ollama models: pass conversation history + persistence callback
+      // API models: pass conversation history + persistence callback
       previousMessages: isCli ? undefined : previousMessages,
       onSessionUpdate: isCli ? undefined : (msgs: Array<{ role: string; content: string }>) => {
         // Hard trim as safety net (compression should have already run above threshold)
         const trimmed = msgs.length > MAX_MESSAGES ? msgs.slice(-MAX_MESSAGES) : msgs
         queries.saveAgentSession(db, worker.id, { messagesJson: JSON.stringify(trimmed), model })
       },
-      // Ollama: JSON action mode (avoids slow constrained tool decoding on small models)
-      ...(isOllama ? { useJsonActionMode: true } : {}),
-      ...ollamaToolOpts
+      ...apiToolOpts
     })
 
     // Check for rate limit

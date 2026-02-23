@@ -3,11 +3,10 @@ import { homedir } from 'os'
 import { executeClaudeCode } from './claude-code'
 import type { ExecutionOptions, ExecutionResult, ConsoleLogCallback, ProgressCallback } from './claude-code'
 import { execOnCloudStation } from './cloud-sync'
-import { ensureOllamaModel, ollamaRequest, ollamaStreamRequest, isOllamaAvailable, listOllamaModels } from './ollama-ensure'
-import type { OllamaToolDef } from './queen-tools'
+import type { ToolDef } from './queen-tools'
 
 export interface AgentExecutionOptions {
-  model: string // 'claude' | 'codex' | 'openai:gpt-4o-mini' | 'anthropic:claude-3-5-sonnet-latest' | 'ollama:llama3'
+  model: string // 'claude' | 'codex' | 'openai:gpt-4o-mini' | 'anthropic:claude-3-5-sonnet-latest'
   prompt: string
   systemPrompt?: string
   maxTurns?: number
@@ -18,14 +17,9 @@ export interface AgentExecutionOptions {
   onConsoleLog?: ConsoleLogCallback
   allowedTools?: string
   disallowedTools?: string
-  // Ollama tool-calling support
-  toolDefs?: OllamaToolDef[]
+  // API queen tool-calling support
+  toolDefs?: ToolDef[]
   onToolCall?: (name: string, args: Record<string, unknown>) => Promise<string>
-  /**
-   * Use plain JSON output mode instead of native tool-calling API.
-   * Faster for small models (llama3.2) — avoids constrained decoding overhead.
-   */
-  useJsonActionMode?: boolean
   /**
    * Prior conversation messages to prepend (session continuity across cycles).
    * When set, the current prompt is appended as a "NEW CYCLE" continuation message
@@ -52,13 +46,7 @@ const DEFAULT_HTTP_TIMEOUT_MS = 60_000
 export async function executeAgent(options: AgentExecutionOptions): Promise<AgentExecutionResult> {
   const model = options.model.trim()
   if (model.startsWith('ollama:')) {
-    if (options.toolDefs && options.toolDefs.length > 0 && options.onToolCall) {
-      if (options.useJsonActionMode) {
-        return executeOllamaJsonActions(options)
-      }
-      return executeOllamaWithTools(options)
-    }
-    return executeOllama(options)
+    throw new Error(`Ollama models are no longer supported. Update your room model to 'claude', 'codex', 'anthropic:*', or 'openai:*'.`)
   }
   if (model === 'codex' || model.startsWith('codex:')) {
     return executeCodex(options)
@@ -215,269 +203,6 @@ async function executeCodex(options: AgentExecutionOptions): Promise<AgentExecut
   })
 }
 
-// ─── Ollama JSON action mode (fast — no constrained tool decoding) ──────────
-// Instead of using the `tools` API (slow constrained JSON decoding for small models),
-// we ask the model to output a JSON action object via plain chat + format:"json".
-// The prompt already lists the available actions; we parse the response and dispatch.
-
-async function executeOllamaJsonActions(options: AgentExecutionOptions): Promise<AgentExecutionResult> {
-  const modelName = options.model.replace(/^ollama:/, '')
-  const startTime = Date.now()
-
-  try {
-    await ensureOllamaModel(modelName)
-  } catch (err) {
-    return {
-      output: `Error: ${err instanceof Error ? err.message : String(err)}`,
-      exitCode: 1,
-      durationMs: Date.now() - startTime,
-      sessionId: null,
-      timedOut: false
-    }
-  }
-
-  // Build a concise action schema from the slim tool defs
-  const toolSchemas = (options.toolDefs ?? []).map(t => {
-    const props = t.function.parameters.properties
-    const required = t.function.parameters.required ?? []
-    const fields = Object.entries(props)
-      .filter(([k]) => required.includes(k))
-      .map(([k, v]) => `"${k}": <${v.type}>`)
-      .join(', ')
-    return `  "${t.function.name}": {${fields}}`
-  }).join('\n')
-
-  const actionSystemPrompt = [
-    options.systemPrompt ?? '',
-    `\nRespond with ONLY a valid JSON object — no explanation, no markdown, no text before or after.\nFormat: {"tool": "<tool_name>", "args": {<args>}}\n\nAvailable tools:\n${toolSchemas}`
-  ].join('\n').trim()
-
-  const timeoutMs = options.timeoutMs ?? 90_000
-  const maxTurns = options.maxTurns ?? 5
-  let finalOutput = ''
-
-  // Session continuity: resume from previous messages, append current cycle as new turn
-  const isResume = (options.previousMessages?.length ?? 0) > 0
-  const currentUserMsg = isResume
-    ? `NEW CYCLE. Updated room state:\n${options.prompt}\n\nContinue working toward the goal. Respond with your next JSON action.`
-    : options.prompt
-  const messages: Array<{ role: string; content: string }> = [
-    ...(options.previousMessages ?? []),
-    { role: 'user', content: currentUserMsg }
-  ]
-
-  for (let turn = 0; turn < maxTurns; turn++) {
-    const body = JSON.stringify({
-      model: modelName,
-      system: actionSystemPrompt,
-      messages,
-      format: 'json',
-      stream: true, // streaming so timeout actually cancels inference in ollama
-      options: { temperature: 0.7 }
-    })
-
-    let responseText = ''
-    try {
-      // Streaming: cancelling the request mid-stream stops ollama inference
-      // (unlike stream:false where ollama keeps running even after client disconnects)
-      responseText = await ollamaStreamRequest('/api/chat', body, timeoutMs)
-    } catch (err) {
-      const error = err as Error
-      const isTimeout = error.message.includes('timeout') || error.message.includes('aborted')
-      return {
-        output: `Error: ${error.message}`,
-        exitCode: isTimeout ? 124 : 1,
-        durationMs: Date.now() - startTime,
-        sessionId: null,
-        timedOut: isTimeout
-      }
-    }
-
-    // Parse the action from the response
-    let toolName = ''
-    let args: Record<string, unknown> = {}
-    try {
-      // Find JSON object in the response (handles extra whitespace/text)
-      const jsonMatch = responseText.match(/\{[\s\S]*\}/)
-      if (jsonMatch) {
-        const parsed = JSON.parse(jsonMatch[0]) as Record<string, unknown>
-
-        // Format 1 (expected): {"tool": "name", "args": {...}}
-        if (typeof parsed.tool === 'string') {
-          toolName = parsed.tool.trim()
-          args = (parsed.args as Record<string, unknown>) ?? {}
-        }
-        // Format 2 (model fallback): {"<toolName>": {<args>}}
-        // Model uses the tool name directly as the key
-        else {
-          const knownTools = new Set(options.toolDefs?.map(t => t.function.name) ?? [])
-          const foundKey = Object.keys(parsed).find(k => knownTools.has(k))
-          if (foundKey) {
-            toolName = foundKey
-            const rawArgs = parsed[foundKey]
-            args = (typeof rawArgs === 'object' && rawArgs !== null ? rawArgs : {}) as Record<string, unknown>
-          }
-        }
-      }
-    } catch {
-      // Couldn't parse — model responded with non-JSON text
-      finalOutput = responseText
-      break
-    }
-
-    if (!toolName || !options.onToolCall) {
-      // Non-JSON or "done" response — end cycle, save session
-      messages.push({ role: 'assistant', content: responseText })
-      finalOutput = responseText
-      options.onSessionUpdate?.(messages)
-      break
-    }
-
-    // Execute the action
-    let toolResult: string
-    try {
-      toolResult = await options.onToolCall(toolName, args)
-    } catch (err) {
-      toolResult = `Error: ${err instanceof Error ? err.message : String(err)}`
-    }
-
-    finalOutput = `${toolName}: ${toolResult}`
-
-    // Feed result back so model can chain actions within the same cycle
-    messages.push({ role: 'assistant', content: responseText })
-    messages.push({ role: 'user', content: `Result: ${toolResult}\nNext action? (JSON tool call, or {"done": true} to end cycle)` })
-    options.onSessionUpdate?.(messages)
-    // continue to next turn
-  }
-
-  return {
-    output: finalOutput || 'No action taken.',
-    exitCode: 0,
-    durationMs: Date.now() - startTime,
-    sessionId: null,
-    timedOut: false
-  }
-}
-
-// ─── Ollama multi-turn tool-call loop ──────────────────────────────────────
-
-interface OllamaToolCall {
-  function: {
-    name: string
-    arguments: Record<string, unknown> | string
-  }
-}
-
-interface OllamaMessage {
-  role: 'system' | 'user' | 'assistant' | 'tool'
-  content: string
-  tool_calls?: OllamaToolCall[]
-}
-
-async function executeOllamaWithTools(options: AgentExecutionOptions): Promise<AgentExecutionResult> {
-  const modelName = options.model.replace(/^ollama:/, '')
-  const startTime = Date.now()
-
-  try {
-    await ensureOllamaModel(modelName)
-  } catch (err) {
-    return {
-      output: `Error: ${err instanceof Error ? err.message : String(err)}`,
-      exitCode: 1,
-      durationMs: Date.now() - startTime,
-      sessionId: null,
-      timedOut: false
-    }
-  }
-
-  const messages: OllamaMessage[] = []
-  if (options.systemPrompt) {
-    messages.push({ role: 'system', content: options.systemPrompt })
-  }
-  messages.push({ role: 'user', content: options.prompt })
-
-  const timeoutMs = options.timeoutMs ?? 5 * 60 * 1000
-  const maxTurns = options.maxTurns ?? 10
-  let finalOutput = ''
-
-  for (let turn = 0; turn < maxTurns; turn++) {
-    const body = JSON.stringify({
-      model: modelName,
-      messages,
-      tools: options.toolDefs,
-      stream: false
-    })
-
-    let raw: string
-    try {
-      raw = await ollamaRequest('/api/chat', body, timeoutMs)
-    } catch (err) {
-      const error = err as Error
-      const isTimeout = error.message.includes('timeout') || error.message.includes('aborted')
-      return {
-        output: `Error: ${error.message}`,
-        exitCode: 1,
-        durationMs: Date.now() - startTime,
-        sessionId: null,
-        timedOut: isTimeout
-      }
-    }
-
-    let parsed: { message: OllamaMessage }
-    try {
-      parsed = JSON.parse(raw) as { message: OllamaMessage }
-    } catch {
-      return {
-        output: raw,
-        exitCode: 0,
-        durationMs: Date.now() - startTime,
-        sessionId: null,
-        timedOut: false
-      }
-    }
-
-    const msg = parsed.message
-    const toolCalls = msg.tool_calls ?? []
-
-    if (toolCalls.length === 0) {
-      // No tool calls — this is the final text response
-      finalOutput = msg.content ?? ''
-      break
-    }
-
-    // Has tool calls: add assistant message, then execute each tool
-    messages.push({ role: 'assistant', content: msg.content ?? '', tool_calls: toolCalls })
-
-    for (const tc of toolCalls) {
-      const name = tc.function.name
-      const rawArgs = tc.function.arguments
-      const args: Record<string, unknown> =
-        typeof rawArgs === 'string'
-          ? (() => { try { return JSON.parse(rawArgs) as Record<string, unknown> } catch { return {} } })()
-          : rawArgs
-
-      let toolResult = `Tool ${name} unavailable`
-      if (options.onToolCall) {
-        try {
-          toolResult = await options.onToolCall(name, args)
-        } catch (err) {
-          toolResult = `Error: ${err instanceof Error ? err.message : String(err)}`
-        }
-      }
-
-      messages.push({ role: 'tool', content: toolResult })
-    }
-  }
-
-  return {
-    output: finalOutput || 'Actions completed.',
-    exitCode: 0,
-    durationMs: Date.now() - startTime,
-    sessionId: null,
-    timedOut: false
-  }
-}
-
 // ─── OpenAI multi-turn tool-call loop ──────────────────────────────────────
 
 interface OpenAiMessage {
@@ -592,7 +317,7 @@ interface AnthropicMessage {
   content: string | AnthropicContentBlock[]
 }
 
-function ollamaToolDefsToAnthropic(defs: import('./queen-tools').OllamaToolDef[]): Array<{ name: string; description: string; input_schema: Record<string, unknown> }> {
+function apiToolDefsToAnthropic(defs: import('./queen-tools').ToolDef[]): Array<{ name: string; description: string; input_schema: Record<string, unknown> }> {
   return defs.map(d => ({
     name: d.function.name,
     description: d.function.description,
@@ -607,7 +332,7 @@ async function executeAnthropicWithTools(options: AgentExecutionOptions): Promis
   const modelName = parseAnthropicModel(options.model)
   const startTime = Date.now()
   const maxTurns = options.maxTurns ?? 10
-  const anthropicTools = options.toolDefs ? ollamaToolDefsToAnthropic(options.toolDefs) : []
+  const anthropicTools = options.toolDefs ? apiToolDefsToAnthropic(options.toolDefs) : []
 
   // Session continuity: resume from prior conversation turns (system prompt passed separately)
   const previousTurns = (options.previousMessages ?? []) as AnthropicMessage[]
@@ -817,58 +542,6 @@ async function executeAnthropicApi(options: AgentExecutionOptions): Promise<Agen
   }
 }
 
-async function executeOllama(options: AgentExecutionOptions): Promise<AgentExecutionResult> {
-  const modelName = options.model.replace(/^ollama:/, '')
-  const startTime = Date.now()
-
-  // Auto-start Ollama and pull model if needed
-  try {
-    await ensureOllamaModel(modelName)
-  } catch (err) {
-    return {
-      output: `Error: ${err instanceof Error ? err.message : String(err)}`,
-      exitCode: 1,
-      durationMs: Date.now() - startTime,
-      sessionId: null,
-      timedOut: false
-    }
-  }
-
-  const messages: Array<{ role: string; content: string }> = []
-  if (options.systemPrompt) {
-    messages.push({ role: 'system', content: options.systemPrompt })
-  }
-  messages.push({ role: 'user', content: options.prompt })
-
-  const body = JSON.stringify({
-    model: modelName,
-    messages,
-    stream: false
-  })
-
-  try {
-    const response = await ollamaRequest('/api/chat', body, options.timeoutMs ?? 5 * 60 * 1000)
-    const parsed = JSON.parse(response)
-    const output = parsed?.message?.content ?? ''
-    return {
-      output,
-      exitCode: 0,
-      durationMs: Date.now() - startTime,
-      sessionId: null,
-      timedOut: false
-    }
-  } catch (err) {
-    const error = err as Error
-    const isTimeout = error.message.includes('timeout') || error.message.includes('aborted')
-    return {
-      output: `Error: ${error.message}`,
-      exitCode: 1,
-      durationMs: Date.now() - startTime,
-      sessionId: null,
-      timedOut: isTimeout
-    }
-  }
-}
 
 function parseModelSuffix(model: string, prefix: string): string {
   const trimmed = model.trim()
@@ -979,7 +652,7 @@ function immediateError(message: string): AgentExecutionResult {
 /**
  * Compress a long conversation history into a compact JSON summary.
  * Called at the start of a cycle when the session exceeds the trim threshold.
- * Applies to API/ollama models (Group B/C). CLI models manage their own context.
+ * Applies to API models (openai:*, anthropic:*). CLI models manage their own context.
  *
  * Returns the raw summary text (JSON string from the model), or null on failure.
  */
@@ -1013,19 +686,6 @@ Respond ONLY with a JSON object (no markdown, no explanation):
 
   const timeoutMs = 60_000
   try {
-    if (model.startsWith('ollama:')) {
-      const modelName = model.replace(/^ollama:/, '')
-      const body = JSON.stringify({
-        model: modelName,
-        messages: [{ role: 'user', content: compressionPrompt }],
-        stream: false
-      })
-      const response = await ollamaRequest('/api/chat', body, timeoutMs)
-      const parsed = JSON.parse(response) as Record<string, unknown>
-      const text = (parsed?.message as Record<string, unknown>)?.content as string | undefined
-      return text?.trim() ?? null
-    }
-
     if (model === 'openai' || model.startsWith('openai:')) {
       const key = apiKey?.trim() || (process.env.OPENAI_API_KEY || '').trim()
       if (!key) return null
@@ -1057,78 +717,6 @@ Respond ONLY with a JSON object (no markdown, no explanation):
     // Non-fatal: fall through to hard trim
   }
   return null
-}
-
-/**
- * Execute Ollama inference on a cloud station.
- * Sends the prompt to the station's local Ollama API via exec.
- */
-export async function executeOllamaOnStation(
-  cloudRoomId: string,
-  stationId: number,
-  options: AgentExecutionOptions
-): Promise<AgentExecutionResult> {
-  const modelName = options.model.replace(/^ollama:/, '')
-  const startTime = Date.now()
-
-  const messages: Array<{ role: string; content: string }> = []
-  if (options.systemPrompt) {
-    messages.push({ role: 'system', content: options.systemPrompt })
-  }
-  messages.push({ role: 'user', content: options.prompt })
-
-  const payload = JSON.stringify({
-    model: modelName,
-    messages,
-    stream: false
-  })
-
-  // Base64-encode to avoid shell escaping issues with long prompts
-  const b64 = Buffer.from(payload).toString('base64')
-  const command = `echo '${b64}' | base64 -d | curl -s --max-time 300 http://localhost:11434/api/chat -d @-`
-
-  // 360s timeout (300s curl + 60s buffer for network/overhead)
-  const result = await execOnCloudStation(cloudRoomId, stationId, command, 360000)
-
-  if (!result) {
-    return {
-      output: 'Error: station execution failed (station unreachable or Ollama not running)',
-      exitCode: 1,
-      durationMs: Date.now() - startTime,
-      sessionId: null,
-      timedOut: false
-    }
-  }
-
-  if (result.exitCode !== 0) {
-    return {
-      output: result.stderr || result.stdout || `Station exec failed with exit code ${result.exitCode}`,
-      exitCode: result.exitCode,
-      durationMs: Date.now() - startTime,
-      sessionId: null,
-      timedOut: false
-    }
-  }
-
-  try {
-    const parsed = JSON.parse(result.stdout)
-    return {
-      output: parsed?.message?.content ?? '',
-      exitCode: 0,
-      durationMs: Date.now() - startTime,
-      sessionId: null,
-      timedOut: false
-    }
-  } catch {
-    // Response wasn't valid JSON — return raw output
-    return {
-      output: result.stdout || '(no output from Ollama)',
-      exitCode: 1,
-      durationMs: Date.now() - startTime,
-      sessionId: null,
-      timedOut: false
-    }
-  }
 }
 
 /**
@@ -1213,5 +801,3 @@ export async function executeApiOnStation(
   }
 }
 
-// isOllamaAvailable, listOllamaModels, ollamaRequest — re-exported from ollama-ensure.ts
-export { isOllamaAvailable, listOllamaModels }

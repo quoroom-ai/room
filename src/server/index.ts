@@ -35,6 +35,7 @@ import { _stopAllLoops } from '../shared/agent-loop'
 import { initUpdateChecker, stopUpdateChecker, getUpdateInfo } from './updateChecker'
 import { startServerRuntime, stopServerRuntime } from './runtime'
 import { closeBrowser } from '../shared/web-tools'
+import { handleWebhookRequest } from './webhooks'
 
 try {
   (process as unknown as { loadEnvFile?: (path?: string) => void }).loadEnvFile?.('.env')
@@ -506,6 +507,15 @@ export function createApiServer(options: ServerOptions = {}): {
             }
           : null,
       }))
+      return
+    }
+
+    // Webhook receiver — uses per-task/per-room token, no Bearer auth required
+    if (pathname.startsWith('/api/hooks/') && req.method === 'POST') {
+      const body = await parseBody(req).catch(() => undefined)
+      const result = await handleWebhookRequest(pathname, body, db)
+      res.writeHead(result.status, responseHeaders)
+      res.end(JSON.stringify(result.data))
       return
     }
 

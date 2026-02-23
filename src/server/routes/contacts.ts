@@ -3,6 +3,7 @@ import type { Router } from '../router'
 import * as queries from '../../shared/db-queries'
 import { isCloudDeployment, getToken } from '../auth'
 import { ensureCloudRoomToken, getRoomCloudId, getStoredCloudRoomToken } from '../../shared/cloud-sync'
+import { triggerAgent } from '../../shared/agent-loop'
 
 const EMAIL_VERIFY_CODE_TTL_MINUTES = 15
 const EMAIL_RESEND_COOLDOWN_SECONDS = 60
@@ -528,6 +529,11 @@ export async function pollQueenInbox(db: Parameters<typeof queries.getSetting>[0
           body: JSON.stringify({ roomId: cloudRoomId, messageIds }),
           signal: AbortSignal.timeout(8_000),
         }).catch(() => { /* best-effort */ })
+
+        // Wake the queen immediately — bypasses gap sleep and quiet hours
+        if (room.queenWorkerId) {
+          triggerAgent(db, room.id, room.queenWorkerId)
+        }
       }
     } catch {
       // Best-effort: skip this room on error
