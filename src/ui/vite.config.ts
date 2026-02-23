@@ -8,6 +8,8 @@ const buildId = process.env.SOURCE_VERSION
   || process.env.HEROKU_SLUG_COMMIT
   || String(Date.now())
 
+const apiPort = process.env.VITE_API_PORT || '3700'
+
 export default defineConfig({
   root: resolve(__dirname),
   plugins: [react(), tailwindcss()],
@@ -28,8 +30,8 @@ export default defineConfig({
   server: {
     port: 5173,
     proxy: {
-      '/api': 'http://127.0.0.1:3700',
-      '/ws': { target: 'ws://127.0.0.1:3700', ws: true }
+      '/api': `http://127.0.0.1:${apiPort}`,
+      '/ws': { target: `ws://127.0.0.1:${apiPort}`, ws: true }
     }
   }
 })

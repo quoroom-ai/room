@@ -24,6 +24,7 @@ import { WalkthroughModal } from './components/WalkthroughModal'
 import { UpdateModal } from './components/UpdateModal'
 import { CreateRoomModal } from './components/CreateRoomModal'
 import { KeepInDockModal } from './components/KeepInDockModal'
+import { ContactPromptModal, CONTACT_PROMPT_SEEN_KEY } from './components/ContactPromptModal'
 import { useNotifications } from './hooks/useNotifications'
 import { semverGt } from './lib/releases'
 import { useInstallPrompt } from './hooks/useInstallPrompt'
@@ -143,6 +144,8 @@ function App(): React.JSX.Element {
   const [installDismissed, setInstallDismissed] = useState(() => storageGet('quoroom_install_dismissed') === 'true')
   const [showKeepInDockTip, setShowKeepInDockTip] = useState(false)
   const [showWalkthrough, setShowWalkthrough] = useState(() => !storageGet('quoroom_walkthrough_seen'))
+  const [showContactPrompt, setShowContactPrompt] = useState(false)
+  const [contactPromptNeeded, setContactPromptNeeded] = useState(false)
   const [sidebarOpen, setSidebarOpen] = useState(false)
 
   // Update check — fetch /api/status once on startup (and every 30 min) to detect new releases
@@ -304,6 +307,23 @@ function App(): React.JSX.Element {
       setAdvancedMode(v === 'true')
     }).catch(() => {})
   }, [gate])
+
+  // Contact prompt — check if user has any verified contacts
+  useEffect(() => {
+    if (gate !== 'app' || !ready) return
+    if (storageGet(CONTACT_PROMPT_SEEN_KEY)) return
+    api.contacts.status().then((status) => {
+      const hasVerified = status.email.verified || status.telegram.verified
+      if (hasVerified) {
+        storageSet(CONTACT_PROMPT_SEEN_KEY, '1')
+        return
+      }
+      setContactPromptNeeded(true)
+      if (!showWalkthrough) {
+        setShowContactPrompt(true)
+      }
+    }).catch(() => {})
+  }, [gate, ready]) // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     if (gate !== 'app' || !ready) return
@@ -854,7 +874,23 @@ function App(): React.JSX.Element {
           onCreate={(room) => void handleRoomCreated(room)}
         />
       )}
-      {showWalkthrough && <WalkthroughModal onClose={() => setShowWalkthrough(false)} />}
+      {showWalkthrough && (
+        <WalkthroughModal onClose={() => {
+          setShowWalkthrough(false)
+          if (contactPromptNeeded) {
+            setShowContactPrompt(true)
+          }
+        }} />
+      )}
+      {showContactPrompt && (
+        <ContactPromptModal
+          onClose={() => setShowContactPrompt(false)}
+          onNavigateToSettings={() => {
+            setShowContactPrompt(false)
+            handleTabChange('settings')
+          }}
+        />
+      )}
       {serverUpdateInfo && !updateDismissed && (
         <UpdateModal
           version={serverUpdateInfo.latestVersion}
