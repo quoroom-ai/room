@@ -493,8 +493,8 @@ export async function runCycle(
       }
     }
 
-    // Ollama: 3 min timeout (streaming cancels on timeout so no backlog); Claude/API: 5 min
-    const cycleTimeoutMs = isOllama ? 3 * 60 * 1000 : 5 * 60 * 1000
+    // Ollama: 10 min timeout for large models on CPU (e.g. qwen3:14b ~5 tok/s); Claude/API: 5 min
+    const cycleTimeoutMs = isOllama ? 10 * 60 * 1000 : 5 * 60 * 1000
 
     const result = await executeAgent({
       model,

@@ -420,9 +420,10 @@ export async function executeQueenTool(
       }
 
       case 'quoroom_update_progress': {
-        const goalId = Number(args.goalId)
-        const observation = String(args.observation ?? '')
-        const metricValue = args.metricValue != null ? Number(args.metricValue) : undefined
+        const goalId = Number(args.goalId ?? args.goal_id)
+        if (!goalId || isNaN(goalId)) return { content: 'Error: goalId is required for quoroom_update_progress. Provide the numeric goal ID.', isError: true }
+        const observation = String(args.observation ?? args.progress ?? args.message ?? args.text ?? '')
+        const metricValue = args.metricValue != null ? Number(args.metricValue) : (args.metric_value != null ? Number(args.metric_value) : undefined)
         updateGoalProgress(db, goalId, observation, metricValue, workerId)
         const goal = queries.getGoal(db, goalId)
         const pct = Math.round((goal?.progress ?? 0) * 100)
@@ -494,7 +495,7 @@ export async function executeQueenTool(
       // ── Workers ──────────────────────────────────────────────────────
       case 'quoroom_create_worker': {
         // Tolerate common model hallucinations for arg names
-        const name = String(args.name ?? args.workerName ?? args.type ?? args.role ?? '').trim()
+        const name = String(args.name ?? args.workerName ?? args.worker_name ?? args.type ?? args.role ?? '').trim()
         const systemPrompt = String(args.systemPrompt ?? args.system_prompt ?? args.instructions ?? args.prompt ?? '').trim()
         if (!name) return { content: 'Error: name is required for quoroom_create_worker. Provide a "name" string.', isError: true }
         if (!systemPrompt) return { content: 'Error: systemPrompt is required for quoroom_create_worker. Provide a "systemPrompt" string describing this worker\'s role and instructions.', isError: true }
