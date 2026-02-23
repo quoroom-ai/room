@@ -9,7 +9,7 @@ import {
   ROOM_NETWORK_EVENT_TYPES,
 } from '../lib/room-events'
 import { wsClient, type WsMessage } from '../lib/ws'
-import type { Task, TaskRun, RoomActivityEntry, Worker, Wallet, RevenueSummary, OnChainBalance } from '@shared/types'
+import type { Task, TaskRun, WorkerCycle, RoomActivityEntry, Worker, Wallet, RevenueSummary, OnChainBalance } from '@shared/types'
 import { formatRelativeTime } from '../utils/time'
 import { CopyAddressButton } from './CopyAddressButton'
 
@@ -17,6 +17,7 @@ interface StatusData {
   entityCount: number
   tasks: Task[]
   latestRun: TaskRun | null
+  latestCycle: WorkerCycle | null
   runningRuns: TaskRun[]
   workerCount: number
   watchCount: number
@@ -65,18 +66,20 @@ export function StatusPanel({ onNavigate, advancedMode, roomId }: StatusPanelPro
   const wide = containerWidth >= 600
 
   const fetchStatus = useCallback(async (): Promise<StatusData> => {
-    const [stats, tasks, runs, workers, watches, runningRuns] = await Promise.all([
+    const [stats, tasks, runs, workers, watches, runningRuns, cycles] = await Promise.all([
       api.memory.getStats(),
       api.tasks.list(roomId ?? undefined),
       api.runs.list(1),
       api.workers.list(),
       api.watches.list(),
       api.runs.list(20, { status: 'running' }),
+      roomId ? api.cycles.listByRoom(roomId, 1) : Promise.resolve([]),
     ])
     return {
       entityCount: stats.entityCount,
       tasks,
       latestRun: runs[0] ?? null,
+      latestCycle: cycles[0] ?? null,
       runningRuns,
       workerCount: workers.length,
       watchCount: watches.length
@@ -251,24 +254,39 @@ export function StatusPanel({ onNavigate, advancedMode, roomId }: StatusPanelPro
     </button>
   ) : null
 
+  // Show the most recent activity: queen cycle or task run, whichever is newer
+  const latestActivity = (() => {
+    const run = data.latestRun
+    const cycle = data.latestCycle
+    if (!run && !cycle) return null
+    if (!run) return { type: 'cycle' as const, status: cycle!.status, startedAt: cycle!.startedAt, durationMs: cycle!.durationMs }
+    if (!cycle) return { type: 'run' as const, status: run.status, startedAt: run.startedAt, durationMs: run.durationMs }
+    return new Date(cycle.startedAt) >= new Date(run.startedAt)
+      ? { type: 'cycle' as const, status: cycle.status, startedAt: cycle.startedAt, durationMs: cycle.durationMs }
+      : { type: 'run' as const, status: run.status, startedAt: run.startedAt, durationMs: run.durationMs }
+  })()
+
   const lastRunCard = (
     <button key="lastrun" className={cardClass} onClick={() => onNavigate?.('results')}>
       <div className="flex items-center justify-between mb-1">
-        <span className="text-sm font-medium text-text-secondary">Last Run</span>
+        <span className="text-sm font-medium text-text-secondary">Last Activity</span>
+        {latestActivity && (
+          <span className="text-xs text-text-muted">{latestActivity.type === 'cycle' ? 'cycle' : 'task'}</span>
+        )}
       </div>
-      {data.latestRun ? (
+      {latestActivity ? (
         <div className="text-sm text-text-muted">
-          <span className={data.latestRun.status === 'completed' ? 'text-status-success' : data.latestRun.status === 'running' ? 'text-interactive' : 'text-status-error'}>
-            {data.latestRun.status}
+          <span className={latestActivity.status === 'completed' ? 'text-status-success' : latestActivity.status === 'running' ? 'text-interactive' : 'text-status-error'}>
+            {latestActivity.status}
           </span>
           {' — '}
-          {formatRelativeTime(data.latestRun.startedAt)}
-          {data.latestRun.durationMs != null && (
-            <span className="text-text-muted"> ({(data.latestRun.durationMs / 1000).toFixed(1)}s)</span>
+          {formatRelativeTime(latestActivity.startedAt)}
+          {latestActivity.durationMs != null && (
+            <span className="text-text-muted"> ({(latestActivity.durationMs / 1000).toFixed(1)}s)</span>
           )}
         </div>
       ) : (
-        <span className="text-sm text-text-muted">No runs yet</span>
+        <span className="text-sm text-text-muted">No activity yet</span>
       )}
     </button>
   )

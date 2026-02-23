@@ -254,6 +254,7 @@ export async function runCycle(
 
     const status = getRoomStatus(db, roomId)
     const pendingEscalations = queries.getPendingEscalations(db, roomId, worker.id)
+    const recentKeeperAnswers = queries.getRecentKeeperAnswers(db, roomId, worker.id, 5)
     const recentActivity = queries.getRoomActivity(db, roomId, 15)
     const goalUpdates = status.activeGoals.slice(0, 5).map(g => ({
       goal: g.description,
@@ -417,9 +418,25 @@ export async function runCycle(
       }).join('\n')}`)
     }
 
-    if (pendingEscalations.length > 0) {
-      contextParts.push(`## Escalations Awaiting Your Response\n${pendingEscalations.map(e =>
+    // Split escalations: questions the Queen sent to keeper vs. escalations directed at the Queen
+    const pendingToKeeper = pendingEscalations.filter(e => e.fromAgentId === worker.id && !e.toAgentId)
+    const pendingFromOthers = pendingEscalations.filter(e => e.fromAgentId !== worker.id)
+
+    if (pendingToKeeper.length > 0) {
+      contextParts.push(`## Pending Questions to Keeper (awaiting keeper reply)\n${pendingToKeeper.map(e =>
         `- #${e.id}: ${e.question}`
+      ).join('\n')}`)
+    }
+
+    if (pendingFromOthers.length > 0) {
+      contextParts.push(`## Escalations Awaiting Your Response\n${pendingFromOthers.map(e =>
+        `- #${e.id}: ${e.question}`
+      ).join('\n')}`)
+    }
+
+    if (recentKeeperAnswers.length > 0) {
+      contextParts.push(`## Keeper Answers (recent)\n${recentKeeperAnswers.map(e =>
+        `- Q: ${e.question}\n  A: ${e.answer}`
       ).join('\n')}`)
     }
 
@@ -491,7 +508,13 @@ export async function runCycle(
       ? 'Always call tools to take action — do not just describe what you would do.'
       : 'IMPORTANT: You MUST call at least one tool in your response. Respond ONLY with a tool call — do not write explanatory text without a tool call.'
 
-    const toolList = `**Goals:** quoroom_set_goal, quoroom_update_progress, quoroom_create_subgoal, quoroom_complete_goal, quoroom_abandon_goal\n**Governance:** quoroom_propose, quoroom_vote\n**Workers:** quoroom_create_worker, quoroom_update_worker\n**Tasks:** quoroom_schedule\n**Memory:** quoroom_remember, quoroom_recall\n**Web:** quoroom_web_search, quoroom_web_fetch, quoroom_browser\n**Comms:** quoroom_ask_keeper\n**Settings:** quoroom_configure_room${selfRegulateHint}`
+    const commsTools = isCli
+      ? 'quoroom_inbox_send_keeper (message keeper), quoroom_inbox_list (inter-room), quoroom_inbox_send_room, quoroom_inbox_reply'
+      : 'quoroom_ask_keeper'
+    const webTools = isCli
+      ? '(use your built-in web search and fetch tools)'
+      : 'quoroom_web_search, quoroom_web_fetch, quoroom_browser'
+    const toolList = `**Goals:** quoroom_set_goal, quoroom_update_progress, quoroom_create_subgoal, quoroom_complete_goal, quoroom_abandon_goal\n**Governance:** quoroom_propose, quoroom_vote\n**Workers:** quoroom_create_worker, quoroom_update_worker\n**Tasks:** quoroom_schedule\n**Memory:** quoroom_remember, quoroom_recall\n**Web:** ${webTools}\n**Comms:** ${commsTools}\n**Settings:** quoroom_configure_room${selfRegulateHint}`
 
     contextParts.push(`## Instructions\nBased on the current state, decide what to do next and call the appropriate tools. Available tools:\n\n${toolList}\n\n${toolCallInstruction}`)
 

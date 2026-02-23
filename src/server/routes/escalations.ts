@@ -1,6 +1,7 @@
 import type { Router } from '../router'
 import * as queries from '../../shared/db-queries'
 import { eventBus } from '../event-bus'
+import { triggerAgent } from '../../shared/agent-loop'
 
 export function registerEscalationRoutes(router: Router): void {
   router.post('/api/rooms/:roomId/escalations', (ctx) => {
@@ -49,6 +50,13 @@ export function registerEscalationRoutes(router: Router): void {
     queries.resolveEscalation(ctx.db, id, body.answer)
     const updated = queries.getEscalation(ctx.db, id)
     eventBus.emit(`room:${escalation.roomId}`, 'escalation:resolved', updated)
+
+    // Wake the Queen immediately so it sees the keeper's answer
+    const room = queries.getRoom(ctx.db, escalation.roomId)
+    if (room?.queenWorkerId) {
+      triggerAgent(ctx.db, escalation.roomId, room.queenWorkerId)
+    }
+
     return { data: updated }
   })
 }

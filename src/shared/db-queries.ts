@@ -1643,6 +1643,13 @@ export function resolveEscalation(db: Database.Database, id: number, answer: str
     .run(answer, id)
 }
 
+export function getRecentKeeperAnswers(db: Database.Database, roomId: number, fromAgentId: number, limit: number = 5): Escalation[] {
+  const rows = db.prepare(
+    `SELECT * FROM escalations WHERE room_id = ? AND from_agent_id = ? AND status = 'resolved' AND to_agent_id IS NULL ORDER BY resolved_at DESC LIMIT ?`
+  ).all(roomId, fromAgentId, limit)
+  return (rows as Record<string, unknown>[]).map(mapEscalationRow)
+}
+
 // ─── Credentials ────────────────────────────────────────────
 
 function mapCredentialRow(row: Record<string, unknown>): Credential {
