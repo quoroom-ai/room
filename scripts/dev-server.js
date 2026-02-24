@@ -8,6 +8,7 @@ const { spawn } = require('child_process')
 const esbuild = require('esbuild')
 const { writeFileSync, mkdirSync, existsSync } = require('fs')
 const { version } = require('../package.json')
+const IS_WIN = process.platform === 'win32'
 
 const port = (() => {
   const i = process.argv.indexOf('--port')
@@ -46,10 +47,40 @@ if (!existsSync('out/mcp/node_modules')) {
       'ws': '*'
     }
   }, null, 2))
-  require('child_process').execSync('npm install --omit=dev', { cwd: 'out/mcp', stdio: 'inherit' })
+  if (process.env.QUOROOM_SKIP_MCP_NPM_INSTALL !== '1') {
+    const npmCmd = IS_WIN ? 'npm.cmd' : 'npm'
+    require('child_process').execSync(`${npmCmd} install --omit=dev`, { cwd: 'out/mcp', stdio: 'inherit' })
+  }
 }
 
 function killExistingServer(port) {
+  if (IS_WIN) {
+    try {
+      const output = require('child_process').execSync('netstat -ano -p tcp', { encoding: 'utf8' })
+      const lines = output.split(/\r?\n/)
+      const pids = new Set()
+      for (const raw of lines) {
+        const line = raw.trim()
+        if (!line || !line.includes('LISTENING')) continue
+        if (!line.includes(`:${port}`)) continue
+        const parts = line.split(/\s+/)
+        const pid = parts[parts.length - 1]
+        if (pid && /^\d+$/.test(pid)) pids.add(pid)
+      }
+      for (const pid of pids) {
+        try {
+          require('child_process').execSync(`taskkill /PID ${pid} /F`, { stdio: 'ignore' })
+        } catch {}
+      }
+      if (pids.size > 0) {
+        console.error(`  Killed PID(s): ${Array.from(pids).join(', ')}`)
+      }
+    } catch {
+      // No process on this port.
+    }
+    return
+  }
+
   try {
     const pids = require('child_process').execSync(`lsof -ti TCP:${port} -s TCP:LISTEN`, { encoding: 'utf8' }).trim()
     if (pids) {
@@ -66,7 +97,7 @@ function killExistingServer(port) {
 let serverProcess = null
 
 function startServer() {
-  serverProcess = spawn('node', ['out/mcp/cli.js', 'serve', '--port', port], {
+  serverProcess = spawn(process.execPath, ['out/mcp/cli.js', 'serve', '--port', port], {
     stdio: 'inherit',
     env: { ...process.env, NODE_ENV: 'development' }
   })
@@ -102,11 +133,17 @@ async function main() {
   }
 
   // Start Vite in watch mode for the UI
-  const viteProcess = spawn(
-    'node',
-    ['node_modules/.bin/vite', 'build', '--watch', '--config', 'src/ui/vite.config.ts'],
-    { stdio: 'inherit', env: { ...process.env, VITE_CLOUD_URL: 'http://localhost:3715' } }
-  )
+  const viteProcess = IS_WIN
+    ? spawn(
+        'cmd.exe',
+        ['/d', '/s', '/c', 'node_modules\\.bin\\vite.cmd', 'build', '--watch', '--config', 'src/ui/vite.config.ts'],
+        { stdio: 'inherit', env: { ...process.env, VITE_CLOUD_URL: 'http://localhost:3715' } }
+      )
+    : spawn(
+        'node_modules/.bin/vite',
+        ['build', '--watch', '--config', 'src/ui/vite.config.ts'],
+        { stdio: 'inherit', env: { ...process.env, VITE_CLOUD_URL: 'http://localhost:3715' } }
+      )
   viteProcess.on('exit', (code) => {
     if (code !== 0 && code !== null) console.error(`Vite exited with code ${code}`)
   })

@@ -45,9 +45,12 @@ async function main() {
     }
   }, null, 2))
 
-  // Only run npm install if node_modules doesn't exist yet
-  if (!existsSync('out/mcp/node_modules')) {
-    execSync('npm install --omit=dev', { cwd: 'out/mcp', stdio: 'inherit' })
+  // Only run npm install if node_modules doesn't exist yet.
+  // In local dev we can skip this and reuse root node_modules.
+  const skipInstall = process.env.QUOROOM_SKIP_MCP_NPM_INSTALL === '1'
+  if (!existsSync('out/mcp/node_modules') && !skipInstall) {
+    const npmCmd = process.platform === 'win32' ? 'npm.cmd' : 'npm'
+    execSync(`${npmCmd} install --omit=dev`, { cwd: 'out/mcp', stdio: 'inherit' })
   }
 }
 
