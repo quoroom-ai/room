@@ -73,6 +73,42 @@ export function registerGoalTools(server: McpServer): void {
   )
 
   server.registerTool(
+    'quoroom_delegate_task',
+    {
+      title: 'Delegate Task',
+      description: 'Delegate a task to a specific worker. Creates a goal assigned to that worker. '
+        + 'The worker will see it in their "Your Assigned Tasks" context. '
+        + 'RESPONSE STYLE: Confirm briefly in 1 sentence.',
+      inputSchema: {
+        roomId: z.number().describe('The room ID'),
+        workerName: z.string().min(1).describe('Worker name to assign to (from Room Workers list)'),
+        task: z.string().min(1).max(2000).describe('Task description'),
+        parentGoalId: z.number().optional().describe('Parent goal ID to attach as sub-goal')
+      }
+    },
+    async ({ roomId, workerName, task, parentGoalId }) => {
+      const db = getMcpDatabase()
+      try {
+        const workers = queries.listRoomWorkers(db, roomId)
+        const target = workers.find(w => w.name.toLowerCase() === workerName.toLowerCase())
+        if (!target) {
+          const available = workers.map(w => w.name).join(', ')
+          return { content: [{ type: 'text' as const, text: `Worker "${workerName}" not found. Available: ${available || 'none'}` }], isError: true }
+        }
+        if (parentGoalId != null) {
+          const parent = queries.getGoal(db, parentGoalId)
+          if (!parent) return { content: [{ type: 'text' as const, text: `Parent goal #${parentGoalId} not found.` }], isError: true }
+          if (parent.status === 'active') queries.updateGoal(db, parentGoalId, { status: 'in_progress' })
+        }
+        const goal = queries.createGoal(db, roomId, task, parentGoalId, target.id)
+        return { content: [{ type: 'text' as const, text: `Task delegated to ${target.name}: "${task}" (goal #${goal.id})` }] }
+      } catch (e) {
+        return { content: [{ type: 'text' as const, text: (e as Error).message }], isError: true }
+      }
+    }
+  )
+
+  server.registerTool(
     'quoroom_complete_goal',
     {
       title: 'Complete Goal',

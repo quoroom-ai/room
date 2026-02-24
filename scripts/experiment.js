@@ -54,9 +54,10 @@ const EXPERIMENT_TOOLS = [
   'quoroom_web_search', 'quoroom_web_fetch',
 ].join(',')
 
-// Swarm tool set — adds governance, subgoals, and messaging for multi-agent coordination
+// Swarm tool set — adds governance, subgoals, delegation, and messaging for multi-agent coordination
 const SWARM_TOOLS = [
   'quoroom_set_goal', 'quoroom_update_progress', 'quoroom_complete_goal', 'quoroom_create_subgoal',
+  'quoroom_delegate_task',
   'quoroom_remember', 'quoroom_recall',
   'quoroom_propose', 'quoroom_vote',
   'quoroom_send_message',
@@ -69,6 +70,8 @@ const SWARM_CYCLE_GAP_MS = 5000
 const DEFAULT_SWARM_GOAL = `You are part of a multi-agent swarm. Your team must collaboratively build a comprehensive plan to launch an AI consulting service.
 
 Coordination rules:
+- The Queen should use quoroom_delegate_task to assign specific tasks to workers by name
+- Workers: check "Your Assigned Tasks" in your context and prioritize completing them
 - Use quoroom_send_message to communicate with teammates (use their names from Room Workers)
 - Use quoroom_propose for major decisions that need team agreement, then vote
 - Use quoroom_remember to store findings so all agents can access them
@@ -80,7 +83,7 @@ Deliver: market research, pricing strategy, outreach plan, and a synthesized exe
 
 const SWARM_MODELS = [
   { label: 'claude', model: 'claude', type: 'cli', isQueen: true },
-  { label: 'codex', model: 'codex', type: 'cli', isQueen: false },
+  { label: 'oai-mini', model: 'openai:gpt-4o-mini', type: 'api', keyEnv: 'OPENAI_API_KEY', credName: 'openai_api_key', isQueen: false },
   { label: 'anth-api', model: 'anthropic:claude-sonnet-4-6', type: 'api', keyEnv: 'ANTHROPIC_API_KEY', credName: 'anthropic_api_key', isQueen: false },
   { label: 'oai-api', model: 'openai:gpt-4o', type: 'api', keyEnv: 'OPENAI_API_KEY', credName: 'openai_api_key', isQueen: false },
 ]
@@ -203,6 +206,17 @@ function build() {
   execSync(`npx esbuild src/mcp/server.ts ${common} --outfile=out/mcp/server.js`, { cwd: PROJECT_ROOT, stdio: 'pipe' })
   execSync(`npx esbuild src/cli/index.ts ${common} --outfile=out/mcp/cli.js`, { cwd: PROJECT_ROOT, stdio: 'pipe' })
   execSync(`npx esbuild src/server/index.ts ${common} --external:ws --outfile=out/mcp/api-server.js`, { cwd: PROJECT_ROOT, stdio: 'pipe' })
+
+  // Update installed MCP binary so Claude CLI picks up code changes
+  // (Claude CLI reads MCP from /usr/local/lib/quoroom/lib/server.js via ~/.claude.json)
+  const installedMcp = '/usr/local/lib/quoroom/lib/server.js'
+  try {
+    execSync(`cp out/mcp/server.js ${installedMcp}`, { cwd: PROJECT_ROOT, stdio: 'pipe' })
+    log('BUILD', C.blue, 'Updated installed MCP server.')
+  } catch {
+    log('BUILD', C.yellow, `Could not update ${installedMcp} — run with sudo or copy manually.`)
+  }
+
   log('BUILD', C.blue, 'Done.')
 }
 
@@ -555,7 +569,7 @@ function collectResults(rooms) {
     const errors = cycles.filter(c => c.status === 'failed').length
 
     // Outcome quality metrics
-    const productiveRx = /web_search|web_fetch|remember|send_message|inbox_send|update_progress|complete_goal|set_goal|propose|vote/
+    const productiveRx = /web_search|web_fetch|remember|send_message|inbox_send|update_progress|complete_goal|set_goal|delegate_task|propose|vote/
     let productiveCalls = 0
     let stuckCycles = 0
     const uniqueSearches = new Set()

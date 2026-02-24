@@ -2118,7 +2118,7 @@ export function countProductiveToolCalls(db: Database.Database, workerId: number
     AND (content LIKE '%web_search%' OR content LIKE '%web_fetch%' OR content LIKE '%remember%'
       OR content LIKE '%send_message%' OR content LIKE '%inbox_send%'
       OR content LIKE '%update_progress%' OR content LIKE '%complete_goal%'
-      OR content LIKE '%set_goal%' OR content LIKE '%propose%' OR content LIKE '%vote%')
+      OR content LIKE '%set_goal%' OR content LIKE '%delegate_task%' OR content LIKE '%propose%' OR content LIKE '%vote%')
   `).get(workerId, lastNCycles) as { cnt: number }
   return row.cnt
 }

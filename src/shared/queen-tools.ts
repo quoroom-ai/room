@@ -84,6 +84,22 @@ export const QUEEN_TOOL_DEFINITIONS: ToolDef[] = [
   {
     type: 'function',
     function: {
+      name: 'quoroom_delegate_task',
+      description: 'Delegate a task to a specific worker. Creates a goal assigned to that worker. The worker will see it in their "Your Assigned Tasks" context. Use this to divide work among your team.',
+      parameters: {
+        type: 'object',
+        properties: {
+          workerName: { type: 'string', description: 'The worker name to assign to (from Room Workers list)' },
+          task: { type: 'string', description: 'Description of the task to delegate' },
+          parentGoalId: { type: 'number', description: 'Optional parent goal ID to attach as sub-goal' }
+        },
+        required: ['workerName', 'task']
+      }
+    }
+  },
+  {
+    type: 'function',
+    function: {
       name: 'quoroom_complete_goal',
       description: 'Mark a goal as completed (100% progress).',
       parameters: {
@@ -430,6 +446,33 @@ export async function executeQueenTool(
         const descriptions = Array.isArray(raw) ? raw.map(String) : [String(raw)]
         const subGoals = decomposeGoal(db, goalId, descriptions)
         return { content: `Created ${subGoals.length} sub-goal(s) under goal #${goalId}.` }
+      }
+
+      case 'quoroom_delegate_task': {
+        const workerName = String(args.workerName ?? args.worker ?? args.to ?? '').trim()
+        const task = String(args.task ?? args.description ?? args.goal ?? '').trim()
+        if (!workerName) return { content: 'Error: "workerName" is required (a worker name from Room Workers list).', isError: true }
+        if (!task) return { content: 'Error: "task" is required (description of the task to delegate).', isError: true }
+        const roomWorkers = queries.listRoomWorkers(db, roomId)
+        const target = roomWorkers.find(w => w.name.toLowerCase() === workerName.toLowerCase())
+        if (!target) {
+          const available = roomWorkers.filter(w => w.id !== workerId).map(w => w.name).join(', ')
+          return { content: `Worker "${workerName}" not found. Available: ${available || 'none'}`, isError: true }
+        }
+        const parentGoalId = args.parentGoalId != null ? Number(args.parentGoalId) : undefined
+        if (parentGoalId != null) {
+          const parentCheck = queries.getGoal(db, parentGoalId)
+          if (!parentCheck) return { content: `Error: parent goal #${parentGoalId} not found.`, isError: true }
+          if (parentCheck.roomId !== roomId) return { content: `Error: parent goal #${parentGoalId} belongs to another room.`, isError: true }
+        }
+        const goal = queries.createGoal(db, roomId, task, parentGoalId, target.id)
+        if (parentGoalId) {
+          const parentGoal = queries.getGoal(db, parentGoalId)
+          if (parentGoal && parentGoal.status === 'active') {
+            queries.updateGoal(db, parentGoalId, { status: 'in_progress' })
+          }
+        }
+        return { content: `Task delegated to ${target.name}: "${task}" (goal #${goal.id})` }
       }
 
       case 'quoroom_complete_goal': {

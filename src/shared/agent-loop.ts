@@ -260,7 +260,8 @@ export async function runCycle(
       id: g.id,
       goal: g.description,
       progress: g.progress,
-      status: g.status
+      status: g.status,
+      assignedWorkerId: g.assignedWorkerId
     }))
     const roomWorkers = queries.listRoomWorkers(db, roomId)
     const roomTasks = queries.listTasks(db, roomId, 'active').slice(0, 10)
@@ -383,9 +384,19 @@ export async function runCycle(
     }
 
     if (goalUpdates.length > 0) {
-      contextParts.push(`## Active Goals\n${goalUpdates.map(g =>
-        `- [#${g.id}] [${Math.round(g.progress * 100)}%] ${g.goal} (${g.status})`
-      ).join('\n')}`)
+      const workerMap = new Map(roomWorkers.map(w => [w.id, w.name]))
+      contextParts.push(`## Active Goals\n${goalUpdates.map(g => {
+        const assignee = g.assignedWorkerId ? ` → ${workerMap.get(g.assignedWorkerId) ?? `Worker #${g.assignedWorkerId}`}` : ''
+        return `- [#${g.id}] [${Math.round(g.progress * 100)}%] ${g.goal} (${g.status})${assignee}`
+      }).join('\n')}`)
+
+      // Show tasks assigned specifically to this worker
+      const myTasks = status.activeGoals.filter(g => g.assignedWorkerId === worker.id)
+      if (myTasks.length > 0) {
+        contextParts.push(`## Your Assigned Tasks\n${myTasks.map(g =>
+          `- [#${g.id}] [${Math.round(g.progress * 100)}%] ${g.description}`
+        ).join('\n')}\n\nThese tasks were delegated to you. Prioritize completing them and report progress.`)
+      }
     }
 
     // Auto-load room memories for all models — queens build knowledge across cycles
@@ -537,7 +548,7 @@ export async function runCycle(
 
     // Build dynamic tool list for prompt (only mention available tools)
     const toolLines: string[] = []
-    const goalTools = ['quoroom_set_goal', 'quoroom_update_progress', 'quoroom_create_subgoal', 'quoroom_complete_goal', 'quoroom_abandon_goal'].filter(has)
+    const goalTools = ['quoroom_set_goal', 'quoroom_update_progress', 'quoroom_create_subgoal', 'quoroom_delegate_task', 'quoroom_complete_goal', 'quoroom_abandon_goal'].filter(has)
     if (goalTools.length) toolLines.push(`**Goals:** ${goalTools.join(', ')}`)
     const govTools = ['quoroom_propose', 'quoroom_vote'].filter(has)
     if (govTools.length) toolLines.push(`**Governance:** ${govTools.join(', ')}`)
