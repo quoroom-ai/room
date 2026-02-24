@@ -6,7 +6,7 @@ export const mainTabs: { id: Tab; label: string; advanced?: boolean }[] = [
   { id: 'goals', label: 'Goals', advanced: true },
   { id: 'votes', label: 'Votes' },
   { id: 'messages', label: 'Messages' },
-  { id: 'workers', label: 'Workers', advanced: true },
+  { id: 'workers', label: 'Workers' },
   { id: 'tasks', label: 'Tasks', advanced: true },
   { id: 'skills', label: 'Skills', advanced: true },
   { id: 'credentials', label: 'Credentials', advanced: true },
