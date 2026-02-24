@@ -1723,6 +1723,14 @@ export function getCredentialByName(db: Database.Database, roomId: number, name:
 
 // ─── Room Workers ───────────────────────────────────────────
 
+/** Fuzzy worker lookup: exact → case-insensitive contains → reverse contains */
+export function findWorkerByName<T extends { name: string }>(workers: T[], name: string): T | undefined {
+  const q = name.toLowerCase().trim()
+  return workers.find(w => w.name.toLowerCase() === q)
+    ?? workers.find(w => w.name.toLowerCase().includes(q))
+    ?? workers.find(w => q.includes(w.name.toLowerCase()))
+}
+
 export function listRoomWorkers(db: Database.Database, roomId: number): Worker[] {
   const rows = db.prepare('SELECT * FROM workers WHERE room_id = ? ORDER BY name ASC').all(roomId)
   return (rows as Record<string, unknown>[]).map(mapWorkerRow)

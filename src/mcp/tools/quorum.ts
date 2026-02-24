@@ -4,6 +4,7 @@ import { getMcpDatabase } from '../db'
 import * as queries from '../../shared/db-queries'
 import { propose, vote, getEligibleVoters } from '../../shared/quorum'
 import type { DecisionType, VoteValue } from '../../shared/types'
+import { nudgeRoomWorkers } from '../nudge'
 
 export function registerQuorumTools(server: McpServer): void {
   server.registerTool(
@@ -30,6 +31,8 @@ export function registerQuorumTools(server: McpServer): void {
         if (decision.status === 'approved') {
           return { content: [{ type: 'text' as const, text: `Proposal auto-approved: "${proposal}"` }] }
         }
+        // Wake other workers so they can vote
+        nudgeRoomWorkers(roomId, proposerId ?? 0)
         const parts = [`Proposal #${decision.id} created: "${proposal}" (voting open, ${decision.threshold} threshold`]
         if (decision.minVoters > 0) parts.push(`, min ${decision.minVoters} votes required`)
         if (decision.sealed) parts.push(', sealed ballot')

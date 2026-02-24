@@ -3,6 +3,7 @@ import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
 import { getMcpDatabase } from '../db'
 import * as queries from '../../shared/db-queries'
 import { setRoomObjective, decomposeGoal, updateGoalProgress, completeGoal, abandonGoal, getGoalTree } from '../../shared/goals'
+import { nudgeWorker } from '../nudge'
 
 export function registerGoalTools(server: McpServer): void {
   server.registerTool(
@@ -90,7 +91,7 @@ export function registerGoalTools(server: McpServer): void {
       const db = getMcpDatabase()
       try {
         const workers = queries.listRoomWorkers(db, roomId)
-        const target = workers.find(w => w.name.toLowerCase() === workerName.toLowerCase())
+        const target = queries.findWorkerByName(workers, workerName)
         if (!target) {
           const available = workers.map(w => w.name).join(', ')
           return { content: [{ type: 'text' as const, text: `Worker "${workerName}" not found. Available: ${available || 'none'}` }], isError: true }
@@ -101,6 +102,8 @@ export function registerGoalTools(server: McpServer): void {
           if (parent.status === 'active') queries.updateGoal(db, parentGoalId, { status: 'in_progress' })
         }
         const goal = queries.createGoal(db, roomId, task, parentGoalId, target.id)
+        // Wake the assigned worker so they pick up the task
+        nudgeWorker(target.id)
         return { content: [{ type: 'text' as const, text: `Task delegated to ${target.name}: "${task}" (goal #${goal.id})` }] }
       } catch (e) {
         return { content: [{ type: 'text' as const, text: (e as Error).message }], isError: true }

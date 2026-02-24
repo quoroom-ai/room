@@ -723,10 +723,6 @@ export function SwarmPanel({ rooms, queenRunning, forcedInviteOpenNonce, onNavig
     return map
   }, [allWorkers])
 
-  const totalIncome = useMemo(() => Object.values(revenueMap ?? {}).reduce((s, r) => s + r.totalIncome, 0), [revenueMap])
-  const totalExpenses = useMemo(() => Object.values(revenueMap ?? {}).reduce((s, r) => s + r.totalExpenses, 0), [revenueMap])
-  const totalOnChainBalance = useMemo(() => Object.values(balanceMap ?? {}).reduce((s, b) => s + b.totalBalance, 0), [balanceMap])
-
   const { events: swarmEvents, ripples: swarmRipples } = useSwarmEvents(rooms, allWorkers)
 
   const showSatellites = containerWidth >= 400
@@ -926,16 +922,6 @@ export function SwarmPanel({ rooms, queenRunning, forcedInviteOpenNonce, onNavig
           <span className="text-xs text-text-muted">{Object.values(stationMap ?? {}).flat().length} stations</span>
           {totalReferred > 0 && (
             <span className="text-xs text-text-muted">{totalReferred} network</span>
-          )}
-
-          {showMoney && revenueMap && (
-            <>
-              {totalOnChainBalance > 0 && (
-                <span className="text-xs text-interactive">{fmtMoney(totalOnChainBalance)} bal</span>
-              )}
-              <span className="text-xs text-status-success">{fmtMoney(totalIncome)} in</span>
-              <span className="text-xs text-status-error">{fmtMoney(totalExpenses)} out</span>
-            </>
           )}
 
           <button

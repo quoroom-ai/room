@@ -51,9 +51,13 @@ export function registerEscalationRoutes(router: Router): void {
     const updated = queries.getEscalation(ctx.db, id)
     eventBus.emit(`room:${escalation.roomId}`, 'escalation:resolved', updated)
 
-    // Wake the Queen immediately so it sees the keeper's answer
+    // Wake the agent who sent the message so they see the reply
+    if (escalation.fromAgentId) {
+      triggerAgent(ctx.db, escalation.roomId, escalation.fromAgentId)
+    }
+    // Also wake the queen if it wasn't the sender
     const room = queries.getRoom(ctx.db, escalation.roomId)
-    if (room?.queenWorkerId) {
+    if (room?.queenWorkerId && room.queenWorkerId !== escalation.fromAgentId) {
       triggerAgent(ctx.db, escalation.roomId, room.queenWorkerId)
     }
 

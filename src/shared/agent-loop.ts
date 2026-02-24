@@ -416,9 +416,15 @@ export async function runCycle(
 
     const votingDecisions = queries.listDecisions(db, roomId, 'voting')
     if (votingDecisions.length > 0) {
-      contextParts.push(`## Pending Decisions (voting — cast your vote)\n${votingDecisions.map(d =>
-        `- #${d.id}: ${d.proposal} (${d.decisionType})`
-      ).join('\n')}`)
+      const decisionLines = votingDecisions.map(d => {
+        const votes = queries.getVotes(db, d.id)
+        const alreadyVoted = votes.some(v => v.workerId === worker.id)
+        const proposerW = d.proposerId ? roomWorkers.find(w => w.id === d.proposerId) : null
+        const by = proposerW ? ` (by ${proposerW.name})` : ''
+        const voteStatus = alreadyVoted ? ' ✓ you voted' : ' ← VOTE NEEDED'
+        return `- #${d.id}: ${d.proposal}${by} [${votes.length} votes so far, need ${d.minVoters}+]${voteStatus}`
+      })
+      contextParts.push(`## Pending Proposals — Use quoroom_vote to cast your vote\n${decisionLines.join('\n')}`)
     }
 
     // Show recent resolved decisions so queen knows what's already been decided

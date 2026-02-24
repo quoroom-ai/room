@@ -3,6 +3,7 @@ import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
 import { getMcpDatabase } from '../db'
 import * as queries from '../../shared/db-queries'
 import { propose, tally } from '../../shared/quorum'
+import { nudgeWorker } from '../nudge'
 
 export function registerInboxTools(server: McpServer): void {
   server.registerTool(
@@ -26,7 +27,7 @@ export function registerInboxTools(server: McpServer): void {
           return { content: [{ type: 'text' as const, text: `Message sent to keeper (#${escalation.id}).` }] }
         }
         const roomWorkers = queries.listRoomWorkers(db, roomId)
-        const target = roomWorkers.find(w => w.name.toLowerCase() === to.toLowerCase())
+        const target = queries.findWorkerByName(roomWorkers, to)
         if (!target) {
           const available = roomWorkers.filter(w => w.id !== fromAgentId).map(w => w.name).join(', ')
           return { content: [{ type: 'text' as const, text: `Worker "${to}" not found. Available: ${available || 'none'}` }], isError: true }
@@ -35,6 +36,8 @@ export function registerInboxTools(server: McpServer): void {
           return { content: [{ type: 'text' as const, text: 'Cannot send a message to yourself.' }], isError: true }
         }
         const escalation = queries.createEscalation(db, roomId, fromAgentId, message, target.id)
+        // Wake target worker so they see the message
+        nudgeWorker(target.id)
         return { content: [{ type: 'text' as const, text: `Message sent to ${target.name} (#${escalation.id}).` }] }
       } catch (e) {
         return { content: [{ type: 'text' as const, text: (e as Error).message }], isError: true }

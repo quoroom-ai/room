@@ -68,19 +68,29 @@ const SWARM_TOOLS = [
 const SWARM_MAX_TURNS = 50
 const SWARM_CYCLE_GAP_MS = 5000
 
-const DEFAULT_SWARM_GOAL = `You are part of a multi-agent swarm. Your team must collaboratively build a comprehensive plan to launch an AI consulting service.
+const DEFAULT_SWARM_GOAL = `You run a research-and-analysis agency. Your mission: EARN REVENUE by selling services to the keeper and other rooms.
+
+Services you offer:
+- Web research reports (market analysis, competitor intel, trend reports)
+- Data analysis and summaries
+- Technical writing and documentation
+
+How to earn:
+1. Message the keeper (quoroom_send_message to="keeper") to pitch your services and ask what they need
+2. Check inbox for messages from other rooms (quoroom_inbox_list) and respond to opportunities
+3. When you get a contract, delegate tasks to workers and deliver results
+4. Propose pricing decisions via quoroom_propose so the team votes on rates
 
 Coordination rules:
-- The Queen should use quoroom_delegate_task to assign specific tasks to workers by name
-- Workers: check "Your Assigned Tasks" in your context and prioritize completing them
-- Use quoroom_send_message to communicate with teammates (use their names from Room Workers)
-- Use quoroom_propose for major decisions that need team agreement, then vote
-- Use quoroom_remember to store findings so all agents can access them
-- Divide work: one agent researches market rates, another develops pricing, another creates outreach plan
+- Queen: delegate tasks to workers by name using quoroom_delegate_task
+- Workers: check "Your Assigned Tasks" and complete them, report progress
+- Use quoroom_send_message to coordinate with teammates
+- Use quoroom_propose for pricing, strategy, and major decisions — then everyone VOTE
+- Use quoroom_remember to store findings for the whole team
 - Check messages from other workers each cycle and respond
-- Update goal progress as you make discoveries
+- Report to the keeper regularly on progress and earnings
 
-Deliver: market research, pricing strategy, outreach plan, and a synthesized executive summary.`
+First actions: research your market, propose a pricing plan, pitch services to the keeper.`
 
 const SWARM_MODELS = [
   { label: 'claude', model: 'claude', type: 'cli', isQueen: true },
@@ -745,14 +755,15 @@ async function setupSwarm(token, apiKeys) {
   log('SWARM', C.cyan, `Room #${room.id} created, queen #${queen.id}`)
 
   // 2. Configure queen
-  await api('PATCH', `/api/workers/${queen.id}`, { model: queenModel.model, name: 'Queen (claude)' }, token)
+  await api('PATCH', `/api/workers/${queen.id}`, { model: queenModel.model, name: 'claude' }, token)
 
-  // 3. Set room config
+  // 3. Set room config (disable auto-approve, require 2+ votes for meaningful quorum)
   await api('PATCH', `/api/rooms/${room.id}`, {
     workerModel: queenModel.model,
     queenCycleGapMs: SWARM_CYCLE_GAP_MS,
     queenMaxTurns: SWARM_MAX_TURNS,
-    allowedTools: SWARM_TOOLS
+    allowedTools: SWARM_TOOLS,
+    config: { autoApprove: [], minVoters: 2 }
   }, token)
 
   // 4. Set API credentials
@@ -779,8 +790,8 @@ async function setupSwarm(token, apiKeys) {
     const m = workerModels[i]
     const color = ROOM_COLORS[(i + 1) % ROOM_COLORS.length]
     const workerRes = await api('POST', '/api/workers', {
-      name: `Worker (${m.label})`,
-      systemPrompt: `You are a worker agent in a multi-agent swarm. Your model is ${m.model}. Collaborate with other agents using quoroom_send_message (specify the worker name in "to"). Vote on proposals with quoroom_vote. Store findings in memory with quoroom_remember so all agents can access them. Focus on making measurable progress each cycle.`,
+      name: m.label,
+      systemPrompt: `You are a worker agent in a multi-agent swarm. Your name is "${m.label}". Your model is ${m.model}. Collaborate with other agents using quoroom_send_message (specify the worker name in "to"). Vote on proposals with quoroom_vote. Store findings in memory with quoroom_remember so all agents can access them. Focus on making measurable progress each cycle.`,
       roomId: room.id,
       maxTurns: SWARM_MAX_TURNS,
       cycleGapMs: SWARM_CYCLE_GAP_MS

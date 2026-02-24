@@ -1,10 +1,21 @@
 import type Database from 'better-sqlite3'
 import * as queries from './db-queries'
-import { propose, vote, tally } from './quorum'
+import { propose, vote } from './quorum'
 import { updateGoalProgress, decomposeGoal, completeGoal, abandonGoal, setRoomObjective } from './goals'
+import { triggerAgent } from './agent-loop'
 import type { DecisionType, VoteValue } from './types'
 import { webFetch, webSearch, browserAction, type BrowserAction } from './web-tools'
 import { WORKER_ROLE_PRESETS } from './constants'
+
+/** Wake all other running workers in a room (e.g. to vote on a proposal or read a message) */
+function wakeRoomWorkers(db: Database.Database, roomId: number, excludeWorkerId: number): void {
+  const workers = queries.listRoomWorkers(db, roomId)
+  for (const w of workers) {
+    if (w.id !== excludeWorkerId) {
+      try { triggerAgent(db, roomId, w.id) } catch { /* worker may not be running */ }
+    }
+  }
+}
 
 // ─── Tool definition format (OpenAI-compatible) ─────────────────────────────
 
@@ -132,7 +143,7 @@ export const QUEEN_TOOL_DEFINITIONS: ToolDef[] = [
     type: 'function',
     function: {
       name: 'quoroom_propose',
-      description: 'Create a proposal for the room quorum to vote on. Low-impact decisions may be auto-approved.',
+      description: 'Create a proposal for the room quorum to vote on. Other workers will see it and vote. Requires minVoters votes to resolve.',
       parameters: {
         type: 'object',
         properties: {
@@ -454,7 +465,7 @@ export async function executeQueenTool(
         if (!workerName) return { content: 'Error: "workerName" is required (a worker name from Room Workers list).', isError: true }
         if (!task) return { content: 'Error: "task" is required (description of the task to delegate).', isError: true }
         const roomWorkers = queries.listRoomWorkers(db, roomId)
-        const target = roomWorkers.find(w => w.name.toLowerCase() === workerName.toLowerCase())
+        const target = queries.findWorkerByName(roomWorkers, workerName)
         if (!target) {
           const available = roomWorkers.filter(w => w.id !== workerId).map(w => w.name).join(', ')
           return { content: `Worker "${workerName}" not found. Available: ${available || 'none'}`, isError: true }
@@ -472,6 +483,8 @@ export async function executeQueenTool(
             queries.updateGoal(db, parentGoalId, { status: 'in_progress' })
           }
         }
+        // Wake the assigned worker so they pick up the task
+        try { triggerAgent(db, roomId, target.id) } catch { /* may not be running */ }
         return { content: `Task delegated to ${target.name}: "${task}" (goal #${goal.id})` }
       }
 
@@ -518,15 +531,17 @@ export async function executeQueenTool(
         if (decision.status === 'approved') {
           return { content: `Proposal auto-approved: "${proposalText}"` }
         }
-        // Auto-cast queen's YES vote so proposals don't deadlock in small rooms
+        // Proposer auto-casts YES but does NOT force tally — let others vote
         try {
           vote(db, decision.id, workerId, 'yes')
-          const resolved = tally(db, decision.id)
-          if (resolved === 'approved') {
-            return { content: `Proposal approved: "${proposalText}"` }
-          }
         } catch { /* non-fatal if already voted */ }
-        return { content: `Proposal #${decision.id} created and voted YES: "${proposalText}" (waiting for others)` }
+        const updated = queries.getDecision(db, decision.id)
+        if (updated && updated.status !== 'voting') {
+          return { content: `Proposal resolved (${updated.status}): "${proposalText}"` }
+        }
+        // Wake other workers so they can vote
+        wakeRoomWorkers(db, roomId, workerId)
+        return { content: `Proposal #${decision.id} created (you voted YES): "${proposalText}". Waiting for other workers to vote.` }
       }
 
       case 'quoroom_vote': {
@@ -666,13 +681,15 @@ export async function executeQueenTool(
 
         // Send to a specific worker
         const roomWorkers = queries.listRoomWorkers(db, roomId)
-        const target = roomWorkers.find(w => w.name.toLowerCase() === to.toLowerCase())
+        const target = queries.findWorkerByName(roomWorkers, to)
         if (!target) {
           const available = roomWorkers.filter(w => w.id !== workerId).map(w => w.name).join(', ')
           return { content: `Worker "${to}" not found. Available: ${available || 'none'}`, isError: true }
         }
         if (target.id === workerId) return { content: 'Cannot send a message to yourself.', isError: true }
         const escalation = queries.createEscalation(db, roomId, workerId, message, target.id)
+        // Wake target worker so they see the message
+        try { triggerAgent(db, roomId, target.id) } catch { /* may not be running */ }
         return { content: `Message sent to ${target.name} (#${escalation.id}).` }
       }
 
