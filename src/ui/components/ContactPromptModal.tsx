@@ -198,7 +198,7 @@ export function ContactPromptModal({ onClose, onNavigateToClerk }: ContactPrompt
           <>
             <h2 className="text-2xl font-bold text-text-primary mb-2">Check Your Inbox</h2>
             <p className="text-text-muted text-sm leading-relaxed mb-6">
-              We sent a 6-digit code to <span className="text-text-primary font-medium">{email.trim().toLowerCase()}</span>. Enter it below to verify.
+              We sent a 6-digit code to <span className="text-text-primary font-medium">{email.trim().toLowerCase()}</span>. It may take 2–5 minutes to arrive. Enter it below to verify.
             </p>
             <div className="mb-4">
               <label className="block text-sm text-text-secondary mb-1">Verification code</label>
@@ -221,6 +221,12 @@ export function ContactPromptModal({ onClose, onNavigateToClerk }: ContactPrompt
                 className="w-full py-2.5 text-sm font-medium text-text-invert bg-interactive hover:bg-interactive-hover rounded-lg transition-colors disabled:opacity-50"
               >
                 {busy ? 'Verifying...' : 'Verify'}
+              </button>
+              <button
+                onClick={() => { setStep('email'); setCode(''); setError(null) }}
+                className="w-full py-2 text-sm text-text-muted hover:text-text-secondary transition-colors"
+              >
+                Retry
               </button>
               <button
                 onClick={skipToTelegram}
