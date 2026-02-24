@@ -976,11 +976,11 @@ export function SettingsPanel({ advancedMode, onAdvancedModeChange, installPromp
           <div className="space-y-5">
             {referralSection}
             {contactsSection}
-            {preferencesSection}
             {appSection}
             {actionsSection}
           </div>
           <div className="space-y-5">
+            {preferencesSection}
             {connectionSection}
             {serverSection}
           </div>

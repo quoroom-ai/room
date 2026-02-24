@@ -44,6 +44,7 @@ function printLinks() {
   console.log('Cloud landing:   http://127.0.0.1:3715/')
   console.log('Cloud dashboard: http://127.0.0.1:3715/app')
   console.log('Local dashboard: http://localhost:4700')
+  console.log('Vite dev (HMR):  http://localhost:5173')
   console.log('')
 }
 
