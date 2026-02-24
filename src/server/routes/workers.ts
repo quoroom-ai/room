@@ -2,6 +2,7 @@ import type { Router } from '../router'
 import type { AgentState } from '../../shared/types'
 import * as queries from '../../shared/db-queries'
 import { eventBus } from '../event-bus'
+import { triggerAgent, pauseAgent } from '../../shared/agent-loop'
 
 export function registerWorkerRoutes(router: Router): void {
   router.post('/api/workers', (ctx) => {
@@ -55,6 +56,31 @@ export function registerWorkerRoutes(router: Router): void {
     queries.deleteWorker(ctx.db, id)
     eventBus.emit('workers', 'worker:deleted', { id })
     return { data: { ok: true } }
+  })
+
+  router.post('/api/workers/:id/start', (ctx) => {
+    const id = Number(ctx.params.id)
+    const worker = queries.getWorker(ctx.db, id)
+    if (!worker) return { status: 404, error: 'Worker not found' }
+    if (!worker.roomId) return { status: 400, error: 'Worker has no room' }
+    const room = queries.getRoom(ctx.db, worker.roomId)
+    if (!room) return { status: 404, error: 'Room not found' }
+    if (room.status !== 'active') return { status: 400, error: 'Room is not active' }
+    triggerAgent(ctx.db, worker.roomId, id, {
+      onCycleLogEntry: (entry) => eventBus.emit(`cycle:${entry.cycleId}`, 'cycle:log', entry),
+      onCycleLifecycle: (event, cycleId) => eventBus.emit(`room:${worker.roomId}`, `cycle:${event}`, { cycleId, roomId: worker.roomId })
+    })
+    eventBus.emit('workers', 'worker:started', { id, roomId: worker.roomId })
+    return { data: { ok: true, running: true } }
+  })
+
+  router.post('/api/workers/:id/stop', (ctx) => {
+    const id = Number(ctx.params.id)
+    const worker = queries.getWorker(ctx.db, id)
+    if (!worker) return { status: 404, error: 'Worker not found' }
+    pauseAgent(ctx.db, id)
+    eventBus.emit('workers', 'worker:stopped', { id })
+    return { data: { ok: true, running: false } }
   })
 
   router.get('/api/rooms/:roomId/workers', (ctx) => {

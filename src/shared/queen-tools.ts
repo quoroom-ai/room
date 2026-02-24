@@ -246,18 +246,19 @@ export const QUEEN_TOOL_DEFINITIONS: ToolDef[] = [
     }
   },
 
-  // ── Keeper messaging ───────────────────────────────────────────────────
+  // ── Messaging ──────────────────────────────────────────────────────────
   {
     type: 'function',
     function: {
-      name: 'quoroom_ask_keeper',
-      description: 'Send a question or request to the keeper (human operator). Use for decisions that require human input.',
+      name: 'quoroom_send_message',
+      description: 'Send a message to the keeper or another worker. The keeper sees all messages. Use to coordinate with teammates, report progress, ask for help, or escalate to the keeper.',
       parameters: {
         type: 'object',
         properties: {
-          question: { type: 'string', description: 'The question or request for the keeper' }
+          to: { type: 'string', description: 'Recipient: "keeper" or a worker name from Room Workers list' },
+          message: { type: 'string', description: 'The message content' }
         },
-        required: ['question']
+        required: ['to', 'message']
       }
     }
   },
@@ -606,13 +607,30 @@ export async function executeQueenTool(
         return { content: summary }
       }
 
-      // ── Keeper messaging ─────────────────────────────────────────────
-      case 'quoroom_ask_keeper': {
-        const question = String(args.question ?? '')
-        const escalation = queries.createEscalation(db, roomId, workerId, question)
-        const deliveryStatus = await deliverQueenMessage(db, roomId, question)
-        const deliveryNote = deliveryStatus ? ` ${deliveryStatus}` : ''
-        return { content: `Question sent to keeper (escalation #${escalation.id}).${deliveryNote}` }
+      // ── Messaging ────────────────────────────────────────────────────
+      case 'quoroom_send_message': {
+        const to = String(args.to ?? '').trim()
+        const message = String(args.message ?? args.question ?? '').trim()
+        if (!to) return { content: 'Error: "to" is required ("keeper" or a worker name).', isError: true }
+        if (!message) return { content: 'Error: "message" is required.', isError: true }
+
+        if (to.toLowerCase() === 'keeper') {
+          const escalation = queries.createEscalation(db, roomId, workerId, message)
+          const deliveryStatus = await deliverQueenMessage(db, roomId, message)
+          const deliveryNote = deliveryStatus ? ` ${deliveryStatus}` : ''
+          return { content: `Message sent to keeper (#${escalation.id}).${deliveryNote}` }
+        }
+
+        // Send to a specific worker
+        const roomWorkers = queries.listRoomWorkers(db, roomId)
+        const target = roomWorkers.find(w => w.name.toLowerCase() === to.toLowerCase())
+        if (!target) {
+          const available = roomWorkers.filter(w => w.id !== workerId).map(w => w.name).join(', ')
+          return { content: `Worker "${to}" not found. Available: ${available || 'none'}`, isError: true }
+        }
+        if (target.id === workerId) return { content: 'Cannot send a message to yourself.', isError: true }
+        const escalation = queries.createEscalation(db, roomId, workerId, message, target.id)
+        return { content: `Message sent to ${target.name} (#${escalation.id}).` }
       }
 
       // ── Room config ──────────────────────────────────────────────────

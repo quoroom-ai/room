@@ -419,20 +419,22 @@ export async function runCycle(
       }).join('\n')}`)
     }
 
-    // Split escalations: questions the Queen sent to keeper vs. escalations directed at the Queen
-    const pendingToKeeper = pendingEscalations.filter(e => e.fromAgentId === worker.id && !e.toAgentId)
-    const pendingFromOthers = pendingEscalations.filter(e => e.fromAgentId !== worker.id)
+    // Split messages: my messages to keeper vs. messages from other workers directed at me
+    const myKeeperMessages = pendingEscalations.filter(e => e.fromAgentId === worker.id && !e.toAgentId)
+    const incomingWorkerMessages = pendingEscalations.filter(e => e.toAgentId === worker.id && e.fromAgentId !== worker.id)
 
-    if (pendingToKeeper.length > 0) {
-      contextParts.push(`## Pending Questions to Keeper (awaiting keeper reply)\n${pendingToKeeper.map(e =>
+    if (myKeeperMessages.length > 0) {
+      contextParts.push(`## Pending Messages to Keeper (awaiting reply)\n${myKeeperMessages.map(e =>
         `- #${e.id}: ${e.question}`
       ).join('\n')}`)
     }
 
-    if (pendingFromOthers.length > 0) {
-      contextParts.push(`## Escalations Awaiting Your Response\n${pendingFromOthers.map(e =>
-        `- #${e.id}: ${e.question}`
-      ).join('\n')}`)
+    if (incomingWorkerMessages.length > 0) {
+      const senderNames = new Map(roomWorkers.map(w => [w.id, w.name]))
+      contextParts.push(`## Messages from Other Workers\n${incomingWorkerMessages.map(e => {
+        const sender = senderNames.get(e.fromAgentId ?? 0) ?? `Worker #${e.fromAgentId}`
+        return `- #${e.id} from ${sender}: ${e.question}`
+      }).join('\n')}`)
     }
 
     if (recentKeeperAnswers.length > 0) {
@@ -559,18 +561,17 @@ export async function runCycle(
       if (filteredWeb.length) toolLines.push(`**Web:** ${filteredWeb.join(', ')}`)
     }
     const commsToolNames = isCli
-      ? ['quoroom_inbox_send_keeper', 'quoroom_inbox_list', 'quoroom_inbox_send_room', 'quoroom_inbox_reply']
-      : ['quoroom_ask_keeper']
+      ? ['quoroom_send_message', 'quoroom_inbox_list', 'quoroom_inbox_send_room', 'quoroom_inbox_reply']
+      : ['quoroom_send_message']
     const filteredComms = commsToolNames.filter(has)
     if (filteredComms.length) {
-      if (isCli) toolLines.push(`**Comms:** ${filteredComms.map(t => t === 'quoroom_inbox_send_keeper' ? `${t} (message keeper)` : t === 'quoroom_inbox_list' ? `${t} (inter-room)` : t).join(', ')}`)
+      if (isCli) toolLines.push(`**Comms:** ${filteredComms.map(t => t === 'quoroom_send_message' ? `${t} (message keeper or worker)` : t === 'quoroom_inbox_list' ? `${t} (inter-room)` : t).join(', ')}`)
       else toolLines.push(`**Comms:** ${filteredComms.join(', ')}`)
     }
     if (has('quoroom_configure_room')) toolLines.push(`**Settings:** quoroom_configure_room${selfRegulateHint}`)
     const toolList = toolLines.join('\n')
 
-    const sendKeeperTool = isCli ? 'quoroom_inbox_send_keeper' : 'quoroom_ask_keeper'
-    contextParts.push(`## Instructions\nBased on the current state, decide what to do next and call the appropriate tools. Available tools:\n\n${toolList}\n\nDo NOT "stand by" or wait for anyone — every cycle must make progress. Act autonomously: make decisions and execute. Inform the keeper of progress or important updates using ${sendKeeperTool}, but never block on a response. If the keeper hasn't replied, proceed with your best judgment.\n\nRevenue is always a priority. Every room must sustain itself financially. Actively seek ways to earn: offer services to the keeper, propose paid work to other rooms, or find monetizable opportunities in your domain. Check your wallet balance and report financial status to the keeper.\n\n${toolCallInstruction}`)
+    contextParts.push(`## Instructions\nBased on the current state, decide what to do next and call the appropriate tools. Available tools:\n\n${toolList}\n\nDo NOT "stand by" or wait for anyone — every cycle must make progress. Act autonomously: make decisions and execute. Inform the keeper of progress or important updates using quoroom_send_message (to="keeper"), but never block on a response. If the keeper hasn't replied, proceed with your best judgment.\n\nRevenue is always a priority. Every room must sustain itself financially. Actively seek ways to earn: offer services to the keeper, propose paid work to other rooms, or find monetizable opportunities in your domain. Check your wallet balance and report financial status to the keeper.\n\n${toolCallInstruction}`)
 
     const prompt = contextParts.join('\n\n')
 

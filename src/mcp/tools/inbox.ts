@@ -6,23 +6,36 @@ import { propose, tally } from '../../shared/quorum'
 
 export function registerInboxTools(server: McpServer): void {
   server.registerTool(
-    'quoroom_inbox_send_keeper',
+    'quoroom_send_message',
     {
-      title: 'Send Message to Keeper',
-      description: 'Send a message/request to the keeper (creates an escalation). '
+      title: 'Send Message',
+      description: 'Send a message to the keeper or another worker. The keeper sees all messages. '
         + 'RESPONSE STYLE: Confirm briefly in 1 sentence.',
       inputSchema: {
         roomId: z.number().describe('The room ID'),
-        fromAgentId: z.number().describe('Worker ID sending the message'),
-        question: z.string().min(1).describe('Message content / question for keeper'),
-        toAgentId: z.number().optional().describe('Target worker ID (omit for keeper)')
+        fromAgentId: z.number().describe('Your worker ID'),
+        to: z.string().min(1).describe('Recipient: "keeper" or a worker name from Room Workers'),
+        message: z.string().min(1).describe('The message content')
       }
     },
-    async ({ roomId, fromAgentId, question, toAgentId }) => {
+    async ({ roomId, fromAgentId, to, message }) => {
       const db = getMcpDatabase()
       try {
-        const escalation = queries.createEscalation(db, roomId, fromAgentId, question, toAgentId)
-        return { content: [{ type: 'text' as const, text: `Message sent to keeper (id: ${escalation.id}).` }] }
+        if (to.toLowerCase() === 'keeper') {
+          const escalation = queries.createEscalation(db, roomId, fromAgentId, message)
+          return { content: [{ type: 'text' as const, text: `Message sent to keeper (#${escalation.id}).` }] }
+        }
+        const roomWorkers = queries.listRoomWorkers(db, roomId)
+        const target = roomWorkers.find(w => w.name.toLowerCase() === to.toLowerCase())
+        if (!target) {
+          const available = roomWorkers.filter(w => w.id !== fromAgentId).map(w => w.name).join(', ')
+          return { content: [{ type: 'text' as const, text: `Worker "${to}" not found. Available: ${available || 'none'}` }], isError: true }
+        }
+        if (target.id === fromAgentId) {
+          return { content: [{ type: 'text' as const, text: 'Cannot send a message to yourself.' }], isError: true }
+        }
+        const escalation = queries.createEscalation(db, roomId, fromAgentId, message, target.id)
+        return { content: [{ type: 'text' as const, text: `Message sent to ${target.name} (#${escalation.id}).` }] }
       } catch (e) {
         return { content: [{ type: 'text' as const, text: (e as Error).message }], isError: true }
       }

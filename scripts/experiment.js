@@ -4,23 +4,29 @@
  *
  * Run directly — everything is self-contained:
  *
- *   node scripts/experiment.js                    # 3 cycles, all models
+ *   node scripts/experiment.js                    # 3 cycles, all models (solo mode)
  *   node scripts/experiment.js --cycles 2 --models api   # 2 cycles, API only
- *   node scripts/experiment.js --models anth      # 3 cycles, Anthropic only
+ *   node scripts/experiment.js --swarm             # swarm: 1 room, 4 agents
+ *   node scripts/experiment.js --swarm --cycles 2  # quick swarm test
  *   node scripts/experiment.js --help
+ *
+ * Modes:
+ *   Solo (default): Each model gets its own room, 1 queen per room
+ *   Swarm (--swarm): 1 room with 4 agents (queen + 3 workers) collaborating
  *
  * What it does:
  *   1. Loads API keys from cloud/.env automatically
  *   2. Builds the server (esbuild)
  *   3. Starts an isolated server on port 3710 (temp DB, separate from dev)
- *   4. Creates rooms, sets goals, starts queens
- *   5. Streams ALL queen activity live to terminal (searches, fetches, memories, tool calls)
+ *   4. Creates room(s), sets goals, starts queens/workers
+ *   5. Streams ALL activity live to terminal (tool calls, messages, votes, memories)
  *   6. Prints comparison table + memory dump when done
  *   7. Cleans up (Ctrl+C safe)
  *
  * Options:
- *   --cycles N      Number of cycles per queen (default: 3)
- *   --models FILTER  "api" | "cli" | comma-separated labels (e.g. "anth,oai")
+ *   --cycles N      Number of cycles per agent (default: 3, swarm default: 5)
+ *   --models FILTER  "api" | "cli" | comma-separated labels (solo mode only)
+ *   --swarm         Swarm mode: 1 room, 4 agents collaborating
  *   --goal "..."    Custom goal for all rooms
  *   --keep-db       Don't delete temp DB after experiment
  *   --help          Show this help
@@ -40,13 +46,44 @@ const TIMEOUT_MS = 10 * 60 * 1000  // 10 min max experiment time
 
 const DEFAULT_GOAL = 'Build a plan to launch an AI consulting service. Research market rates online. Store findings in memory. Create sub-goals for pricing and outreach. Message the keeper with your strategy and budget needs. Report progress every cycle.'
 
-// Minimal tool set for experiments — removes tools that waste turns or cause models to get stuck
+// Minimal tool set for solo experiments — removes tools that waste turns
 const EXPERIMENT_TOOLS = [
   'quoroom_set_goal', 'quoroom_update_progress', 'quoroom_complete_goal',
   'quoroom_remember', 'quoroom_recall',
-  'quoroom_ask_keeper',
+  'quoroom_send_message',
   'quoroom_web_search', 'quoroom_web_fetch',
 ].join(',')
+
+// Swarm tool set — adds governance, subgoals, and messaging for multi-agent coordination
+const SWARM_TOOLS = [
+  'quoroom_set_goal', 'quoroom_update_progress', 'quoroom_complete_goal', 'quoroom_create_subgoal',
+  'quoroom_remember', 'quoroom_recall',
+  'quoroom_propose', 'quoroom_vote',
+  'quoroom_send_message',
+  'quoroom_web_search', 'quoroom_web_fetch',
+].join(',')
+
+const SWARM_MAX_TURNS = 50
+const SWARM_CYCLE_GAP_MS = 5000
+
+const DEFAULT_SWARM_GOAL = `You are part of a multi-agent swarm. Your team must collaboratively build a comprehensive plan to launch an AI consulting service.
+
+Coordination rules:
+- Use quoroom_send_message to communicate with teammates (use their names from Room Workers)
+- Use quoroom_propose for major decisions that need team agreement, then vote
+- Use quoroom_remember to store findings so all agents can access them
+- Divide work: one agent researches market rates, another develops pricing, another creates outreach plan
+- Check messages from other workers each cycle and respond
+- Update goal progress as you make discoveries
+
+Deliver: market research, pricing strategy, outreach plan, and a synthesized executive summary.`
+
+const SWARM_MODELS = [
+  { label: 'claude', model: 'claude', type: 'cli', isQueen: true },
+  { label: 'codex', model: 'codex', type: 'cli', isQueen: false },
+  { label: 'anth-api', model: 'anthropic:claude-sonnet-4-6', type: 'api', keyEnv: 'ANTHROPIC_API_KEY', credName: 'anthropic_api_key', isQueen: false },
+  { label: 'oai-api', model: 'openai:gpt-4o', type: 'api', keyEnv: 'OPENAI_API_KEY', credName: 'openai_api_key', isQueen: false },
+]
 
 const ALL_MODELS = [
   { label: 'claude', model: 'claude', type: 'cli' },
@@ -84,7 +121,8 @@ function getArg(name) {
   const i = args.indexOf(name)
   return i !== -1 ? args[i + 1] : null
 }
-const numCycles = parseInt(getArg('--cycles') || '3', 10)
+const isSwarm = args.includes('--swarm')
+const numCycles = parseInt(getArg('--cycles') || (isSwarm ? '5' : '3'), 10)
 const goal = getArg('--goal') || DEFAULT_GOAL
 const keepDb = args.includes('--keep-db')
 const modelFilter = getArg('--models')  // e.g. "api" for API-only, "cli" for CLI-only, or comma-separated labels
@@ -517,7 +555,7 @@ function collectResults(rooms) {
     const errors = cycles.filter(c => c.status === 'failed').length
 
     // Outcome quality metrics
-    const productiveRx = /web_search|web_fetch|remember|ask_keeper|inbox_send|update_progress|complete_goal|set_goal/
+    const productiveRx = /web_search|web_fetch|remember|send_message|inbox_send|update_progress|complete_goal|set_goal|propose|vote/
     let productiveCalls = 0
     let stuckCycles = 0
     const uniqueSearches = new Set()
@@ -635,18 +673,352 @@ function pad(s, w) {
   return s + ' '.repeat(w - s.length)
 }
 
+// ─── Swarm mode ─────────────────────────────────────────────────────────────
+
+async function setupSwarm(token, apiKeys) {
+  const swarmGoal = goal !== DEFAULT_GOAL ? goal : DEFAULT_SWARM_GOAL
+
+  log('SWARM', C.bold, 'Creating swarm room...')
+
+  // 1. Create room (auto-creates queen)
+  const queenModel = SWARM_MODELS.find(m => m.isQueen)
+  const res = await api('POST', '/api/rooms', { name: 'swarm-experiment', goal: swarmGoal }, token)
+  if (res.status !== 200 && res.status !== 201) {
+    log('SWARM', C.red, `FAILED to create room: ${JSON.stringify(res.data).substring(0, 200)}`)
+    return null
+  }
+  const room = res.data.room || res.data
+  const queen = res.data.queen
+
+  log('SWARM', C.cyan, `Room #${room.id} created, queen #${queen.id}`)
+
+  // 2. Configure queen
+  await api('PATCH', `/api/workers/${queen.id}`, { model: queenModel.model, name: 'Queen (claude)' }, token)
+
+  // 3. Set room config
+  await api('PATCH', `/api/rooms/${room.id}`, {
+    workerModel: queenModel.model,
+    queenCycleGapMs: SWARM_CYCLE_GAP_MS,
+    queenMaxTurns: SWARM_MAX_TURNS,
+    allowedTools: SWARM_TOOLS
+  }, token)
+
+  // 4. Set API credentials
+  for (const m of SWARM_MODELS) {
+    if (m.type === 'api' && m.credName && apiKeys[m.keyEnv]) {
+      await api('POST', `/api/rooms/${room.id}/credentials`, {
+        name: m.credName, type: 'api_key', value: apiKeys[m.keyEnv]
+      }, token)
+      log('SWARM', C.green, `API key ${m.credName} configured`)
+    }
+  }
+
+  // 5. Build agent list starting with queen
+  const agents = [{
+    ...queenModel,
+    workerId: queen.id,
+    roomId: room.id,
+    color: ROOM_COLORS[0]
+  }]
+
+  // 6. Create worker agents
+  const workerModels = SWARM_MODELS.filter(m => !m.isQueen)
+  for (let i = 0; i < workerModels.length; i++) {
+    const m = workerModels[i]
+    const color = ROOM_COLORS[(i + 1) % ROOM_COLORS.length]
+    const workerRes = await api('POST', '/api/workers', {
+      name: `Worker (${m.label})`,
+      systemPrompt: `You are a worker agent in a multi-agent swarm. Your model is ${m.model}. Collaborate with other agents using quoroom_send_message (specify the worker name in "to"). Vote on proposals with quoroom_vote. Store findings in memory with quoroom_remember so all agents can access them. Focus on making measurable progress each cycle.`,
+      roomId: room.id,
+      maxTurns: SWARM_MAX_TURNS,
+      cycleGapMs: SWARM_CYCLE_GAP_MS
+    }, token)
+
+    if (workerRes.status !== 201) {
+      log(m.label, C.red, `Failed to create worker: ${JSON.stringify(workerRes.data).substring(0, 200)}`)
+      continue
+    }
+
+    const worker = workerRes.data
+    await api('PATCH', `/api/workers/${worker.id}`, { model: m.model }, token)
+
+    agents.push({ ...m, workerId: worker.id, roomId: room.id, color })
+    log(m.label, color, `Worker #${worker.id} created (model: ${m.model})`)
+  }
+
+  return { roomId: room.id, queenId: queen.id, agents }
+}
+
+async function runSwarmCycles(token, swarm) {
+  const Database = require('better-sqlite3')
+  const { roomId, agents } = swarm
+
+  console.log('')
+  log('SWARM', C.bold, `Starting ${agents.length} agents for ${numCycles} cycle(s) each...`)
+  console.log('')
+
+  // Start queen
+  const queenAgent = agents.find(a => a.isQueen)
+  await api('POST', `/api/rooms/${roomId}/queen/start`, {}, token)
+  log(queenAgent.label, queenAgent.color, 'Queen started')
+
+  // Start non-queen workers
+  for (const a of agents.filter(a => !a.isQueen)) {
+    const res = await api('POST', `/api/workers/${a.workerId}/start`, {}, token)
+    log(a.label, a.color, res.status === 200 ? 'Worker started' : `Start failed: ${JSON.stringify(res.data)}`)
+  }
+
+  console.log('')
+  log('SWARM', C.bold, 'Monitoring all agents live...')
+  console.log('─'.repeat(80))
+
+  const start = Date.now()
+  const lastLogSeq = {}
+  const printedCycles = new Set()
+  const completedCycles = new Set()
+  const stoppedAgents = new Set()
+
+  while (Date.now() - start < TIMEOUT_MS) {
+    await sleep(2000)
+
+    let db
+    try { db = new Database(dbPath, { readonly: true }) } catch { continue }
+
+    let allDone = true
+
+    for (const agent of agents) {
+      const cycles = db.prepare(
+        'SELECT id, status, duration_ms, input_tokens, output_tokens, error_message FROM worker_cycles WHERE worker_id = ? AND room_id = ? ORDER BY id'
+      ).all(agent.workerId, roomId)
+
+      const done = cycles.filter(c => c.status === 'completed' || c.status === 'failed').length
+      if (done < numCycles) allDone = false
+
+      // Stop agent once it reaches target cycle count
+      if (done >= numCycles && !stoppedAgents.has(agent.workerId)) {
+        stoppedAgents.add(agent.workerId)
+        if (agent.isQueen) {
+          api('POST', `/api/rooms/${roomId}/queen/stop`, {}, token).catch(() => {})
+        } else {
+          api('POST', `/api/workers/${agent.workerId}/stop`, {}, token).catch(() => {})
+        }
+        log(agent.label, agent.color, `${C.bold}── Target ${numCycles} cycle(s) reached — agent stopped ──${C.reset}`)
+      }
+
+      // Stream logs for each cycle
+      for (const cycle of cycles) {
+        if (!printedCycles.has(cycle.id)) {
+          printedCycles.add(cycle.id)
+          const cycleNum = cycles.indexOf(cycle) + 1
+          console.log('')
+          log(agent.label, agent.color, `${C.bold}── Cycle ${cycleNum} started (cycle_id=${cycle.id}) ──${C.reset}`)
+        }
+
+        const lastSeq = lastLogSeq[cycle.id] || 0
+        const logs = db.prepare(
+          'SELECT seq, entry_type, content FROM cycle_logs WHERE cycle_id = ? AND seq > ? ORDER BY seq'
+        ).all(cycle.id, lastSeq)
+
+        for (const entry of logs) {
+          lastLogSeq[cycle.id] = entry.seq
+          const content = (entry.content || '').replace(/\n/g, '\n' + ' '.repeat(28))
+
+          switch (entry.entry_type) {
+            case 'tool_call':
+              log(agent.label, agent.color, `  -> ${C.cyan}${content.substring(0, 200)}${C.reset}`)
+              break
+            case 'tool_result':
+              log(agent.label, agent.color, `  <- ${C.dim}${content.substring(0, 300)}${C.reset}`)
+              break
+            case 'assistant_text':
+              log(agent.label, agent.color, `  ${C.white}${content.substring(0, 400)}${C.reset}`)
+              break
+            case 'error':
+              log(agent.label, C.red, `  ERROR: ${content.substring(0, 300)}`)
+              break
+            default:
+              log(agent.label, agent.color, `  [${entry.entry_type}] ${content.substring(0, 200)}`)
+          }
+        }
+
+        if ((cycle.status === 'completed' || cycle.status === 'failed') && !completedCycles.has(cycle.id)) {
+          completedCycles.add(cycle.id)
+          const dur = ((cycle.duration_ms || 0) / 1000).toFixed(1)
+          const tokIn = cycle.input_tokens || '?'
+          const tokOut = cycle.output_tokens || '?'
+          if (cycle.status === 'completed') {
+            log(agent.label, agent.color, `${C.bold}── Cycle done: ${dur}s, tokens: ${tokIn}/${tokOut} ──${C.reset}`)
+          } else {
+            log(agent.label, C.red, `${C.bold}── Cycle FAILED: ${cycle.error_message || 'unknown'} ──${C.reset}`)
+          }
+        }
+      }
+    }
+
+    db.close()
+
+    if (allDone) {
+      console.log('')
+      log('SWARM', C.green + C.bold, 'All agents completed!')
+      return
+    }
+  }
+
+  console.log('')
+  log('SWARM', C.red, 'TIMEOUT — some agents did not complete')
+}
+
+function collectSwarmResults(swarm) {
+  const Database = require('better-sqlite3')
+  const db = new Database(dbPath, { readonly: true })
+  const { roomId, agents } = swarm
+
+  // Per-agent metrics
+  const agentResults = []
+  for (const agent of agents) {
+    const cycles = db.prepare(
+      'SELECT id, duration_ms, input_tokens, output_tokens, status FROM worker_cycles WHERE worker_id = ? AND room_id = ? ORDER BY id'
+    ).all(agent.workerId, roomId)
+
+    const completed = cycles.filter(c => c.status === 'completed')
+    const totalDuration = completed.reduce((s, c) => s + (c.duration_ms || 0), 0)
+    const totalInputTokens = completed.reduce((s, c) => s + (c.input_tokens || 0), 0)
+    const totalOutputTokens = completed.reduce((s, c) => s + (c.output_tokens || 0), 0)
+
+    let toolCalls = 0
+    const uniqueTools = new Set()
+    for (const c of completed) {
+      const calls = db.prepare("SELECT content FROM cycle_logs WHERE cycle_id = ? AND entry_type = 'tool_call'").all(c.id)
+      toolCalls += calls.length
+      for (const call of calls) {
+        const match = call.content?.match(/(?:→ |Using )(\w+)/)
+        if (match) uniqueTools.add(match[1])
+      }
+    }
+
+    // Messages sent by this agent
+    const msgsSent = db.prepare(
+      'SELECT COUNT(*) as cnt FROM escalations WHERE room_id = ? AND from_agent_id = ?'
+    ).get(roomId, agent.workerId)
+
+    agentResults.push({
+      label: agent.label,
+      cycles: completed.length,
+      totalDuration: (totalDuration / 1000).toFixed(1) + 's',
+      tokens: `${fmtK(totalInputTokens)}/${fmtK(totalOutputTokens)}`,
+      toolCalls,
+      uniqueTools: uniqueTools.size,
+      msgsSent: msgsSent.cnt,
+      errors: cycles.filter(c => c.status === 'failed').length
+    })
+  }
+
+  // Collaboration metrics (room-wide)
+  const interWorkerMsgs = db.prepare(
+    'SELECT COUNT(*) as cnt FROM escalations WHERE room_id = ? AND to_agent_id IS NOT NULL'
+  ).get(roomId)
+
+  const keeperMsgs = db.prepare(
+    'SELECT COUNT(*) as cnt FROM escalations WHERE room_id = ? AND to_agent_id IS NULL'
+  ).get(roomId)
+
+  const votes = db.prepare(
+    'SELECT COUNT(*) as cnt FROM quorum_votes WHERE decision_id IN (SELECT id FROM quorum_decisions WHERE room_id = ?)'
+  ).get(roomId)
+
+  const decisions = db.prepare(
+    'SELECT COUNT(*) as cnt FROM quorum_decisions WHERE room_id = ?'
+  ).get(roomId)
+
+  const memories = db.prepare(
+    'SELECT COUNT(*) as cnt FROM entities WHERE room_id = ?'
+  ).get(roomId)
+
+  const goals = db.prepare(
+    'SELECT id, status, progress FROM goals WHERE room_id = ?'
+  ).all(roomId)
+
+  db.close()
+
+  return {
+    agentResults,
+    collaboration: {
+      interWorkerMsgs: interWorkerMsgs.cnt,
+      keeperMsgs: keeperMsgs.cnt,
+      votesCast: votes.cnt,
+      proposalsMade: decisions.cnt,
+      memoriesStored: memories.cnt,
+      goalsCreated: goals.length,
+      goalsCompleted: goals.filter(g => g.status === 'completed').length,
+      maxProgress: goals.length > 0 ? Math.max(...goals.map(g => g.progress ?? 0)) : 0
+    }
+  }
+}
+
+function printSwarmResults(results) {
+  const now = new Date().toISOString().replace('T', ' ').substring(0, 19)
+  const swarmGoal = goal !== DEFAULT_GOAL ? goal : DEFAULT_SWARM_GOAL
+  console.log('\n' + '='.repeat(74))
+  console.log(`  SWARM EXPERIMENT RESULTS - ${now}`)
+  console.log(`  Agents: ${results.agentResults.length} | Cycles: ${numCycles} per agent`)
+  console.log('='.repeat(74))
+
+  // Per-agent table
+  const labelW = 18
+  const colW = 14
+  const labels = results.agentResults.map(r => r.label)
+
+  console.log('')
+  console.log('  ' + pad('Agent', labelW) + labels.map(l => pad(l, colW)).join(''))
+  console.log('  ' + '-'.repeat(labelW) + labels.map(() => '-'.repeat(colW)).join(''))
+
+  const metrics = [
+    ['Cycles done', r => String(r.cycles)],
+    ['Duration', r => r.totalDuration],
+    ['Tokens (in/out)', r => r.tokens],
+    ['Tool calls', r => String(r.toolCalls)],
+    ['Unique tools', r => String(r.uniqueTools)],
+    ['Messages sent', r => String(r.msgsSent)],
+    ['Errors', r => String(r.errors)],
+  ]
+  for (const [name, fn] of metrics) {
+    console.log('  ' + pad(name, labelW) + results.agentResults.map(fn).map(v => pad(v, colW)).join(''))
+  }
+
+  // Collaboration summary
+  const c = results.collaboration
+  console.log('')
+  console.log('  COLLABORATION METRICS')
+  console.log('  ' + '-'.repeat(40))
+  console.log(`  Inter-agent messages:  ${c.interWorkerMsgs}`)
+  console.log(`  Keeper messages:       ${c.keeperMsgs}`)
+  console.log(`  Proposals made:        ${c.proposalsMade}`)
+  console.log(`  Votes cast:            ${c.votesCast}`)
+  console.log(`  Shared memories:       ${c.memoriesStored}`)
+  console.log(`  Goals (made/done):     ${c.goalsCreated}/${c.goalsCompleted}`)
+  console.log(`  Max goal progress:     ${Math.round(c.maxProgress * 100)}%`)
+  console.log('')
+}
+
 // ─── Main ────────────────────────────────────────────────────────────────────
 
 async function main() {
+  const activeGoal = isSwarm && goal === DEFAULT_GOAL ? DEFAULT_SWARM_GOAL : goal
+  const modelsForKeys = isSwarm ? SWARM_MODELS : MODELS
+
   console.log('')
-  console.log(`${C.bold}Queen Experiment${C.reset} — ${numCycles} cycles, ${MODELS.length} models`)
-  console.log(`Goal: "${goal.substring(0, 100)}${goal.length > 100 ? '...' : ''}"`)
+  if (isSwarm) {
+    console.log(`${C.bold}Swarm Experiment${C.reset} — ${numCycles} cycles, 4 agents in 1 room`)
+  } else {
+    console.log(`${C.bold}Queen Experiment${C.reset} — ${numCycles} cycles, ${MODELS.length} models`)
+  }
+  console.log(`Goal: "${activeGoal.substring(0, 100)}${activeGoal.length > 100 ? '...' : ''}"`)
   console.log('')
 
   // 1. Load API keys
   const cloudEnv = loadCloudEnv()
   const apiKeys = {}
-  for (const m of MODELS) {
+  for (const m of modelsForKeys) {
     if (m.keyEnv && cloudEnv[m.keyEnv]) {
       apiKeys[m.keyEnv] = cloudEnv[m.keyEnv]
       log('KEYS', C.green, `${m.keyEnv} loaded (${m.label})`)
@@ -669,25 +1041,41 @@ async function main() {
   const token = getAuthToken()
   log('AUTH', C.green, `Token: ${token.substring(0, 10)}...`)
 
-  // 5. Setup rooms
-  console.log('')
-  log('SETUP', C.bold, 'Creating experiment rooms...')
-  const rooms = await setupRooms(token, apiKeys)
-  if (rooms.length === 0) {
-    log('SETUP', C.red, 'No rooms created! Aborting.')
-    stopServer()
-    process.exit(1)
+  if (isSwarm) {
+    // === SWARM MODE ===
+    console.log('')
+    log('SETUP', C.bold, 'Setting up swarm...')
+    const swarm = await setupSwarm(token, apiKeys)
+    if (!swarm) {
+      log('SETUP', C.red, 'Swarm setup failed! Aborting.')
+      stopServer()
+      process.exit(1)
+    }
+
+    await runSwarmCycles(token, swarm)
+
+    const results = collectSwarmResults(swarm)
+    printSwarmResults(results)
+    printMemoryDump([{ label: 'swarm', roomId: swarm.roomId, queenId: swarm.queenId, color: C.cyan }])
+  } else {
+    // === SOLO MODE ===
+    console.log('')
+    log('SETUP', C.bold, 'Creating experiment rooms...')
+    const rooms = await setupRooms(token, apiKeys)
+    if (rooms.length === 0) {
+      log('SETUP', C.red, 'No rooms created! Aborting.')
+      stopServer()
+      process.exit(1)
+    }
+
+    await runCycles(token, rooms)
+
+    const results = collectResults(rooms)
+    printResults(results)
+    printMemoryDump(rooms)
   }
 
-  // 6. Run cycles with live monitoring
-  await runCycles(token, rooms)
-
-  // 7. Collect and print results
-  const results = collectResults(rooms)
-  printResults(results)
-  printMemoryDump(rooms)
-
-  // 8. Cleanup
+  // Cleanup
   stopServer()
   if (keepDb) {
     log('CLEANUP', C.dim, `DB preserved: ${dbPath}`)
