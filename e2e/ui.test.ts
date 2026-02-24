@@ -174,9 +174,10 @@ test.describe('UI — Interaction', () => {
     const roomsRes = await page.request.get(`${base}/api/rooms`, {
       headers: { Authorization: `Bearer ${token}` }
     })
-    const rooms = await roomsRes.json()
-    const roomId = rooms[0]?.id
-    for (const room of rooms) {
+    const allRooms = (await roomsRes.json()) as Array<{ id: number; name: string; status: string }>
+    // Match App.tsx selection logic: first non-stopped room
+    const roomId = allRooms.filter(r => r.status !== 'stopped')[0]?.id
+    for (const room of allRooms) {
       const tasksRes = await page.request.get(`${base}/api/rooms/${room.id}/tasks`, {
         headers: { Authorization: `Bearer ${token}` }
       })
@@ -226,9 +227,10 @@ test.describe('UI — Interaction', () => {
     const roomsRes = await page.request.get(`${base}/api/rooms`, {
       headers: { Authorization: `Bearer ${token}` }
     })
-    const rooms = await roomsRes.json()
-    const roomId = rooms[0]?.id
-    for (const room of rooms) {
+    const allRooms = (await roomsRes.json()) as Array<{ id: number; name: string; status: string }>
+    // Match App.tsx selection logic: first non-stopped room
+    const roomId = allRooms.filter(r => r.status !== 'stopped')[0]?.id
+    for (const room of allRooms) {
       const workersRes = await page.request.get(`${base}/api/rooms/${room.id}/workers`, {
         headers: { Authorization: `Bearer ${token}` }
       })
@@ -369,7 +371,8 @@ test.describe('UI — Mobile + PWA', () => {
     await page.addInitScript(() => {
       localStorage.setItem('quoroom_walkthrough_seen', 'true')
       localStorage.setItem('quoroom_contact_prompt_seen', '1')
-      localStorage.setItem('quoroom_tab', 'status')
+      // Use 'settings' tab: mobile header is always visible for settings/help/clerk/swarm tabs
+      localStorage.setItem('quoroom_tab', 'settings')
     })
     await page.route('**/api/status', async (route) => {
       const response = await route.fetch()
