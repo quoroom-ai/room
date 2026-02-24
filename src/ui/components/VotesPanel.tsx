@@ -381,7 +381,7 @@ function DecisionRow({
       >
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-2">
-            <span className="text-sm text-text-primary">{d.proposal}</span>
+            <span className="text-sm text-text-primary line-clamp-1">{d.proposal}</span>
             <span className={`px-1.5 py-0.5 rounded-lg text-xs font-medium shrink-0 ${STATUS_COLORS[d.status] ?? 'bg-surface-tertiary text-text-muted'}`}>
               {d.status}
             </span>
@@ -417,6 +417,11 @@ function DecisionRow({
 
       {expanded && (
         <div className="px-3 pb-3 pt-2 border-t border-border-primary bg-surface-secondary space-y-2">
+          {/* Full proposal text */}
+          <div className="text-sm text-text-primary whitespace-pre-wrap break-words">
+            {d.proposal}
+          </div>
+
           {/* Keeper vote */}
           {isVoting && (
             <div className="flex items-center gap-2 py-1">
@@ -543,7 +548,7 @@ function DecisionRow({
                         {v.vote}
                       </span>
                       {v.reasoning && (
-                        <span className="text-text-muted truncate">{v.reasoning}</span>
+                        <span className="text-text-muted whitespace-pre-wrap break-words">{v.reasoning}</span>
                       )}
                     </div>
                   ))}

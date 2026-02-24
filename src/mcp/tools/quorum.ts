@@ -16,7 +16,7 @@ export function registerQuorumTools(server: McpServer): void {
       inputSchema: {
         roomId: z.number().describe('The room ID'),
         proposerId: z.number().optional().describe('Worker ID of the proposer'),
-        proposal: z.string().min(1).max(2000).describe('The proposal text'),
+        proposal: z.string().min(1).max(2000).describe('The proposal text. Start with a short title on the first line, then details with line breaks and bullet points.'),
         decisionType: z.enum(['strategy', 'resource', 'personnel', 'rule_change', 'low_impact'])
           .describe('Type of decision: strategy, resource, personnel, rule_change, or low_impact')
       }

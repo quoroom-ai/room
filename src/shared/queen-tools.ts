@@ -4,7 +4,7 @@ import { propose, vote } from './quorum'
 import { updateGoalProgress, decomposeGoal, completeGoal, abandonGoal, setRoomObjective } from './goals'
 import { triggerAgent } from './agent-loop'
 import type { DecisionType, VoteValue } from './types'
-import { webFetch, webSearch, browserAction, type BrowserAction } from './web-tools'
+import { webFetch, webSearch, browserActionPersistent, type BrowserAction } from './web-tools'
 import { WORKER_ROLE_PRESETS } from './constants'
 
 /** Wake all other running workers in a room (e.g. to vote on a proposal or read a message) */
@@ -147,7 +147,7 @@ export const QUEEN_TOOL_DEFINITIONS: ToolDef[] = [
       parameters: {
         type: 'object',
         properties: {
-          proposal: { type: 'string', description: 'The proposal text' },
+          proposal: { type: 'string', description: 'The proposal text. Start with a short title on the first line, then details with line breaks and bullet points.' },
           decisionType: {
             type: 'string',
             description: 'Type of decision',
@@ -345,16 +345,17 @@ export const QUEEN_TOOL_DEFINITIONS: ToolDef[] = [
     type: 'function',
     function: {
       name: 'quoroom_browser',
-      description: 'Control a headless browser to interact with websites: navigate pages, click buttons, fill forms, buy services, register domains. Returns accessibility tree snapshot of the page. Use for tasks requiring user interaction that quoroom_web_fetch cannot handle.',
+      description: 'Control a headless browser to interact with websites: navigate pages, click buttons, fill forms, buy services, register domains, create accounts. Returns accessibility tree snapshot. Pass sessionId to maintain cookies/login across calls.',
       parameters: {
         type: 'object',
         properties: {
           url: { type: 'string', description: 'Starting URL' },
           actions: {
             type: 'array',
-            description: 'Sequence of browser actions. Each action is an object with required "type" field (one of: navigate, click, fill, select, wait, submit, snapshot) plus optional fields: url (navigate), text/selector (click), selector+value (fill/select), ms (wait), selector (submit).',
+            description: 'Sequence of browser actions. Each action has "type" (navigate, click, fill, select, wait, submit, snapshot, scroll, hover, press, type, screenshot, waitForSelector) plus optional fields: url (navigate), text/selector (click), selector+value (fill/select), ms (wait/waitForSelector), selector (submit/hover/waitForSelector), value (press: key name like Enter/Tab, type: text to type), direction+amount (scroll).',
             items: { type: 'object' }
-          }
+          },
+          sessionId: { type: 'string', description: 'Session ID from previous call to resume with same cookies/login. Omit for new session.' }
         },
         required: ['url', 'actions']
       }
@@ -723,8 +724,10 @@ export async function executeQueenTool(
       case 'quoroom_browser': {
         const url = String(args.url ?? '').trim()
         const actions = (args.actions ?? []) as BrowserAction[]
+        const sid = args.sessionId ? String(args.sessionId) : undefined
         if (!url) return { content: 'Error: url is required', isError: true }
-        return { content: await browserAction(url, actions) }
+        const result = await browserActionPersistent(url, actions, sid)
+        return { content: result.snapshot }
       }
 
       // ── Wallet ────────────────────────────────────────────────────
