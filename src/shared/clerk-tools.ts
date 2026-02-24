@@ -3,7 +3,9 @@ import * as queries from './db-queries'
 import { createRoom, pauseRoom, restartRoom, deleteRoom } from './room'
 import { pauseAgent, triggerAgent } from './agent-loop'
 import type { ToolDef } from './queen-tools'
+import type { VoteValue } from './types'
 import { getRoomCloudId } from './cloud-sync'
+import { keeperVote } from './quorum'
 
 export type ClerkToolArgs = Record<string, unknown>
 
@@ -153,6 +155,68 @@ export const CLERK_TOOL_DEFINITIONS: ToolDef[] = [
           message: { type: 'string', description: 'Message content from keeper' }
         },
         required: ['message']
+      }
+    }
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'quoroom_list_keeper_requests',
+      description: 'List pending room requests that need keeper attention: unresolved escalations, keeper votes, and unread inbound room messages.',
+      parameters: {
+        type: 'object',
+        properties: {
+          roomId: { type: 'number', description: 'Optional room ID filter' },
+          roomName: { type: 'string', description: 'Optional room name filter (alternative to roomId)' },
+          limit: { type: 'number', description: 'Optional max items to return (default 25)' }
+        }
+      }
+    }
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'quoroom_resolve_escalation',
+      description: 'Reply to a pending room escalation on behalf of keeper.',
+      parameters: {
+        type: 'object',
+        properties: {
+          escalationId: { type: 'number', description: 'Escalation ID to resolve' },
+          answer: { type: 'string', description: 'Keeper answer to deliver to room' },
+        },
+        required: ['escalationId', 'answer']
+      }
+    }
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'quoroom_keeper_vote',
+      description: 'Cast keeper vote for a decision (yes/no/abstain).',
+      parameters: {
+        type: 'object',
+        properties: {
+          decisionId: { type: 'number', description: 'Decision ID' },
+          vote: { type: 'string', description: 'Vote value: yes, no, or abstain' }
+        },
+        required: ['decisionId', 'vote']
+      }
+    }
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'quoroom_reply_room_message',
+      description: 'Reply to an inbound inter-room message on behalf of keeper.',
+      parameters: {
+        type: 'object',
+        properties: {
+          messageId: { type: 'number', description: 'Inbound room message ID' },
+          body: { type: 'string', description: 'Reply body text' },
+          subject: { type: 'string', description: 'Optional custom subject' },
+          toRoomId: { type: 'string', description: 'Optional explicit target room ID (defaults to original sender)' }
+        },
+        required: ['messageId', 'body']
       }
     }
   },
@@ -521,6 +585,108 @@ export async function executeClerkTool(
           try { triggerAgent(db, room.id, room.queenWorkerId) } catch { /* non-fatal */ }
         }
         return { content: `Sent keeper message to "${room.name}" (#${room.id}) as escalation #${escalation.id}.` }
+      }
+
+      case 'quoroom_list_keeper_requests': {
+        const selectorArgs: ClerkToolArgs = { roomId: args.roomId, roomName: args.roomName }
+        const selectedRoom = resolveRoom(db, selectorArgs)
+        if (hasExplicitRoomSelector(args) && !selectedRoom) return { content: 'Error: room not found.', isError: true }
+
+        const limitRaw = parseIntArg(args.limit)
+        const limit = limitRaw != null ? Math.max(1, Math.min(200, limitRaw)) : 25
+        const rooms = selectedRoom ? [selectedRoom] : queries.listRooms(db)
+        const lines: string[] = []
+
+        for (const room of rooms) {
+          const pendingEscalations = queries
+            .getPendingEscalations(db, room.id)
+            .filter((item) => item.toAgentId == null)
+          for (const escalation of pendingEscalations) {
+            const fromName = escalation.fromAgentId
+              ? (queries.getWorker(db, escalation.fromAgentId)?.name ?? `worker #${escalation.fromAgentId}`)
+              : 'agent'
+            lines.push(`[Escalation] room="${room.name}" id=${escalation.id} from=${fromName} question="${escalation.question.replace(/\s+/g, ' ').trim()}"`)
+            if (lines.length >= limit) break
+          }
+          if (lines.length >= limit) break
+
+          const voteNeeded = queries
+            .listDecisions(db, room.id, 'voting')
+            .filter((decision) => !decision.keeperVote)
+          for (const decision of voteNeeded) {
+            lines.push(`[Vote] room="${room.name}" decisionId=${decision.id} proposal="${decision.proposal.replace(/\s+/g, ' ').trim()}"`)
+            if (lines.length >= limit) break
+          }
+          if (lines.length >= limit) break
+
+          const unreadInbound = queries
+            .listRoomMessages(db, room.id, 'unread')
+            .filter((message) => message.direction === 'inbound')
+          for (const message of unreadInbound) {
+            lines.push(`[RoomMessage] room="${room.name}" messageId=${message.id} from=${message.fromRoomId ?? 'unknown'} subject="${message.subject.replace(/\s+/g, ' ').trim()}"`)
+            if (lines.length >= limit) break
+          }
+          if (lines.length >= limit) break
+        }
+
+        if (lines.length === 0) return { content: 'No pending keeper requests.' }
+        return { content: lines.join('\n') }
+      }
+
+      case 'quoroom_resolve_escalation': {
+        const escalationId = parseIntArg(args.escalationId)
+        if (escalationId == null) return { content: 'Error: escalationId is required.', isError: true }
+        const answer = String(args.answer ?? '').trim()
+        if (!answer) return { content: 'Error: answer is required.', isError: true }
+
+        const escalation = queries.getEscalation(db, escalationId)
+        if (!escalation) return { content: `Error: escalation #${escalationId} not found.`, isError: true }
+        if (escalation.status !== 'pending') {
+          return { content: `Escalation #${escalationId} is already ${escalation.status}.` }
+        }
+
+        queries.resolveEscalation(db, escalationId, answer)
+        const room = queries.getRoom(db, escalation.roomId)
+        if (room?.status === 'active' && room.queenWorkerId) {
+          try { triggerAgent(db, room.id, room.queenWorkerId) } catch { /* non-fatal */ }
+        }
+        return { content: `Resolved escalation #${escalationId} in room "${room?.name ?? escalation.roomId}".` }
+      }
+
+      case 'quoroom_keeper_vote': {
+        const decisionId = parseIntArg(args.decisionId)
+        if (decisionId == null) return { content: 'Error: decisionId is required.', isError: true }
+        const voteRaw = String(args.vote ?? '').trim().toLowerCase()
+        if (voteRaw !== 'yes' && voteRaw !== 'no' && voteRaw !== 'abstain') {
+          return { content: 'Error: vote must be yes, no, or abstain.', isError: true }
+        }
+
+        const updated = keeperVote(db, decisionId, voteRaw as VoteValue)
+        return { content: `Keeper vote "${voteRaw}" cast on decision #${decisionId} (${updated.status}).` }
+      }
+
+      case 'quoroom_reply_room_message': {
+        const messageId = parseIntArg(args.messageId)
+        if (messageId == null) return { content: 'Error: messageId is required.', isError: true }
+        const body = String(args.body ?? '').trim()
+        if (!body) return { content: 'Error: body is required.', isError: true }
+
+        const original = queries.getRoomMessage(db, messageId)
+        if (!original) return { content: `Error: room message #${messageId} not found.`, isError: true }
+        const toRoomId = String(args.toRoomId ?? '').trim() || original.fromRoomId
+        if (!toRoomId) return { content: 'Error: cannot determine recipient room id. Provide toRoomId.', isError: true }
+
+        const subject = String(args.subject ?? '').trim() || `Re: ${original.subject}`
+        queries.replyToRoomMessage(db, messageId)
+        const reply = queries.createRoomMessage(
+          db,
+          original.roomId,
+          'outbound',
+          subject,
+          body,
+          { toRoomId }
+        )
+        return { content: `Queued reply as room message #${reply.id} to ${toRoomId}.` }
       }
 
       case 'quoroom_message_other_room': {

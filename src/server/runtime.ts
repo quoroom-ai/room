@@ -17,6 +17,7 @@ import {
   sendCloudRoomMessage,
 } from '../shared/cloud-sync'
 import { pollQueenInbox } from './routes/contacts'
+import { relayPendingKeeperRequests } from './clerk-notifications'
 import type { Watch } from '../shared/types'
 import { eventBus } from './event-bus'
 
@@ -25,6 +26,7 @@ const WATCH_REFRESH_MS = 15_000
 const TASK_MAINTENANCE_MS = 60_000
 const CLOUD_MESSAGE_SYNC_MS = 60_000
 const QUEEN_INBOX_POLL_MS = getBoundedIntervalMs('QUOROOM_QUEEN_INBOX_POLL_MS', 2_500, 1_000, 30_000)
+const CLERK_ALERT_RELAY_MS = getBoundedIntervalMs('QUOROOM_CLERK_ALERT_RELAY_MS', 15_000, 3_000, 120_000)
 const WATCH_DEBOUNCE_MS = 1_500
 const CLERK_CONTACT_ONBOARDING_START_KEY = 'clerk_contact_onboarding_started_at'
 
@@ -45,9 +47,12 @@ let watcherTimer: ReturnType<typeof setInterval> | null = null
 let maintenanceTimer: ReturnType<typeof setInterval> | null = null
 let cloudMessageTimer: ReturnType<typeof setInterval> | null = null
 let queenInboxTimer: ReturnType<typeof setInterval> | null = null
+let clerkAlertTimer: ReturnType<typeof setInterval> | null = null
 let cloudSyncInFlight = false
 let queenInboxInFlight = false
 let queenInboxRepollRequested = false
+let clerkAlertInFlight = false
+let clerkAlertRepollRequested = false
 
 function getBoundedIntervalMs(envKey: string, fallback: number, min: number, max: number): number {
   const raw = Number.parseInt((process.env[envKey] || '').trim(), 10)
@@ -67,6 +72,22 @@ function queueQueenInboxPoll(db: Database.Database): void {
     if (queenInboxRepollRequested) {
       queenInboxRepollRequested = false
       queueQueenInboxPoll(db)
+    }
+  })
+}
+
+function queueClerkAlertRelay(db: Database.Database): void {
+  if (clerkAlertInFlight) {
+    clerkAlertRepollRequested = true
+    return
+  }
+
+  clerkAlertInFlight = true
+  void relayPendingKeeperRequests(db).finally(() => {
+    clerkAlertInFlight = false
+    if (clerkAlertRepollRequested) {
+      clerkAlertRepollRequested = false
+      queueClerkAlertRelay(db)
     }
   })
 }
@@ -444,6 +465,7 @@ export function startServerRuntime(db: Database.Database): void {
   refreshWatches(db)
   void syncCloudRoomMessages(db)
   queueQueenInboxPoll(db)
+  queueClerkAlertRelay(db)
 
   schedulerTimer = setInterval(() => {
     refreshCronJobs(db)
@@ -469,6 +491,10 @@ export function startServerRuntime(db: Database.Database): void {
   queenInboxTimer = setInterval(() => {
     queueQueenInboxPoll(db)
   }, QUEEN_INBOX_POLL_MS)
+
+  clerkAlertTimer = setInterval(() => {
+    queueClerkAlertRelay(db)
+  }, CLERK_ALERT_RELAY_MS)
 
   resumeActiveQueens(db)
 
@@ -508,14 +534,18 @@ export function stopServerRuntime(): void {
   if (maintenanceTimer) clearInterval(maintenanceTimer)
   if (cloudMessageTimer) clearInterval(cloudMessageTimer)
   if (queenInboxTimer) clearInterval(queenInboxTimer)
+  if (clerkAlertTimer) clearInterval(clerkAlertTimer)
   schedulerTimer = null
   watcherTimer = null
   maintenanceTimer = null
   cloudMessageTimer = null
   queenInboxTimer = null
+  clerkAlertTimer = null
   cloudSyncInFlight = false
   queenInboxInFlight = false
+  clerkAlertInFlight = false
   queenInboxRepollRequested = false
+  clerkAlertRepollRequested = false
 
   for (const [, entry] of cronJobs) {
     entry.job.stop()

@@ -164,6 +164,10 @@ const TOOL_NAMES: Record<string, string> = {
   quoroom_inbox_list: 'checking inbox',
   quoroom_inbox_reply: 'replying to message',
   quoroom_inbox_send_room: 'messaging another room',
+  quoroom_list_keeper_requests: 'checking keeper requests',
+  quoroom_resolve_escalation: 'answering room escalation',
+  quoroom_keeper_vote: 'casting keeper vote',
+  quoroom_reply_room_message: 'replying to room inbox message',
   // Decisions / quorum
   quoroom_propose: 'proposing a vote',
   quoroom_vote: 'casting a vote',

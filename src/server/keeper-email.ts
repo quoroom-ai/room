@@ -4,6 +4,7 @@
  */
 import * as queries from '../shared/db-queries'
 import { getRoomCloudId, getStoredCloudRoomToken, ensureCloudRoomToken } from '../shared/cloud-sync'
+import { insertClerkMessageAndEmit } from './clerk-message-events'
 
 function getCloudApiBase(): string {
   return (process.env.QUOROOM_CLOUD_API ?? 'https://quoroom.ai/api').replace(/\/+$/, '')
@@ -84,7 +85,7 @@ export async function sendKeeperEmail(
   const payload = await res.json().catch(() => ({})) as { email?: string }
   const sent = payload.email === 'sent'
   if (sent) {
-    queries.insertClerkMessage(db, 'assistant', content, 'email')
+    insertClerkMessageAndEmit(db, 'assistant', content, 'email')
   }
   return sent
 }

@@ -377,6 +377,17 @@ export function ClerkPanel({ setupLaunchKey = 0 }: ClerkPanelProps): React.JSX.E
           source: data.source ?? null,
           createdAt: new Date().toISOString()
         }])
+        return
+      }
+
+      if (event.type === 'clerk:message') {
+        const data = event.data as { message?: ClerkMessage }
+        const message = data.message
+        if (!message || typeof message.id !== 'number') return
+        setMessages((prev) => {
+          if (prev.some((item) => item.id === message.id)) return prev
+          return [...prev, message]
+        })
       }
     })
   }, [])

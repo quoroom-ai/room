@@ -9,6 +9,7 @@ import {
   getClerkApiAuth,
   syncProjectDocsMemory,
 } from '../clerk-profile'
+import { insertClerkMessageAndEmit } from '../clerk-message-events'
 import { DEFAULT_CLERK_MODEL } from '../../shared/clerk-profile-config'
 
 const VALIDATION_TIMEOUT_MS = 8000
@@ -204,6 +205,37 @@ function buildClerkContext(db: Database.Database, projectDocsSnapshot?: string):
     parts.push(recentActivity.slice(0, 15).join('\n'))
   }
 
+  const pendingKeeperRequests: string[] = []
+  for (const room of activeRooms.slice(0, 10)) {
+    const escalations = queries
+      .getPendingEscalations(db, room.id)
+      .filter((item) => item.toAgentId == null)
+    for (const escalation of escalations.slice(0, 4)) {
+      const fromLabel = escalation.fromAgentId
+        ? (queries.getWorker(db, escalation.fromAgentId)?.name ?? `worker #${escalation.fromAgentId}`)
+        : 'agent'
+      pendingKeeperRequests.push(`[Escalation] room=${room.name} id=${escalation.id} from=${fromLabel} question=${clipText(escalation.question, 180)}`)
+    }
+
+    const decisions = queries
+      .listDecisions(db, room.id, 'voting')
+      .filter((decision) => !decision.keeperVote)
+    for (const decision of decisions.slice(0, 4)) {
+      pendingKeeperRequests.push(`[Vote] room=${room.name} decisionId=${decision.id} proposal=${clipText(decision.proposal, 180)}`)
+    }
+
+    const unreadMessages = queries
+      .listRoomMessages(db, room.id, 'unread')
+      .filter((message) => message.direction === 'inbound')
+    for (const message of unreadMessages.slice(0, 4)) {
+      pendingKeeperRequests.push(`[RoomMessage] room=${room.name} messageId=${message.id} from=${message.fromRoomId ?? 'unknown'} subject=${clipText(message.subject, 180)}`)
+    }
+  }
+  if (pendingKeeperRequests.length > 0) {
+    parts.push('\n## Pending Keeper Requests')
+    parts.push(pendingKeeperRequests.slice(0, 40).join('\n'))
+  }
+
   if (projectDocsSnapshot && projectDocsSnapshot.trim()) {
     parts.push('\n## Project Knowledge')
     parts.push(projectDocsSnapshot.trim())
@@ -266,7 +298,7 @@ export async function runClerkAssistantTurn(
     const model = queries.getSetting(db, 'clerk_model') || clerk.model || DEFAULT_CLERK_MODEL
 
     if (!options.skipUserInsert) {
-      queries.insertClerkMessage(db, 'user', trimmed, options.userSource)
+      insertClerkMessageAndEmit(db, 'user', trimmed, options.userSource)
     }
 
     // Pause commentary immediately when keeper writes.
@@ -321,7 +353,7 @@ export async function runClerkAssistantTurn(
     }
 
     const response = result.output || 'No response'
-    queries.insertClerkMessage(db, 'assistant', response, 'assistant')
+    insertClerkMessageAndEmit(db, 'assistant', response, 'assistant')
     queries.setSetting(db, CLERK_LAST_ASSISTANT_REPLY_AT_KEY, new Date().toISOString())
     eventBus.emit('clerk', 'clerk:assistant_reply', { timestamp: Date.now() })
 

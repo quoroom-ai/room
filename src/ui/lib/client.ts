@@ -156,6 +156,10 @@ interface ContactTelegramStatus {
 
 interface ContactStatusResponse {
   deploymentMode: 'local' | 'cloud'
+  notifications: {
+    email: boolean
+    telegram: boolean
+  }
   email: ContactEmailStatus
   telegram: ContactTelegramStatus
 }

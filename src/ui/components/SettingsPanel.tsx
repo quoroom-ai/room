@@ -35,6 +35,10 @@ interface ServerStatus {
 
 interface ContactStatusState {
   deploymentMode: 'local' | 'cloud'
+  notifications: {
+    email: boolean
+    telegram: boolean
+  }
   email: {
     value: string | null
     verified: boolean
@@ -100,6 +104,20 @@ export function SettingsPanel({ advancedMode, onAdvancedModeChange, installPromp
       if (!emailInput && payload.email.value) setEmailInput(payload.email.value)
     } catch {
       setContacts(null)
+    }
+  }
+
+  async function setClerkNotificationChannel(channel: 'email' | 'telegram', enabled: boolean): Promise<void> {
+    setContactBusy(`notify-${channel}`)
+    try {
+      const key = channel === 'email' ? 'clerk_notify_email' : 'clerk_notify_telegram'
+      await api.settings.set(key, String(enabled))
+      await refreshContactStatus()
+      setContactFeedback({ kind: 'success', text: `Clerk ${channel} alerts ${enabled ? 'enabled' : 'disabled'}.` })
+    } catch (error) {
+      setContactFeedback({ kind: 'error', text: error instanceof Error ? error.message : 'Failed to update notification preference.' })
+    } finally {
+      setContactBusy(null)
     }
   }
 
@@ -398,6 +416,36 @@ export function SettingsPanel({ advancedMode, onAdvancedModeChange, installPromp
         {notifDenied && (
           <p className="text-xs text-status-error mt-0.5 leading-tight">Permission denied by browser. Allow notifications in browser settings.</p>
         )}
+        <div className="py-1.5">
+          <div className="flex items-center justify-between text-sm">
+            <span className="text-text-secondary">Clerk alert channels</span>
+            <div className="flex gap-2">
+              <button
+                onClick={() => { void setClerkNotificationChannel('email', !(contacts?.notifications.email ?? true)) }}
+                disabled={!contacts || contactBusy === 'notify-email'}
+                className={`px-2.5 py-1 rounded-lg border text-xs transition-colors disabled:opacity-50 disabled:cursor-not-allowed ${
+                  contacts?.notifications.email ?? true
+                    ? 'bg-interactive text-text-invert border-interactive'
+                    : 'bg-surface-primary text-text-secondary border-border-primary hover:bg-surface-hover'
+                }`}
+              >
+                Email {contacts?.notifications.email ?? true ? 'On' : 'Off'}
+              </button>
+              <button
+                onClick={() => { void setClerkNotificationChannel('telegram', !(contacts?.notifications.telegram ?? true)) }}
+                disabled={!contacts || contactBusy === 'notify-telegram'}
+                className={`px-2.5 py-1 rounded-lg border text-xs transition-colors disabled:opacity-50 disabled:cursor-not-allowed ${
+                  contacts?.notifications.telegram ?? true
+                    ? 'bg-interactive text-text-invert border-interactive'
+                    : 'bg-surface-primary text-text-secondary border-border-primary hover:bg-surface-hover'
+                }`}
+              >
+                Telegram {contacts?.notifications.telegram ?? true ? 'On' : 'Off'}
+              </button>
+            </div>
+          </div>
+          <p className="text-xs text-text-muted mt-0.5 leading-tight">Global setting for Clerk outreach. Default is both.</p>
+        </div>
         {toggle('Advanced mode', advancedMode, toggleAdvancedMode, 'Show memory, watches, results tabs and extra controls')}
         {toggle('Telemetry', telemetryEnabled, toggleTelemetry, 'Send heartbeats to quoroom.ai (room appears in online counter and leaderboard)')}
         <div className="py-1.5">
@@ -545,7 +593,7 @@ export function SettingsPanel({ advancedMode, onAdvancedModeChange, installPromp
 
   const contactsSection = (
     <div>
-      <h3 className="text-sm font-semibold text-text-primary mb-2">Queen Communications</h3>
+      <h3 className="text-sm font-semibold text-text-primary mb-2">Clerk Communications</h3>
       <div className="bg-surface-secondary rounded-lg p-3 space-y-4 shadow-sm">
         <div className="space-y-2">
           <div className="flex items-center justify-between text-sm">
@@ -675,7 +723,7 @@ export function SettingsPanel({ advancedMode, onAdvancedModeChange, installPromp
             {contactFeedback.text}
           </p>
         )}
-        <p className="text-xs text-text-muted leading-tight">How queens reach you when you're not at your computer.</p>
+        <p className="text-xs text-text-muted leading-tight">How Clerk reaches you when you're not at your computer.</p>
       </div>
     </div>
   )

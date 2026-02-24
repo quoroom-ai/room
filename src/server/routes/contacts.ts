@@ -5,6 +5,8 @@ import { isCloudDeployment, getToken } from '../auth'
 import { ensureCloudRoomToken, getRoomCloudId, getStoredCloudRoomToken } from '../../shared/cloud-sync'
 import { triggerAgent } from '../../shared/agent-loop'
 import { runClerkAssistantTurn } from './clerk'
+import { getClerkNotifyPreferences } from '../clerk-notifications'
+import { insertClerkMessageAndEmit } from '../clerk-message-events'
 
 const EMAIL_VERIFY_CODE_TTL_MINUTES = 15
 const EMAIL_RESEND_COOLDOWN_SECONDS = 60
@@ -342,6 +344,7 @@ async function fetchCloudTelegramVerificationStatus(tokenHash: string): Promise<
 
 function getContactsStatus(db: Parameters<typeof queries.getSetting>[0]): Record<string, unknown> {
   const nowMs = Date.now()
+  const notifyPrefs = getClerkNotifyPreferences(db)
 
   const email = getSettingTrimmed(db, CONTACT_EMAIL_KEY) || null
   const emailVerifiedAt = getSettingTrimmed(db, CONTACT_EMAIL_VERIFIED_AT_KEY) || null
@@ -371,6 +374,10 @@ function getContactsStatus(db: Parameters<typeof queries.getSetting>[0]): Record
 
   return {
     deploymentMode: isCloudDeployment() ? 'cloud' : 'local',
+    notifications: {
+      email: notifyPrefs.email,
+      telegram: notifyPrefs.telegram,
+    },
     email: {
       value: email,
       verified: Boolean(emailVerifiedAt),
@@ -531,7 +538,7 @@ function storeClerkContactMemory(
   if (!body) return
 
   const role = input.direction === 'inbound' ? 'user' : 'assistant'
-  queries.insertClerkMessage(db, role, body, input.channel)
+  insertClerkMessageAndEmit(db, role, body, input.channel)
   if (input.direction === 'inbound') {
     setSetting(db, 'clerk_last_user_message_at', new Date().toISOString())
   }

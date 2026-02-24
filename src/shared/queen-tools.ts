@@ -784,6 +784,12 @@ async function deliverQueenMessage(db: Database.Database, roomId: number, questi
     const queenNickname = room.queenNickname
     if (!queenNickname) return ''
 
+    const relaySettingRaw = (queries.getSetting(db, 'clerk_relay_keeper_messages') ?? '').trim().toLowerCase()
+    const relayViaClerk = relaySettingRaw ? relaySettingRaw !== 'false' : true
+    if (relayViaClerk && queenNickname.toLowerCase() !== 'clerk') {
+      return 'Queued for Clerk relay.'
+    }
+
     const keeperEmail = queries.getSetting(db, 'contact_email')
     const emailVerifiedAt = queries.getSetting(db, 'contact_email_verified_at')
     const telegramId = queries.getSetting(db, 'contact_telegram_id')
