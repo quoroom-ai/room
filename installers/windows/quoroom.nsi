@@ -21,7 +21,7 @@ VIAddVersionKey "LegalCopyright" "MIT License"
 !define MUI_ABORTWARNING
 
 ; Welcome copy
-!define MUI_WELCOMEPAGE_TEXT "This installer adds Quoroom to your PATH.$\r$\n$\r$\nAfter install, the local server starts automatically and your browser opens http://localhost:3700.$\r$\n$\r$\nYour browser controls Quoroom locally on this PC. Room data stays on your machine and is not sent to the internet by default."
+!define MUI_WELCOMEPAGE_TEXT "This installer adds Quoroom to your PATH.$\r$\n$\r$\nAfter install, the local server starts automatically and your browser opens http://localhost:3700.$\r$\n$\r$\nAny time later, reopen from Start Menu -> Quoroom -> Open Quoroom, or use the Quoroom desktop shortcut (no terminal window).$\r$\n$\r$\nYour browser controls Quoroom locally on this PC. Room data stays on your machine and is not sent to the internet by default."
 
 ; Pages
 !insertmacro MUI_PAGE_WELCOME
@@ -48,7 +48,10 @@ Section "Install"
 
   ; Start Menu
   CreateDirectory "$SMPROGRAMS\Quoroom"
+  Call CreateLauncherScript
+  CreateShortcut "$SMPROGRAMS\Quoroom\Open Quoroom.lnk" "$SYSDIR\wscript.exe" '"$INSTDIR\bin\quoroom-launch.vbs"' "$INSTDIR\ui\favicon.ico" 0
   CreateShortcut "$SMPROGRAMS\Quoroom\Uninstall.lnk" "$INSTDIR\uninstall.exe"
+  CreateShortcut "$DESKTOP\Quoroom.lnk" "$SYSDIR\wscript.exe" '"$INSTDIR\bin\quoroom-launch.vbs"' "$INSTDIR\ui\favicon.ico" 0
 
   ; Add bin\ to system PATH via registry
   ReadRegStr $0 HKLM "SYSTEM\CurrentControlSet\Control\Session Manager\Environment" "Path"
@@ -101,6 +104,7 @@ Section "Uninstall"
 
   ; Remove Start Menu
   RMDir /r "$SMPROGRAMS\Quoroom"
+  Delete "$DESKTOP\Quoroom.lnk"
 
   ; Remove registry
   DeleteRegKey HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\Quoroom"
@@ -110,11 +114,8 @@ SectionEnd
 ; --- Launch server + browser ---
 
 Function LaunchQuoroom
-  ; Start local API/UI server via the packaged CLI wrapper.
-  ExecShell "open" "$INSTDIR\bin\quoroom.cmd" "serve --port 3700"
-  ; Give server a moment to bind before opening the browser.
-  Sleep 1500
-  ExecShell "open" "http://localhost:3700"
+  ; Run launcher via Windows Script Host so quoroom.cmd stays hidden.
+  Exec '"$SYSDIR\wscript.exe" "$INSTDIR\bin\quoroom-launch.vbs"'
 FunctionEnd
 
 ; Launch automatically when the user leaves the Finish page.
@@ -123,6 +124,19 @@ Function FinishPageLeave
 FunctionEnd
 
 ; --- Helper functions ---
+
+Function CreateLauncherScript
+  FileOpen $0 "$INSTDIR\bin\quoroom-launch.vbs" w
+  FileWrite $0 "Set shell = CreateObject($\"WScript.Shell$\")$\r$\n"
+  FileWrite $0 "Set fso = CreateObject($\"Scripting.FileSystemObject$\")$\r$\n"
+  FileWrite $0 "scriptDir = fso.GetParentFolderName(WScript.ScriptFullName)$\r$\n"
+  FileWrite $0 "cmdPath = scriptDir & $\"\\quoroom.cmd$\"$\r$\n"
+  FileWrite $0 "command = Chr(34) & cmdPath & Chr(34) & $\" serve --port 3700$\"$\r$\n"
+  FileWrite $0 "shell.Run command, 0, False$\r$\n"
+  FileWrite $0 "WScript.Sleep 1500$\r$\n"
+  FileWrite $0 "shell.Run $\"http://localhost:3700$\", 1, False$\r$\n"
+  FileClose $0
+FunctionEnd
 
 ; StrContains - check if $1 is in $0 (push haystack, needle)
 Function StrContains

@@ -187,6 +187,10 @@ brew install quoroom-ai/quoroom/quoroom
 
 Download from [GitHub Releases](https://github.com/quoroom-ai/room/releases). Installers add `quoroom` to your PATH automatically. No dependencies needed.
 
+Installer launchers:
+- macOS `.pkg`: open `/Applications/Quoroom.app`
+- Windows `.exe`: Start Menu -> Quoroom -> Open Quoroom
+
 | Platform | Installer | Archive |
 |----------|-----------|---------|
 | macOS (Apple Silicon + Intel) | `.pkg` | `.tar.gz` |
@@ -209,6 +213,8 @@ Removes Quoroom binaries, all data, and logs. Prompts for confirmation before pr
 # Start the HTTP/WebSocket API server + dashboard
 quoroom serve
 ```
+
+If you installed with the macOS `.pkg` or Windows `.exe` installer, you can also use the launcher app/shortcut instead of command line.
 
 On first run, `quoroom serve` automatically registers the Quoroom MCP server in every AI coding tool you have installed (Claude Code, Claude Desktop, Cursor, Windsurf). Just **restart your AI client once** — after that, all `mcp__quoroom__*` tools are available automatically in every session.
 
