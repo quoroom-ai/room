@@ -49,7 +49,7 @@ test.describe('UI — Accordion room navigation', () => {
       const body = await listRes.json() as Array<{ id: number; name: string }> | { rooms: Array<{ id: number; name: string }> }
       const list = Array.isArray(body) ? body : body.rooms ?? []
       for (const r of list) {
-        if (r.name === 'Accordion Test Room A' || r.name === 'Accordion Test Room B') {
+        if (r.name === 'AccordionRoomA' || r.name === 'AccordionRoomB') {
           await request.delete(`${base}/api/rooms/${r.id}`, { headers: { Authorization: `Bearer ${token}` } })
         }
       }
@@ -57,11 +57,11 @@ test.describe('UI — Accordion room navigation', () => {
 
     const a = await request.post(`${base}/api/rooms`, {
       headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
-      data: { name: 'Accordion Test Room A', goal: 'Room A goal' }
+      data: { name: 'AccordionRoomA', goal: 'Room A goal' }
     })
     const b = await request.post(`${base}/api/rooms`, {
       headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
-      data: { name: 'Accordion Test Room B', goal: 'Room B goal' }
+      data: { name: 'AccordionRoomB', goal: 'Room B goal' }
     })
     roomAId = (await a.json()).room.id
     roomBId = (await b.json()).room.id
@@ -69,11 +69,11 @@ test.describe('UI — Accordion room navigation', () => {
     // Create a worker in each room so Workers panel shows room-specific content
     await request.post(`${base}/api/workers`, {
       headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
-      data: { name: 'Worker for Room A', systemPrompt: 'room a', roomId: roomAId }
+      data: { name: 'WorkerForRoomA', systemPrompt: 'room a', roomId: roomAId }
     })
     await request.post(`${base}/api/workers`, {
       headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
-      data: { name: 'Worker for Room B', systemPrompt: 'room b', roomId: roomBId }
+      data: { name: 'WorkerForRoomB', systemPrompt: 'room b', roomId: roomBId }
     })
   })
 
@@ -93,7 +93,7 @@ test.describe('UI — Accordion room navigation', () => {
     // Always suppress the walkthrough modal.
     await page.addInitScript(() => {
       if (!sessionStorage.getItem('_e2e_init')) {
-        localStorage.removeItem('quoroom_tab')
+        localStorage.setItem('quoroom_tab', 'status')
         localStorage.removeItem('quoroom_room')
         sessionStorage.setItem('_e2e_init', '1')
       }
@@ -116,13 +116,13 @@ test.describe('UI — Accordion room navigation', () => {
   })
 
   test('room accordion renders rooms in sidebar', async ({ page }) => {
-    await expect(sidebar(page).locator('button').filter({ hasText: 'Accordion Test Room A' })).toBeVisible({ timeout: 10000 })
-    await expect(sidebar(page).locator('button').filter({ hasText: 'Accordion Test Room B' })).toBeVisible({ timeout: 5000 })
+    await expect(sidebar(page).locator('button').filter({ hasText: 'AccordionRoomA' })).toBeVisible({ timeout: 10000 })
+    await expect(sidebar(page).locator('button').filter({ hasText: 'AccordionRoomB' })).toBeVisible({ timeout: 5000 })
     await page.screenshot({ path: 'e2e/screenshots/accordion-01-sidebar.png', fullPage: true })
   })
 
   test('clicking a room expands its tab submenu', async ({ page }) => {
-    await expandRoom(page, 'Accordion Test Room B')
+    await expandRoom(page, 'AccordionRoomB')
     // Submenu tab is visible inside the sidebar
     await expect(sidebar(page).locator('button').filter({ hasText: /^Overview$/ })).toBeVisible()
     await page.screenshot({ path: 'e2e/screenshots/accordion-02-expanded.png', fullPage: true })
@@ -130,30 +130,30 @@ test.describe('UI — Accordion room navigation', () => {
 
   test('tabs show data for the selected room', async ({ page }) => {
     // Open Room A → Workers
-    await expandRoom(page, 'Accordion Test Room A')
+    await expandRoom(page, 'AccordionRoomA')
     await clickTab(page, 'Workers')
 
-    await expect(page.getByText('Worker for Room A')).toBeVisible({ timeout: 10000 })
-    await expect(page.getByText('Worker for Room B')).not.toBeVisible()
+    await expect(page.getByText('WorkerForRoomA')).toBeVisible({ timeout: 10000 })
+    await expect(page.getByText('WorkerForRoomB')).not.toBeVisible()
     await page.screenshot({ path: 'e2e/screenshots/accordion-03-room-a-workers.png', fullPage: true })
 
     // Open Room B → Workers
-    await expandRoom(page, 'Accordion Test Room B')
+    await expandRoom(page, 'AccordionRoomB')
     await clickTab(page, 'Workers')
 
-    await expect(page.getByText('Worker for Room B')).toBeVisible({ timeout: 10000 })
-    await expect(page.getByText('Worker for Room A')).not.toBeVisible()
+    await expect(page.getByText('WorkerForRoomB')).toBeVisible({ timeout: 10000 })
+    await expect(page.getByText('WorkerForRoomA')).not.toBeVisible()
     await page.screenshot({ path: 'e2e/screenshots/accordion-04-room-b-workers.png', fullPage: true })
   })
 
   test('only one room submenu open at a time', async ({ page }) => {
     // Expand Room A
-    await expandRoom(page, 'Accordion Test Room A')
+    await expandRoom(page, 'AccordionRoomA')
     let activityCount = await sidebar(page).locator('button').filter({ hasText: /^Overview$/ }).count()
     expect(activityCount).toBe(1)
 
     // Expand Room B — Room A should collapse, Room B opens
-    await expandRoom(page, 'Accordion Test Room B')
+    await expandRoom(page, 'AccordionRoomB')
     activityCount = await sidebar(page).locator('button').filter({ hasText: /^Overview$/ }).count()
     expect(activityCount).toBe(1)
 
@@ -162,7 +162,7 @@ test.describe('UI — Accordion room navigation', () => {
 
   test('page refresh restores selected room and tab', async ({ page }) => {
     // Navigate to Room B → Goals
-    await expandRoom(page, 'Accordion Test Room B')
+    await expandRoom(page, 'AccordionRoomB')
     await clickTab(page, 'Goals')
     await expect(page.getByRole('heading', { name: 'Goals' })).toBeVisible({ timeout: 5000 })
 

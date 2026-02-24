@@ -55,12 +55,13 @@ test('Room toggle buttons update room settings', async ({ page }) => {
   await page.addInitScript(() => {
     localStorage.setItem('quoroom_walkthrough_seen', 'true')
     localStorage.setItem('quoroom_contact_prompt_seen', '1')
+    localStorage.setItem('quoroom_tab', 'status')
   })
 
   // Create a test room via API
   const create = await page.request.post(`${base}/api/rooms`, {
     headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
-    data: { name: 'Button Test Room', goal: 'Test buttons' }
+    data: { name: 'ButtonTestRoom', goal: 'Test buttons' }
   })
   expect(create.status()).toBe(201)
   const roomId = (await create.json())?.room?.id
@@ -72,7 +73,7 @@ test('Room toggle buttons update room settings', async ({ page }) => {
 
   // Click the room in the sidebar to expand its submenu
   const sidebar = page.locator('[data-testid="sidebar"]')
-  const roomBtn = sidebar.locator('button').filter({ hasText: /Button Test Room/i }).first()
+  const roomBtn = sidebar.locator('button').filter({ hasText: /ButtonTestRoom/i }).first()
   await roomBtn.waitFor({ timeout: 10000 })
   const btnText = await roomBtn.textContent()
   if (!btnText?.includes('\u25B4')) {

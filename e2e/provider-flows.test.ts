@@ -8,10 +8,10 @@ import { getBaseUrl, getToken } from './helpers'
 
 const base = getBaseUrl()
 const token = getToken()
-const ROOM_PREFIX = 'E2E Provider Flow Room'
+const ROOM_PREFIX = 'E2EProviderRoom'
 
 function uniqueRoomName(label: string): string {
-  return `${ROOM_PREFIX} ${label} ${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
+  return `${ROOM_PREFIX}${label}-${Date.now()}`
 }
 
 function providerEntry(installed: boolean, connected: boolean | null, version?: string) {

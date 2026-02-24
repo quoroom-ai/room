@@ -38,7 +38,7 @@ async function initPage(page: Page): Promise<void> {
     data: { value: 'true' },
   })
   await page.addInitScript(() => {
-    localStorage.removeItem('quoroom_tab')
+    localStorage.setItem('quoroom_tab', 'status')
     localStorage.removeItem('quoroom_room')
     localStorage.setItem('quoroom_walkthrough_seen', 'true')
     localStorage.setItem('quoroom_contact_prompt_seen', '1')
@@ -65,11 +65,11 @@ test.describe('Realtime panel updates', () => {
 
   test.beforeAll(async ({ request }) => {
     const suffix = Date.now()
-    roomAName = `Realtime Switch Room A ${suffix}`
-    roomBName = `Realtime Switch Room B ${suffix}`
-    roomRealtimeName = `Realtime Panels Room ${suffix}`
-    workerAName = `Worker A ${suffix}`
-    workerBName = `Worker B ${suffix}`
+    roomAName = `RealtimeSwitchRoomA-${suffix}`
+    roomBName = `RealtimeSwitchRoomB-${suffix}`
+    roomRealtimeName = `RealtimePanelsRoom-${suffix}`
+    workerAName = `WorkerA-${suffix}`
+    workerBName = `WorkerB-${suffix}`
 
     const a = await request.post(`${base}/api/rooms`, {
       headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },

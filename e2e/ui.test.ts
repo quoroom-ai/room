@@ -42,6 +42,7 @@ test.describe('UI — Tab navigation', () => {
     await page.addInitScript(() => {
       localStorage.setItem('quoroom_walkthrough_seen', 'true')
       localStorage.setItem('quoroom_contact_prompt_seen', '1')
+      localStorage.setItem('quoroom_tab', 'status')
     })
     // Suppress update modal by stripping updateInfo from /api/status
     await page.route('**/api/status', async (route) => {
@@ -150,6 +151,7 @@ test.describe('UI — Interaction', () => {
     await page.addInitScript(() => {
       localStorage.setItem('quoroom_walkthrough_seen', 'true')
       localStorage.setItem('quoroom_contact_prompt_seen', '1')
+      localStorage.setItem('quoroom_tab', 'status')
     })
     await page.route('**/api/status', async (route) => {
       const response = await route.fetch()
@@ -367,6 +369,7 @@ test.describe('UI — Mobile + PWA', () => {
     await page.addInitScript(() => {
       localStorage.setItem('quoroom_walkthrough_seen', 'true')
       localStorage.setItem('quoroom_contact_prompt_seen', '1')
+      localStorage.setItem('quoroom_tab', 'status')
     })
     await page.route('**/api/status', async (route) => {
       const response = await route.fetch()
