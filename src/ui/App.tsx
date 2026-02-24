@@ -160,6 +160,7 @@ function App(): React.JSX.Element {
   const [showContactPrompt, setShowContactPrompt] = useState(false)
   const [contactPromptNeeded, setContactPromptNeeded] = useState(false)
   const [sidebarOpen, setSidebarOpen] = useState(false)
+  const [clerkSetupLaunchKey, setClerkSetupLaunchKey] = useState(0)
 
   // Update check — fetch /api/status once on startup (and every 30 min) to detect new releases
   const [serverUpdateInfo, setServerUpdateInfo] = useState<{
@@ -556,7 +557,7 @@ function App(): React.JSX.Element {
           handleTabChange('status')
         }} />
       case 'clerk':
-        return <ClerkPanel />
+        return <ClerkPanel setupLaunchKey={clerkSetupLaunchKey} />
       case 'status':
         return <StatusPanel onNavigate={(t) => handleTabChange(t as Tab)} advancedMode={advancedMode} roomId={selectedRoomId} />
       case 'chat':
@@ -955,6 +956,8 @@ function App(): React.JSX.Element {
       {showWalkthrough && (
         <WalkthroughModal installPrompt={installPrompt} onNavigateToHelp={() => handleTabChange('help')} onClose={() => {
           setShowWalkthrough(false)
+          handleTabChange('clerk')
+          setClerkSetupLaunchKey((prev) => prev + 1)
           if (contactPromptNeeded) {
             setShowContactPrompt(true)
           }
@@ -963,9 +966,10 @@ function App(): React.JSX.Element {
       {showContactPrompt && (
         <ContactPromptModal
           onClose={() => setShowContactPrompt(false)}
-          onNavigateToSettings={() => {
+          onNavigateToClerk={() => {
             setShowContactPrompt(false)
-            handleTabChange('settings')
+            handleTabChange('clerk')
+            setClerkSetupLaunchKey((prev) => prev + 1)
           }}
         />
       )}

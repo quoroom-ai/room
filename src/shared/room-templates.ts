@@ -20,7 +20,7 @@ export interface RoomTemplate {
 export const ROOM_TEMPLATES: RoomTemplate[] = [
   {
     id: 'saas-builder',
-    name: 'SaaS Builder',
+    name: 'saasbuilder',
     goal: 'Build and launch profitable micro-SaaS products',
     description: 'Research market opportunities, build MVPs, deploy, and monetize. Focus on recurring revenue.',
     workerTemplates: [
@@ -44,7 +44,7 @@ export const ROOM_TEMPLATES: RoomTemplate[] = [
   },
   {
     id: 'freelancer',
-    name: 'Freelancer',
+    name: 'freelancer',
     goal: 'Find and complete freelance jobs to earn money',
     description: 'Browse freelance platforms, bid on jobs, deliver quality work, build reputation. Focus on software development and data tasks.',
     workerTemplates: [
@@ -63,7 +63,7 @@ export const ROOM_TEMPLATES: RoomTemplate[] = [
   },
   {
     id: 'content-creator',
-    name: 'Content Creator',
+    name: 'contentcreator',
     goal: 'Create and monetize content across platforms',
     description: 'Generate articles, videos scripts, social media content. Build audience. Monetize through ads, sponsorships, and affiliate links.',
     workerTemplates: [
@@ -87,7 +87,7 @@ export const ROOM_TEMPLATES: RoomTemplate[] = [
   },
   {
     id: 'trading-bot',
-    name: 'Trading Bot',
+    name: 'tradingbot',
     goal: 'Analyze markets and execute profitable trades',
     description: 'Monitor crypto and DeFi markets. Identify arbitrage, yield farming, and trading opportunities. Execute trades on-chain.',
     workerTemplates: [

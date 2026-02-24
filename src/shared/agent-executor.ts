@@ -82,9 +82,16 @@ async function executeClaude(options: AgentExecutionOptions): Promise<AgentExecu
   }
 
   const result: ExecutionResult = await executeClaudeCode(options.prompt, execOpts)
+  const combinedErrorOutput = [result.stdout, result.stderr]
+    .map((part) => part.trim())
+    .filter(Boolean)
+    .join('\n')
+  const output = result.exitCode === 0
+    ? result.stdout
+    : (combinedErrorOutput || result.stdout || result.stderr)
 
   return {
-    output: result.stdout,
+    output,
     exitCode: result.exitCode,
     durationMs: result.durationMs,
     sessionId: result.sessionId,
@@ -821,4 +828,3 @@ export async function executeApiOnStation(
     }
   }
 }
-

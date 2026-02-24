@@ -12,7 +12,7 @@ export function registerRoomTools(server: McpServer): void {
       description: 'Create a new Room — an autonomous agent collective with a queen, goal, and quorum governance. '
         + 'RESPONSE STYLE: Confirm briefly in 1 sentence.',
       inputSchema: {
-        name: z.string().min(1).max(200).describe('Name for the room (e.g., "SaaS Builder", "Freelance Coder")'),
+        name: z.string().min(1).max(200).regex(/^\S+$/, 'name must be a single word').describe('Name for the room — single lowercase word (e.g., "saasbuilder", "freelancer")'),
         goal: z.string().max(1000).optional().describe('The room\'s objective (e.g., "Build profitable micro-SaaS tools")'),
         queenSystemPrompt: z.string().max(50000).optional().describe('Custom system prompt for the queen agent. If omitted, uses default.'),
         threshold: z.enum(['majority', 'supermajority', 'unanimous']).optional().describe('Quorum voting threshold (default: majority)'),
@@ -21,14 +21,20 @@ export function registerRoomTools(server: McpServer): void {
     },
     async ({ name, goal, queenSystemPrompt, threshold, timeoutMinutes }) => {
       const db = getMcpDatabase()
+      const normalizedName = name.toLowerCase()
       const config: Record<string, unknown> = {}
       if (threshold) config.threshold = threshold
       if (timeoutMinutes) config.timeoutMinutes = timeoutMinutes
-      const result = createRoom(db, { name, goal, queenSystemPrompt, config: config as Parameters<typeof createRoom>[1]['config'] })
+      const result = createRoom(db, { name: normalizedName, goal, queenSystemPrompt, config: config as Parameters<typeof createRoom>[1]['config'] })
+      const globalQueenModel = queries.getSetting(db, 'queen_model')
+      if (globalQueenModel) {
+        queries.updateWorker(db, result.queen.id, { model: globalQueenModel })
+      }
+      queries.updateRoom(db, result.room.id, { workerModel: 'queen' })
       return {
         content: [{
           type: 'text' as const,
-          text: `Created room "${name}" (id: ${result.room.id}) with queen "${result.queen.name}"${goal ? ` and objective: ${goal}` : ''}.`
+          text: `Created room "${normalizedName}" (id: ${result.room.id}) with queen "${result.queen.name}"${goal ? ` and objective: ${goal}` : ''}.`
         }]
       }
     }

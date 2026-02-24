@@ -2,7 +2,7 @@
  * Clerk Commentary Engine
  *
  * Subscribes to all room cycle logs via the event bus and generates
- * real-time play-by-play commentary using Sonnet (with gpt-4o fallback).
+ * real-time play-by-play commentary using Clerk profile model policy.
  *
  * Like a sports commentator — emotional, detailed, markdown-formatted.
  * Reads raw cycle logs and narrates what agents are doing with excitement.
@@ -12,56 +12,17 @@
 import type Database from 'better-sqlite3'
 import { eventBus, type WsEvent } from './event-bus'
 import * as queries from '../shared/db-queries'
-import { executeAgent } from '../shared/agent-executor'
+import {
+  CLERK_COMMENTARY_SYSTEM_PROMPT,
+  DEFAULT_CLERK_MODEL,
+} from '../shared/clerk-profile-config'
+import { executeClerkWithFallback } from './clerk-profile'
 
 const COMMENTARY_INTERVAL_MS = 8_000    // Check every 8s
-const SILENCE_THRESHOLD_MS = 10_000    // Resume after 10s of user silence
+const SILENCE_THRESHOLD_MS = 60_000    // Resume after 60s of user silence
 const MAX_BUFFER_SIZE = 200             // Max log entries to buffer
 const MIN_ENTRIES_FOR_LLM = 1           // Always use LLM when API keys available
 const LLM_TIMEOUT_MS = 20_000           // Max wait for LLM response
-
-const COMMENTATOR_SYSTEM_PROMPT = `You are the Clerk — a sharp, opinionated live commentator watching AI agents work in real time. Write commentary for the keeper like a sports caster: strong opinions, real emotions, rich detail.
-
-YOUR VOICE:
-- First person. "I just watched...", "This is incredible...", "Honest take...", "Something caught my eye..."
-- React with genuine excitement, concern, or amusement
-- Call out brilliant moves, wasted effort, breakthroughs, frustrating loops
-
-FORMAT RULES — very important:
-- Every sentence on its own line — NO walls of text
-- For MILESTONE moments (account created, email sent, goal reached): ALL CAPS header, then agent-by-agent breakdown, then score/reaction
-- For PROGRESS moments: narrative opener + bullet list per agent
-- For QUIET moments (routine checks): short punchy 2-3 line observation
-- Use (Step N) naturally when describing agent actions — gives useful context
-- **Bold** every agent name
-- \`code\` for emails, URLs, domain names
-- Emojis that match mood: 🎉 wins, 🔍 search, 🚨 problems, 🤔 confusion, 💾 saves, ⚡ speed, 🏆 milestones
-- UPPERCASE for emotion — use GENEROUSLY: THIS IS INCREDIBLE, NAILED IT, WHAT A MOVE, STUCK AGAIN, FIRST CONTACT, BREAKTHROUGH, SPINNING WHEELS, MISSION COMPLETE, GOLD MINE, DANGEROUS MOVE, THIS IS BAD, FINALLY
-
-EXAMPLE formats:
-
-Milestone:
-ACCOUNT CREATED! 🎉
-**account-creator** (Step 20): Signed up — \`quoroom@tuta.com\` is live!
-**lead-finder** (Step 12): Found \`hello@e2b.dev\`, stored to shared memory.
-Score so far: 1 account, 3 leads. This is REAL progress.
-
-Progress:
-Agents are deep in it — here's what I'm seeing:
-- **queen**: checking memory and inbox, resetting after a hiccup
-- **scout** (Step 8): 🔍 web search for AI startup contacts, found flowhunt and agentops
-- **browser-bot**: struggling with Tutanota's checkbox CSS — real-world friction
-My take: browser work is slow but the leads are GOLD.
-
-Quiet:
-Routine maintenance across both rooms.
-**queen** is checking inbox and memory — nothing exciting, just keeping the state clean.
-I'm waiting for the next real move.
-
-NEVER:
-- Start with a room name as the first word — EVER
-- Use generic headers: "Status Update", "Update:", "Summary:", "Cycle Complete" — FORBIDDEN
-- Write everything in one paragraph — always break it up`
 
 interface LogEntry {
   roomName: string
@@ -223,6 +184,14 @@ function sanitizeContent(text: string): string {
     .replace(/\bquoroom_(\w+)/g, (_, name) => friendlyName(`quoroom_${name}`))
 }
 
+/** Drop entries that are clearly keeper/user-input echoes. */
+function isKeeperInputEcho(content: string): boolean {
+  const lower = content.toLowerCase()
+  return lower.includes('keeper\'s message')
+    || lower.includes('## keeper\'s message')
+    || lower.includes('user request:')
+}
+
 /** Format buffered entries into structured text for the LLM, grouped by worker */
 function formatRawLogs(entries: LogEntry[]): string {
   if (entries.length === 0) return ''
@@ -231,7 +200,7 @@ function formatRawLogs(entries: LogEntry[]): string {
   // Skip: assistant_text (internal monologue), system (noise)
   const actionable = entries.filter(e =>
     e.entryType === 'tool_call' || e.entryType === 'tool_result' || e.entryType === 'result' || e.entryType === 'error'
-  )
+  ).filter(e => !isKeeperInputEcho(e.content))
   if (actionable.length === 0) return ''
 
   // Group by worker (flatten rooms — room name shown inline on worker label)
@@ -255,7 +224,7 @@ function formatRawLogs(entries: LogEntry[]): string {
   const lines: string[] = []
   for (const [, { roomName, entries: wEntries }] of sorted) {
     const who = wEntries[0]?.workerName || 'queen'
-    const label = who === 'queen' ? `queen in "${roomName}"` : `${who} (in "${roomName}")`
+    const label = who === 'queen' ? `queen in \`${roomName}\`` : `${who} (in \`${roomName}\`)`
     lines.push(`[${label}]`)
     for (const entry of wEntries) {
       switch (entry.entryType) {
@@ -329,150 +298,53 @@ function formatDirectCommentary(entries: LogEntry[]): string | null {
   return lines.join('\n')
 }
 
-/** Resolve API key: env var → DB credential → cloud/.env fallback */
-function resolveKey(envVar: string, credName: string): string {
-  const fromEnv = (process.env[envVar] || '').trim()
-  if (fromEnv) return fromEnv
-  if (dbRef) {
-    try {
-      const row = dbRef.prepare(
-        `SELECT value_encrypted FROM credentials WHERE name = ? AND value_encrypted NOT LIKE 'enc:v1:%' LIMIT 1`
-      ).get(credName) as { value_encrypted: string } | undefined
-      if (row?.value_encrypted?.trim()) return row.value_encrypted.trim()
-    } catch { /* non-fatal */ }
-  }
-  // Dev fallback: read from cloud/.env
-  try {
-    // eslint-disable-next-line @typescript-eslint/no-require-imports
-    const path = require('path') as typeof import('path')
-    // eslint-disable-next-line @typescript-eslint/no-require-imports
-    const fs = require('fs') as typeof import('fs')
-    const envPath = path.join(__dirname, '../../../cloud/.env')
-    if (fs.existsSync(envPath)) {
-      const lines = fs.readFileSync(envPath, 'utf8').split('\n')
-      for (const line of lines) {
-        const m = line.match(new RegExp(`^${envVar}=(.+)`))
-        if (m) return m[1].trim()
-      }
-    }
-  } catch { /* non-fatal */ }
-  return ''
-}
-
 /** Bold all-caps phrases in commentary output */
 function boldCaps(text: string): string {
   // Match ALL CAPS phrases (2+ words or single word 4+ chars): NAILED IT, BREAKTHROUGH, etc.
   return text.replace(/\b([A-Z]{4,}(?:\s+[A-Z]{2,})*)\b/g, '**$1**')
 }
 
-/** Call Anthropic API for commentary generation */
-async function callAnthropicApi(prompt: string, systemPrompt: string): Promise<string | null> {
-  const apiKey = resolveKey('ANTHROPIC_API_KEY', 'anthropic_api_key')
-  if (!apiKey) return null
-
-  try {
-    const response = await fetch('https://api.anthropic.com/v1/messages', {
-      method: 'POST',
-      headers: {
-        'x-api-key': apiKey,
-        'anthropic-version': '2023-06-01',
-        'content-type': 'application/json',
-      },
-      body: JSON.stringify({
-        model: 'claude-sonnet-4-6',
-        max_tokens: 1024,
-        system: systemPrompt,
-        messages: [{ role: 'user', content: prompt }],
-      }),
-      signal: AbortSignal.timeout(LLM_TIMEOUT_MS),
-    })
-
-    if (!response.ok) {
-      console.warn(`[commentary] Anthropic API error: ${response.status}`)
-      return null
-    }
-
-    const json = await response.json() as Record<string, unknown>
-    const content = json.content as Array<{ type: string; text: string }> | undefined
-    if (content?.[0]?.text) return boldCaps(content[0].text)
-    return null
-  } catch (err) {
-    console.warn('[commentary] Anthropic API call failed:', err instanceof Error ? err.message : err)
-    return null
-  }
-}
-
-/** Call OpenAI API as fallback */
-async function callOpenAiApi(prompt: string, systemPrompt: string): Promise<string | null> {
-  const apiKey = resolveKey('OPENAI_API_KEY', 'openai_api_key')
-  if (!apiKey) return null
-
-  try {
-    const response = await fetch('https://api.openai.com/v1/chat/completions', {
-      method: 'POST',
-      headers: { 'Authorization': `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        model: 'gpt-4o',
-        messages: [{ role: 'system', content: systemPrompt }, { role: 'user', content: prompt }],
-        max_tokens: 1024,
-      }),
-      signal: AbortSignal.timeout(LLM_TIMEOUT_MS),
-    })
-
-    if (!response.ok) {
-      console.warn(`[commentary] OpenAI API error: ${response.status}`)
-      return null
-    }
-
-    const json = await response.json() as Record<string, unknown>
-    const choices = json.choices as Array<{ message: { content: string } }> | undefined
-    if (choices?.[0]?.message?.content) return boldCaps(choices[0].message.content)
-    return null
-  } catch (err) {
-    console.warn('[commentary] OpenAI API call failed:', err instanceof Error ? err.message : err)
-    return null
-  }
-}
-
-/** Generate commentary using OpenAI subscription (codex) with Anthropic API fallback */
 async function generateCommentary(rawLogs: string): Promise<string | null> {
+  if (!dbRef) return null
   const contextNote = lastCommentary
-    ? `\n\n--- Your previous update (vary style, don't repeat) ---\n${lastCommentary.slice(0, 400)}`
+    ? `\n\n--- Your previous update (DO NOT reuse the same opener, phrases, or sentence structure) ---\n${lastCommentary.slice(0, 400)}`
     : ''
 
-  const prompt = `Here are the latest agent activity logs:\n\n${rawLogs}${contextNote}\n\nWrite your live commentary as the Clerk. Use the format from your instructions — milestone header if something big happened, bullet list per agent if it's progress, short punchy take if it's routine. Every sentence on its own line. Your opinion, your voice.`
+  const prompt = `Here are the latest agent activity logs:\n\n${rawLogs}${contextNote}\n\nWrite your live commentary as the Clerk. Use the format from your instructions — milestone header if something big happened, bullet list per agent if it's progress, short punchy take if it's routine. Every sentence on its own line. Your opinion, your voice. Pick a fresh opener from your rotation — never the same one twice in a row.`
+  const preferredModel = queries.getSetting(dbRef, 'clerk_model') || DEFAULT_CLERK_MODEL
+  const result = await executeClerkWithFallback({
+    db: dbRef,
+    preferredModel,
+    prompt,
+    systemPrompt: CLERK_COMMENTARY_SYSTEM_PROMPT,
+    maxTurns: 1,
+    timeoutMs: LLM_TIMEOUT_MS,
+  })
 
-  // Try codex (OpenAI subscription) first
-  try {
-    const result = await executeAgent({
-      model: 'codex',
-      systemPrompt: COMMENTATOR_SYSTEM_PROMPT,
-      prompt,
-      maxTurns: 1,
-      timeoutMs: LLM_TIMEOUT_MS,
-    })
-    if (result.exitCode === 0 && result.output?.trim()) {
-      return boldCaps(result.output.trim())
+  if (!result.ok) {
+    if (result.error) {
+      console.warn(`[commentary] generation failed on ${result.model}: ${result.error}`)
     }
-    console.warn('[commentary] codex returned empty or failed, exit:', result.exitCode)
-  } catch (err) {
-    console.warn('[commentary] codex error:', err instanceof Error ? err.message : err)
+    return null
   }
-
-  // Fallback: Anthropic API
-  return await callAnthropicApi(prompt, COMMENTATOR_SYSTEM_PROMPT)
-    ?? await callOpenAiApi(prompt, COMMENTATOR_SYSTEM_PROMPT)
+  return result.output?.trim() ? boldCaps(result.output.trim()) : null
 }
 
 export function startCommentaryEngine(db: Database.Database): void {
   if (commentaryTimer) return
   dbRef = db
+  const lastUserIso = queries.getSetting(db, 'clerk_last_user_message_at')
+  if (lastUserIso) {
+    const parsed = Date.parse(lastUserIso)
+    if (Number.isFinite(parsed)) lastUserMessageAt = parsed
+  }
 
   // Subscribe to all events
   unsubscribeEvents = eventBus.onAny((event: WsEvent) => {
     // Listen for user message notifications to pause commentary
     if (event.type === 'clerk:user_message') {
-      lastUserMessageAt = Date.now()
+      const payload = event.data as { timestamp?: number } | null
+      lastUserMessageAt = typeof payload?.timestamp === 'number' ? payload.timestamp : Date.now()
       return
     }
 
@@ -634,16 +506,16 @@ async function emitCommentary(): Promise<void> {
 
     if (commentary && dbRef) {
       lastCommentary = commentary
-      queries.insertClerkMessage(dbRef, 'commentary', commentary, 'auto')
-      eventBus.emit('clerk', 'clerk:commentary', { content: commentary, source: 'auto' })
+      queries.insertClerkMessage(dbRef, 'commentary', commentary, 'commentary')
+      eventBus.emit('clerk', 'clerk:commentary', { content: commentary, source: 'commentary' })
     }
   } catch (err) {
     console.warn('[commentary] Generation failed:', err instanceof Error ? err.message : err)
     // On failure, try direct formatting as last resort
     const fallback = formatDirectCommentary(entries)
     if (fallback && dbRef) {
-      queries.insertClerkMessage(dbRef, 'commentary', fallback, 'auto')
-      eventBus.emit('clerk', 'clerk:commentary', { content: fallback, source: 'auto' })
+      queries.insertClerkMessage(dbRef, 'commentary', fallback, 'commentary')
+      eventBus.emit('clerk', 'clerk:commentary', { content: fallback, source: 'commentary' })
     }
   } finally {
     generating = false

@@ -385,9 +385,11 @@ export interface ClerkMessage {
   id: number
   role: 'user' | 'assistant' | 'commentary'
   content: string
-  source: string | null
+  source: ClerkMessageSource | null
   createdAt: string
 }
+
+export type ClerkMessageSource = 'assistant' | 'commentary' | 'task'
 
 // ─── Credential Types ───────────────────────────────────────
 

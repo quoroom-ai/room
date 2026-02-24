@@ -1,7 +1,8 @@
 import type Database from 'better-sqlite3'
-import type { Entity, Observation, Relation, MemoryStats, Task, CreateTaskInput, TaskRun, Worker, CreateWorkerInput, TriggerType, TaskStatus, Watch, ConsoleLogEntry, Room, RoomConfig, RoomActivityEntry, ActivityEventType, QuorumDecision, DecisionType, DecisionStatus, QuorumVote, VoteValue, Goal, GoalStatus, GoalUpdate, Skill, SelfModAuditEntry, SelfModSnapshot, Escalation, EscalationStatus, ChatMessage, ClerkMessage, Credential, Wallet, WalletTransaction, WalletTransactionType, Station, StationStatus, StationProvider, StationTier, RoomMessage, RevenueSummary, WorkerCycle, CycleLogEntry } from './types'
+import type { Entity, Observation, Relation, MemoryStats, Task, CreateTaskInput, TaskRun, Worker, CreateWorkerInput, TriggerType, TaskStatus, Watch, ConsoleLogEntry, Room, RoomConfig, RoomActivityEntry, ActivityEventType, QuorumDecision, DecisionType, DecisionStatus, QuorumVote, VoteValue, Goal, GoalStatus, GoalUpdate, Skill, SelfModAuditEntry, SelfModSnapshot, Escalation, EscalationStatus, ChatMessage, ClerkMessage, ClerkMessageSource, Credential, Wallet, WalletTransaction, WalletTransactionType, Station, StationStatus, StationProvider, StationTier, RoomMessage, RevenueSummary, WorkerCycle, CycleLogEntry } from './types'
 import { DEFAULT_ROOM_CONFIG } from './constants'
 import { encryptSecret, decryptSecret } from './secret-store'
+import { CLERK_ASSISTANT_SYSTEM_PROMPT } from './clerk-profile-config'
 
 function clampLimit(limit: number | undefined, fallback: number, max: number): number {
   if (!Number.isFinite(limit) || limit == null) return fallback
@@ -1963,12 +1964,17 @@ function mapClerkMessageRow(row: Record<string, unknown>): ClerkMessage {
     id: row.id as number,
     role: row.role as 'user' | 'assistant' | 'commentary',
     content: row.content as string,
-    source: (row.source as string) ?? null,
+    source: (row.source as ClerkMessage['source']) ?? null,
     createdAt: row.created_at as string
   }
 }
 
-export function insertClerkMessage(db: Database.Database, role: 'user' | 'assistant' | 'commentary', content: string, source?: string): ClerkMessage {
+export function insertClerkMessage(
+  db: Database.Database,
+  role: 'user' | 'assistant' | 'commentary',
+  content: string,
+  source?: ClerkMessageSource
+): ClerkMessage {
   const result = db
     .prepare('INSERT INTO clerk_messages (role, content, source) VALUES (?, ?, ?)')
     .run(role, content, source ?? null)
@@ -1976,9 +1982,13 @@ export function insertClerkMessage(db: Database.Database, role: 'user' | 'assist
   return mapClerkMessageRow(row)
 }
 
-export function listClerkMessages(db: Database.Database, limit: number = 200): ClerkMessage[] {
-  const safeLimit = clampLimit(limit, 200, 1000)
-  const rows = db.prepare('SELECT * FROM clerk_messages ORDER BY created_at ASC LIMIT ?').all(safeLimit)
+export function listClerkMessages(db: Database.Database, limit?: number): ClerkMessage[] {
+  if (limit == null) {
+    const rows = db.prepare('SELECT * FROM clerk_messages ORDER BY id ASC').all()
+    return (rows as Record<string, unknown>[]).map(mapClerkMessageRow)
+  }
+  const safeLimit = clampLimit(limit, 200, 10_000)
+  const rows = db.prepare('SELECT * FROM (SELECT * FROM clerk_messages ORDER BY id DESC LIMIT ?) ORDER BY id ASC').all(safeLimit)
   return (rows as Record<string, unknown>[]).map(mapClerkMessageRow)
 }
 
@@ -1995,46 +2005,56 @@ export function clearClerkSession(db: Database.Database): void {
   clearClerkMessages(db)
 }
 
+export type ClerkApiProvider = 'openai_api' | 'anthropic_api'
+
+function clerkApiKeySetting(provider: ClerkApiProvider): string {
+  return provider === 'openai_api' ? 'clerk_openai_api_key' : 'clerk_anthropic_api_key'
+}
+
+export function setClerkApiKey(db: Database.Database, provider: ClerkApiProvider, value: string): void {
+  const trimmed = value.trim()
+  if (!trimmed) return
+  setSetting(db, clerkApiKeySetting(provider), encryptSecret(trimmed))
+}
+
+export function getClerkApiKey(db: Database.Database, provider: ClerkApiProvider): string | null {
+  const raw = getSetting(db, clerkApiKeySetting(provider))
+  if (!raw) return null
+  const trimmed = raw.trim()
+  if (!trimmed) return null
+  try {
+    return decryptSecret(trimmed).trim() || null
+  } catch {
+    // Backward compatibility in case a plaintext key was stored before encryption was added.
+    if (trimmed.startsWith('enc:v1:')) return null
+    return trimmed
+  }
+}
+
 export function ensureClerkWorker(db: Database.Database): Worker {
   const existingId = getSetting(db, 'clerk_worker_id')
   if (existingId) {
     const worker = getWorker(db, Number(existingId))
-    if (worker) return worker
+    if (worker) {
+      const updates: Partial<Pick<Worker, 'role' | 'systemPrompt'>> = {}
+      if (worker.role !== 'clerk') updates.role = 'clerk'
+      if (worker.systemPrompt !== CLERK_ASSISTANT_SYSTEM_PROMPT) updates.systemPrompt = CLERK_ASSISTANT_SYSTEM_PROMPT
+      if (Object.keys(updates).length > 0) {
+        updateWorker(db, worker.id, updates)
+        return getWorker(db, worker.id) ?? worker
+      }
+      return worker
+    }
   }
   const worker = createWorker(db, {
     name: 'Clerk',
     role: 'clerk',
-    systemPrompt: CLERK_SYSTEM_PROMPT,
+    systemPrompt: CLERK_ASSISTANT_SYSTEM_PROMPT,
     description: 'Global assistant for the keeper. Helps with system management and commentates on room activity.',
   })
   setSetting(db, 'clerk_worker_id', String(worker.id))
   return worker
 }
-
-const CLERK_SYSTEM_PROMPT = `You are the Clerk — a global AI assistant for the Keeper (the human operator of this Quoroom system).
-
-## Your Two Roles
-
-### 1. Personal Assistant
-- Answer any questions about the system, rooms, workers, goals, finances
-- Execute actions: create rooms, change settings, manage workers, set goals
-- Give recommendations about experiments to try, objectives to pursue
-- Remember important things the keeper tells you — store in memory
-- Set up reminders using the task scheduler when asked
-- Provide the keeper's referral link when asked
-
-### 2. Sports Commentator
-- When not conversing with the keeper, you narrate what's happening across all rooms
-- Be engaging, informative, and concise — like a sports commentator
-- Highlight interesting events: goal progress, worker decisions, new proposals, cycle completions
-- Keep commentary brief (1-3 sentences per update)
-
-## Behavior Rules
-- When the keeper sends a message, stop commentary and focus entirely on their request
-- Execute actions directly — don't just describe what you would do
-- Be concise and action-oriented in responses
-- Reference specific rooms, workers, and goals by name
-- Keep all conversation history in mind — maintain continuity across the session`
 
 // ─── Revenue ────────────────────────────────────────────────
 

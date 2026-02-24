@@ -80,22 +80,49 @@ function resolveApiAuthStatus(
   provider: ModelProvider
 ): ModelAuthStatus {
   const roomCred = getRoomCredential(db, roomId, credentialName)
+  const sharedRoomCred = findAnyRoomCredential(db, credentialName, roomId)
+  const clerkCred = getClerkCredential(db, credentialName)
   const envKey = getEnvValue(envVar)
+  const hasCredential = Boolean(roomCred || sharedRoomCred || clerkCred)
   return {
     provider,
     mode: 'api',
     credentialName,
     envVar,
-    hasCredential: Boolean(roomCred),
+    hasCredential,
     hasEnvKey: Boolean(envKey),
-    ready: Boolean(roomCred || envKey)
+    ready: Boolean(hasCredential || envKey)
   }
 }
 
 function resolveApiKey(db: Database.Database, roomId: number, credentialName: string, envVar: string): string | undefined {
   const roomCred = getRoomCredential(db, roomId, credentialName)
   if (roomCred) return roomCred
+  const sharedRoomCred = findAnyRoomCredential(db, credentialName, roomId)
+  if (sharedRoomCred) return sharedRoomCred
+  const clerkCred = getClerkCredential(db, credentialName)
+  if (clerkCred) return clerkCred
   return getEnvValue(envVar) || undefined
+}
+
+function findAnyRoomCredential(db: Database.Database, credentialName: string, excludeRoomId?: number): string | null {
+  const rooms = queries.listRooms(db)
+  for (const room of rooms) {
+    if (excludeRoomId != null && room.id === excludeRoomId) continue
+    const value = getRoomCredential(db, room.id, credentialName)
+    if (value) return value
+  }
+  return null
+}
+
+function getClerkCredential(db: Database.Database, credentialName: string): string | null {
+  if (credentialName === 'openai_api_key') {
+    return queries.getClerkApiKey(db, 'openai_api')
+  }
+  if (credentialName === 'anthropic_api_key') {
+    return queries.getClerkApiKey(db, 'anthropic_api')
+  }
+  return null
 }
 
 function getRoomCredential(db: Database.Database, roomId: number, credentialName: string): string | null {
@@ -123,4 +150,3 @@ function checkCodexCliAvailable(): boolean {
     return false
   }
 }
-

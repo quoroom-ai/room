@@ -227,6 +227,75 @@ export async function executeTask(
 
   const startTime = Date.now()
 
+  if (task.executor === 'keeper_contact_check') {
+    runningTasks.add(taskId)
+    const run = queries.createTaskRun(db, taskId)
+    try {
+      const contactEmail = queries.getSetting(db, 'contact_email')?.trim() ?? ''
+      const emailVerifiedAt = queries.getSetting(db, 'contact_email_verified_at')?.trim() ?? ''
+      const telegramId = queries.getSetting(db, 'contact_telegram_id')?.trim() ?? ''
+      const telegramVerifiedAt = queries.getSetting(db, 'contact_telegram_verified_at')?.trim() ?? ''
+
+      const hasEmail = Boolean(contactEmail && emailVerifiedAt)
+      const hasTelegram = Boolean(telegramId && telegramVerifiedAt)
+
+      let output: string
+      if (!hasEmail || !hasTelegram) {
+        const missing = [
+          !hasEmail ? 'email' : null,
+          !hasTelegram ? 'telegram' : null
+        ].filter(Boolean).join(' and ')
+        output = `Keeper action needed: Please add your ${missing} in Settings -> Contacts so Clerk can always stay connected.`
+        queries.insertClerkMessage(db, 'commentary', output, 'task')
+      } else {
+        output = 'Contact check: keeper already connected via email/telegram; no reminder sent.'
+      }
+
+      queries.completeTaskRun(db, run.id, output)
+      queries.incrementRunCount(db, taskId)
+
+      const durationMs = Date.now() - startTime
+      onComplete?.(task, output, durationMs)
+      return { success: true, output, durationMs }
+    } catch (err) {
+      const errorMsg = err instanceof Error ? err.message : String(err)
+      queries.completeTaskRun(db, run.id, '', undefined, errorMsg)
+      onFailed?.(task, errorMsg)
+      return { success: false, output: '', errorMessage: errorMsg, durationMs: Date.now() - startTime }
+    } finally {
+      runningTasks.delete(taskId)
+    }
+  }
+
+  if (task.executor === 'keeper_reminder') {
+    runningTasks.add(taskId)
+    const run = queries.createTaskRun(db, taskId)
+    try {
+      const reminderBody = task.prompt.trim() || task.description?.trim() || task.name.trim() || 'Scheduled reminder.'
+      const roomName = task.roomId != null
+        ? (queries.getRoom(db, task.roomId)?.name ?? `room #${task.roomId}`)
+        : null
+      const output = roomName
+        ? `Reminder (${roomName}): ${reminderBody}`
+        : `Reminder: ${reminderBody}`
+
+      queries.insertClerkMessage(db, 'commentary', output, 'task')
+      queries.completeTaskRun(db, run.id, output)
+      queries.incrementRunCount(db, taskId)
+
+      const durationMs = Date.now() - startTime
+      onComplete?.(task, output, durationMs)
+      return { success: true, output, durationMs }
+    } catch (err) {
+      const errorMsg = err instanceof Error ? err.message : String(err)
+      queries.completeTaskRun(db, run.id, '', undefined, errorMsg)
+      onFailed?.(task, errorMsg)
+      return { success: false, output: '', errorMessage: errorMsg, durationMs: Date.now() - startTime }
+    } finally {
+      runningTasks.delete(taskId)
+    }
+  }
+
   // ─── Resolve worker model EARLY to decide execution path ──────
   // worker.model > room.workerModel > 'claude' (default)
   let systemPrompt: string | undefined

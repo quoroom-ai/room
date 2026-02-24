@@ -31,8 +31,8 @@ const steps = [
     body: "Every important decision is made by vote. Until there are workers, it's just you and the Queen — you both have a say. Add workers and they can outvote you. Use Auto or Semi mode to control what the swarm does.",
   },
   {
-    title: "You're in charge",
-    body: 'Check settings before starting the room. Chat with the Queen anytime and track all activity. Workers may ask for credentials to access outside services — you decide whether to help. Find this guide again in Help.',
+    title: 'Control everything with Clerk',
+    body: 'You are the Keeper, and Clerk is your control panel. Use Clerk to create rooms, update goals, start or pause queens, manage tasks, and steer the swarm from one place. When you are away, connect Telegram or email so Clerk can still help you run everything.',
   },
 ]
 

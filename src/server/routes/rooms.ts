@@ -115,9 +115,11 @@ export function registerRoomRoutes(router: Router): void {
   router.post('/api/rooms', (ctx) => {
     const { name, goal, queenSystemPrompt, config, referredByCode } = ctx.body as Record<string, unknown> || {}
     if (!name || typeof name !== 'string') return { status: 400, error: 'name is required' }
+    const normalizedName = name.trim().toLowerCase()
+    if (/\s/.test(normalizedName)) return { status: 400, error: 'name must be a single word' }
 
     const result = createRoom(ctx.db, {
-      name,
+      name: normalizedName,
       goal: goal as string | undefined,
       queenSystemPrompt: queenSystemPrompt as string | undefined,
       config: config as Record<string, unknown> | undefined,
@@ -136,7 +138,11 @@ export function registerRoomRoutes(router: Router): void {
       const plan = (raw in QUEEN_DEFAULTS_BY_PLAN ? raw : 'none') as ClaudePlan
       planDefaults = QUEEN_DEFAULTS_BY_PLAN[plan]
     }
-    queries.updateRoom(ctx.db, result.room.id, planDefaults)
+    queries.updateRoom(ctx.db, result.room.id, {
+      ...planDefaults,
+      // Keep workers aligned with queen model by default.
+      workerModel: 'queen'
+    })
 
     // Apply global queen model default
     if (globalQueenModel && result.queen) {

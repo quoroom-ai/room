@@ -26,6 +26,7 @@ const TASK_MAINTENANCE_MS = 60_000
 const CLOUD_MESSAGE_SYNC_MS = 60_000
 const QUEEN_INBOX_POLL_MS = 60_000
 const WATCH_DEBOUNCE_MS = 1_500
+const CLERK_CONTACT_ONBOARDING_START_KEY = 'clerk_contact_onboarding_started_at'
 
 const cronJobs = new Map<number, { expression: string; job: cron.ScheduledTask }>()
 const pendingTaskStarts = new Set<number>()
@@ -83,7 +84,14 @@ function queueTaskExecution(
   void executeTask(taskId, {
     db,
     resultsDir: getResultsDir(),
-    onComplete: (t) => eventBus.emit('runs', 'run:completed', { taskId: t.id, roomId: t.roomId }),
+    onComplete: (t, output) => {
+      eventBus.emit('runs', 'run:completed', { taskId: t.id, roomId: t.roomId })
+      if (t.executor === 'keeper_reminder') {
+        eventBus.emit('clerk', 'clerk:commentary', { content: output, source: 'task' })
+      } else if (t.executor === 'keeper_contact_check' && output.startsWith('Keeper action needed:')) {
+        eventBus.emit('clerk', 'clerk:commentary', { content: output, source: 'task' })
+      }
+    },
     onFailed: (t, error) => eventBus.emit('runs', 'run:failed', { taskId: t.id, roomId: t.roomId, error }),
     onConsoleLogEntry: (entry) => {
       eventBus.emit(`run:${entry.runId}`, 'run:log', entry)
@@ -110,6 +118,62 @@ export function runTaskNow(
   taskId: number
 ): { started: boolean; reason?: string } {
   return queueTaskExecution(db, taskId, { allowInactive: true, source: 'manual' })
+}
+
+function toSqliteLocalDateTime(date: Date): string {
+  const year = date.getFullYear()
+  const month = String(date.getMonth() + 1).padStart(2, '0')
+  const day = String(date.getDate()).padStart(2, '0')
+  const hour = String(date.getHours()).padStart(2, '0')
+  const minute = String(date.getMinutes()).padStart(2, '0')
+  const second = String(date.getSeconds()).padStart(2, '0')
+  return `${year}-${month}-${day} ${hour}:${minute}:${second}`
+}
+
+function getOrInitContactOnboardingStart(db: Database.Database): Date {
+  const raw = queries.getSetting(db, CLERK_CONTACT_ONBOARDING_START_KEY)?.trim() ?? ''
+  if (raw) {
+    const parsed = Date.parse(raw)
+    if (Number.isFinite(parsed)) return new Date(parsed)
+  }
+  const now = new Date()
+  queries.setSetting(db, CLERK_CONTACT_ONBOARDING_START_KEY, now.toISOString())
+  return now
+}
+
+function hasContactCheckTask(db: Database.Database, day: 1 | 7): boolean {
+  const marker = `"day":${day}`
+  return queries.listTasks(db).some((task) =>
+    task.executor === 'keeper_contact_check'
+    && (task.triggerConfig ?? '').includes(marker)
+  )
+}
+
+function ensureClerkContactCheckTasks(db: Database.Database): void {
+  const start = getOrInitContactOnboardingStart(db)
+  const checkpoints: Array<{ day: 1 | 7; offsetDays: number; name: string }> = [
+    { day: 1, offsetDays: 1, name: 'Clerk contact check (day 1)' },
+    { day: 7, offsetDays: 7, name: 'Clerk contact check (day 7)' },
+  ]
+
+  for (const checkpoint of checkpoints) {
+    if (hasContactCheckTask(db, checkpoint.day)) continue
+    const runAt = new Date(start.getTime() + checkpoint.offsetDays * 24 * 60 * 60 * 1000)
+    queries.createTask(db, {
+      name: checkpoint.name,
+      description: 'Auto-check keeper contact connection (email/telegram).',
+      prompt: 'Check keeper contact channels and ask to connect if missing.',
+      triggerType: 'once',
+      scheduledAt: toSqliteLocalDateTime(runAt),
+      executor: 'keeper_contact_check',
+      maxRuns: 1,
+      triggerConfig: JSON.stringify({
+        source: 'runtime',
+        kind: 'keeper_contact_check',
+        day: checkpoint.day
+      })
+    })
+  }
 }
 
 function refreshCronJobs(db: Database.Database): void {
@@ -350,6 +414,7 @@ async function syncCloudRoomMessages(db: Database.Database): Promise<void> {
 export function startServerRuntime(db: Database.Database): void {
   stopServerRuntime()
 
+  ensureClerkContactCheckTasks(db)
   refreshCronJobs(db)
   runDueOneTimeTasks(db)
   runTaskMaintenance(db)

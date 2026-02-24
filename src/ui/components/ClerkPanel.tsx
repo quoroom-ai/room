@@ -10,6 +10,10 @@ interface ProviderStatusEntry {
   connected: boolean | null
 }
 
+interface ClerkPanelProps {
+  setupLaunchKey?: number
+}
+
 /** Process inline markdown: **bold**, *italic*, `code`, [text](url) */
 function processInline(text: string): React.ReactNode[] {
   const parts: React.ReactNode[] = []
@@ -153,7 +157,7 @@ function renderMarkdown(text: string): React.JSX.Element {
   return <>{elements}</>
 }
 
-export function ClerkPanel(): React.JSX.Element {
+export function ClerkPanel({ setupLaunchKey = 0 }: ClerkPanelProps): React.JSX.Element {
   const [messages, setMessages] = useState<ClerkMessage[]>([])
   const [input, setInput] = useState('')
   const [loading, setLoading] = useState(false)
@@ -205,6 +209,11 @@ export function ClerkPanel(): React.JSX.Element {
       }
     }
   }, [clerkStatus, initialLoaded])
+
+  useEffect(() => {
+    if (setupLaunchKey <= 0) return
+    setShowSetup(true)
+  }, [setupLaunchKey])
 
   // Auto-scroll
   useEffect(() => {
@@ -273,6 +282,11 @@ export function ClerkPanel(): React.JSX.Element {
   async function handleApplyModel(model: string): Promise<void> {
     await api.clerk.updateSettings({ model })
     setClerkModel(model)
+    refreshStatus()
+  }
+
+  async function handleSaveApiKey(provider: 'openai_api' | 'anthropic_api', key: string): Promise<void> {
+    await api.clerk.setApiKey(provider, key)
     refreshStatus()
   }
 
@@ -377,8 +391,9 @@ export function ClerkPanel(): React.JSX.Element {
         <ClerkSetupGuide
           claude={providerStatus?.claude ?? null}
           codex={providerStatus?.codex ?? null}
-          queenAuth={null}
+          apiAuth={clerkStatus?.apiAuth ?? null}
           onApplyModel={handleApplyModel}
+          onSaveApiKey={handleSaveApiKey}
           onClose={() => setShowSetup(false)}
         />
       )}

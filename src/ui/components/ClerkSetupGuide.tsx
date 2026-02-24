@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 
 type SetupPathId = 'claude_sub' | 'codex_sub' | 'openai_api' | 'anthropic_api'
 
@@ -7,10 +7,9 @@ interface ProviderSignal {
   connected: boolean | null
 }
 
-interface QueenAuthSignal {
-  provider: string
-  mode: string
-  hasCredential: boolean
+interface ApiAuthSignal {
+  hasRoomCredential: boolean
+  hasSavedKey: boolean
   hasEnvKey: boolean
   ready: boolean
 }
@@ -28,8 +27,12 @@ interface SetupPath {
 interface ClerkSetupGuideProps {
   claude: ProviderSignal | null
   codex: ProviderSignal | null
-  queenAuth: QueenAuthSignal | null
+  apiAuth: {
+    openai: ApiAuthSignal
+    anthropic: ApiAuthSignal
+  } | null
   onApplyModel: (model: string) => Promise<void>
+  onSaveApiKey: (provider: 'openai_api' | 'anthropic_api', key: string) => Promise<void>
   onClose: () => void
 }
 
@@ -75,16 +78,14 @@ const PATHS: SetupPath[] = [
 function pickRecommendedPath(
   claude: ProviderSignal | null,
   codex: ProviderSignal | null,
-  queenAuth: QueenAuthSignal | null,
+  apiAuth: { openai: ApiAuthSignal; anthropic: ApiAuthSignal } | null,
 ): SetupPathId {
   if (claude?.connected === true) return 'claude_sub'
   if (codex?.connected === true) return 'codex_sub'
   if (claude?.installed) return 'claude_sub'
   if (codex?.installed) return 'codex_sub'
-  if (queenAuth?.ready) {
-    if (queenAuth.provider === 'openai_api') return 'openai_api'
-    if (queenAuth.provider === 'anthropic_api') return 'anthropic_api'
-  }
+  if (apiAuth?.openai.ready) return 'openai_api'
+  if (apiAuth?.anthropic.ready) return 'anthropic_api'
   return 'claude_sub'
 }
 
@@ -92,7 +93,7 @@ function getPathStatus(
   pathId: SetupPathId,
   claude: ProviderSignal | null,
   codex: ProviderSignal | null,
-  queenAuth: QueenAuthSignal | null,
+  apiAuth: { openai: ApiAuthSignal; anthropic: ApiAuthSignal } | null,
 ): { label: string; ready: boolean } {
   switch (pathId) {
     case 'claude_sub':
@@ -106,28 +107,47 @@ function getPathStatus(
       if (codex.installed) return { label: 'installed', ready: false }
       return { label: 'not installed', ready: false }
     case 'openai_api':
-      if (queenAuth?.provider === 'openai_api' && queenAuth.ready) return { label: 'ready', ready: true }
-      return { label: 'no API key', ready: false }
+      return apiAuth?.openai.ready
+        ? { label: `API key ready (${describeApiAuthSource(apiAuth.openai)})`, ready: true }
+        : { label: 'API key required', ready: false }
     case 'anthropic_api':
-      if (queenAuth?.provider === 'anthropic_api' && queenAuth.ready) return { label: 'ready', ready: true }
-      return { label: 'no API key', ready: false }
+      return apiAuth?.anthropic.ready
+        ? { label: `API key ready (${describeApiAuthSource(apiAuth.anthropic)})`, ready: true }
+        : { label: 'API key required', ready: false }
   }
+}
+
+function isApiPath(pathId: SetupPathId | null): pathId is 'openai_api' | 'anthropic_api' {
+  return pathId === 'openai_api' || pathId === 'anthropic_api'
+}
+
+function describeApiAuthSource(auth: ApiAuthSignal): string {
+  if (auth.hasSavedKey) return 'Clerk key'
+  if (auth.hasRoomCredential) return 'room key'
+  if (auth.hasEnvKey) return 'env key'
+  return 'none'
 }
 
 export function ClerkSetupGuide({
   claude,
   codex,
-  queenAuth,
+  apiAuth,
   onApplyModel,
+  onSaveApiKey,
   onClose,
 }: ClerkSetupGuideProps): React.JSX.Element {
   const recommendedId = useMemo(
-    () => pickRecommendedPath(claude, codex, queenAuth),
-    [claude, codex, queenAuth]
+    () => pickRecommendedPath(claude, codex, apiAuth),
+    [claude, codex, apiAuth]
   )
   const [selectedPathId, setSelectedPathId] = useState<SetupPathId | null>(null)
+  const [apiKeyInput, setApiKeyInput] = useState('')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
+
+  useEffect(() => {
+    if (!selectedPathId) setSelectedPathId(recommendedId)
+  }, [recommendedId, selectedPathId])
 
   async function handleApply(): Promise<void> {
     const path = selectedPathId ? PATHS.find(p => p.id === selectedPathId) : null
@@ -135,10 +155,23 @@ export function ClerkSetupGuide({
     setBusy(true)
     setError(null)
     try {
+      if (isApiPath(path.id)) {
+        const provider = path.id === 'openai_api' ? 'openai_api' : 'anthropic_api'
+        const status = getPathStatus(path.id, claude, codex, apiAuth)
+        const key = apiKeyInput.trim()
+        if (!status.ready && !key) {
+          setError(`Enter your ${provider === 'openai_api' ? 'OpenAI' : 'Anthropic'} API key to continue.`)
+          return
+        }
+        if (key) {
+          await onSaveApiKey(provider, key)
+        }
+      }
       await onApplyModel(path.model)
       onClose()
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to apply')
+    } finally {
       setBusy(false)
     }
   }
@@ -165,6 +198,14 @@ export function ClerkSetupGuide({
         </div>
 
         <div className="space-y-3">
+          <div className="rounded-xl border border-border-primary bg-surface-secondary p-3 text-sm text-text-secondary">
+            <p className="font-medium text-text-primary mb-1">Who is the Clerk?</p>
+            <p>
+              Clerk is your global operator assistant. It can control rooms for you (create, update, pause, restart,
+              delete), message rooms on your behalf, and run reminders/tasks. It also gives live commentary when you
+              are idle.
+            </p>
+          </div>
           <p className="text-sm text-text-secondary">
             Pick a model path. The Clerk will use this to chat, commentate, and manage your system.
           </p>
@@ -172,11 +213,15 @@ export function ClerkSetupGuide({
             {PATHS.map((path) => {
               const isRecommended = path.id === recommendedId
               const isSelected = path.id === selectedPathId
-              const status = getPathStatus(path.id, claude, codex, queenAuth)
+              const status = getPathStatus(path.id, claude, codex, apiAuth)
               return (
                 <button
                   key={path.id}
-                  onClick={() => setSelectedPathId(path.id)}
+                  onClick={() => {
+                    setSelectedPathId(path.id)
+                    setApiKeyInput('')
+                    setError(null)
+                  }}
                   disabled={busy}
                   className={`text-left p-3 rounded-xl border transition-colors ${
                     isSelected
@@ -204,7 +249,7 @@ export function ClerkSetupGuide({
 
         {selectedPathId && (() => {
           const path = PATHS.find(p => p.id === selectedPathId)!
-          const status = getPathStatus(selectedPathId, claude, codex, queenAuth)
+          const status = getPathStatus(selectedPathId, claude, codex, apiAuth)
           return (
             <div className="mt-4 p-3 rounded-lg bg-surface-secondary border border-border-primary">
               <div className="text-sm text-text-secondary space-y-1">
@@ -212,6 +257,26 @@ export function ClerkSetupGuide({
                 <p><span className="text-text-muted">Setup:</span> {path.setup}</p>
                 <p><span className="text-text-muted">Tradeoff:</span> {path.tradeoff}</p>
               </div>
+              {isApiPath(selectedPathId) && (
+                <div className="mt-3 pt-3 border-t border-border-primary space-y-2">
+                  <label className="block text-xs font-medium text-text-secondary">
+                    {selectedPathId === 'openai_api' ? 'OpenAI API key' : 'Anthropic API key'}
+                  </label>
+                  <input
+                    type="password"
+                    value={apiKeyInput}
+                    onChange={(e) => setApiKeyInput(e.target.value)}
+                    placeholder={status.ready ? 'Optional: paste a new key to replace' : 'Paste API key'}
+                    disabled={busy}
+                    className="w-full px-2.5 py-2 text-sm border border-border-primary rounded-lg focus:outline-none focus:border-text-muted bg-surface-primary text-text-primary placeholder:text-text-muted disabled:opacity-70"
+                  />
+                  <p className="text-xs text-text-muted">
+                    {status.ready
+                      ? 'A key is already available. Leave blank to reuse it; this key is shared with room setup.'
+                      : 'Key is validated and saved when you connect.'}
+                  </p>
+                </div>
+              )}
               {!status.ready && (
                 <p className="text-xs text-status-warning mt-2">
                   This provider is not fully configured yet. The Clerk may not work until it is ready.

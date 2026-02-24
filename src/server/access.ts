@@ -60,6 +60,10 @@ const AUTO_MODE_USER_WHITELIST = [
   /^POST \/api\/contacts\/telegram\/check$/,          // poll telegram verification
   /^POST \/api\/contacts\/telegram\/disconnect$/,     // disconnect telegram
   /^DELETE \/api\/rooms\/\d+\/cloud-stations\/\d+$/, // delete cloud station (archive)
+  /^POST \/api\/clerk\/chat$/,                        // send message to clerk
+  /^POST \/api\/clerk\/reset$/,                       // clear clerk session/messages
+  /^PUT \/api\/clerk\/settings$/,                     // configure clerk model/commentary
+  /^POST \/api\/clerk\/api-key$/,                     // validate/save clerk API key
 ]
 
 /** Sensitive read endpoints blocked for user token in auto mode. */

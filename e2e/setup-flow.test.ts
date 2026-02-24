@@ -31,6 +31,20 @@ async function suppressBlockingModals(page: Page): Promise<void> {
   await page.addInitScript(() => {
     localStorage.setItem('quoroom_walkthrough_seen', 'true')
     localStorage.setItem('quoroom_contact_prompt_seen', '1')
+    localStorage.setItem('quoroom_tab', 'swarm')
+  })
+  await page.route('**/api/clerk/status', async (route) => {
+    await route.fulfill({
+      json: {
+        configured: true,
+        model: 'claude',
+        commentaryEnabled: true,
+        apiAuth: {
+          openai: { hasRoomCredential: false, hasSavedKey: false, hasEnvKey: false, ready: false },
+          anthropic: { hasRoomCredential: false, hasSavedKey: false, hasEnvKey: false, ready: false },
+        },
+      },
+    })
   })
   await page.route('**/api/status', async (route) => {
     const response = await route.fetch()
@@ -66,6 +80,13 @@ async function cleanupRoomsByPrefix(request: APIRequestContext, prefix: string):
 
 async function createRoomViaUi(page: Page, roomName: string): Promise<number> {
   await page.goto(base, { waitUntil: 'domcontentloaded' })
+  const clerkSetupHeading = page.getByRole('heading', { name: 'Connect Your Clerk' })
+  if (await clerkSetupHeading.isVisible().catch(() => false)) {
+    await page.getByRole('button', { name: 'Close' }).first().click().catch(async () => {
+      await page.keyboard.press('Escape')
+    })
+    await expect(clerkSetupHeading).not.toBeVisible({ timeout: 5000 })
+  }
   const setupHeading = page.getByRole('heading', { name: 'Room Setup Flow' })
   if (await setupHeading.isVisible().catch(() => false)) {
     await page.getByRole('button', { name: 'Close' }).first().click().catch(async () => {
@@ -203,7 +224,7 @@ test('setup popup applies selected model path', async ({ page }) => {
 })
 
 test('archive uses cloud-station deletion route', async ({ page, request }) => {
-  const roomName = uniqueRoomName('D')
+  const roomName = uniqueRoomName('D').toLowerCase().replace(/\s+/g, '-')
   const create = await request.post(`${base}/api/rooms`, {
     headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
     data: { name: roomName, goal: 'Test archive flow' },

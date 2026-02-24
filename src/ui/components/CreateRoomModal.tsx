@@ -95,11 +95,12 @@ export function CreateRoomModal({ onClose, onCreate }: CreateRoomModalProps): Re
               ref={nameRef}
               type="text"
               value={name}
-              onChange={e => setName(e.target.value)}
+              onChange={e => setName(e.target.value.replace(/\s/g, '').toLowerCase())}
               onKeyDown={e => { if (e.key === 'Enter' && name.trim()) handleCreate() }}
-              placeholder="My Project"
+              placeholder="myproject"
               className="w-full px-3 py-2 rounded-lg bg-surface-secondary border border-border-primary text-sm text-text-primary placeholder:text-text-muted focus:outline-none focus:border-interactive"
             />
+            <p className="text-xs text-text-muted mt-0.5">Use one lowercase word (no spaces).</p>
           </div>
 
           <div>

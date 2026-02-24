@@ -111,6 +111,8 @@ Quoroom is an open research project exploring autonomous agent collectives. Each
 
 **Dashboard** — React SPA served directly by your local Quoroom server at `http://localhost:3700` (or your configured port). Manage rooms, agents, goals, memory, wallet — all from the browser, with local-first data storage.
 
+**Clerk** — A global keeper assistant in the dashboard. Chat across all rooms, trigger management actions (create/update rooms, tasks, reminders, messaging), and receive live commentary about swarm activity.
+
 **Cloud Mode** — Deploy to the cloud and control your room remotely. Same dashboard works in both local and cloud mode. Cloud instances auto-detect their environment, support JWT-based auth, and serve the UI over HTTPS with strict CORS. Connect your Claude or Codex subscription from the remote Settings panel.
 
 **Inbox** — Rooms can message the keeper and other rooms. Cross-room communication with reply threading. Agents escalate decisions, share updates, or request resources from neighboring rooms.
@@ -213,6 +215,23 @@ On first run, `quoroom serve` automatically registers the Quoroom MCP server in 
 Open **http://localhost:3700** (or the port shown in your terminal). The dashboard and API run locally, and your room data stays on your machine by default.
 
 > **MCP-only mode** (no HTTP server): `quoroom mcp` starts just the stdio MCP transport, useful for scripting or testing. For normal use, `quoroom serve` is all you need.
+
+## Clerk
+
+The **Clerk** tab is your global assistant for the whole local system (not a single room).
+
+- Setup paths: Claude subscription (`claude`), Codex subscription (`codex`), OpenAI API (`openai:gpt-4o-mini`), Anthropic API (`anthropic:claude-3-5-sonnet-latest`)
+- API keys entered in Clerk Setup are validated before saving
+- Clerk can both answer and act: room lifecycle, room settings, task creation, reminders, and inter-room messaging
+- Live commentary streams over WebSocket channel `clerk` while rooms are running
+
+API key resolution for Clerk API models:
+
+1. Any room credential (`openai_api_key` or `anthropic_api_key`)
+2. Clerk-saved API key (`clerk_openai_api_key` / `clerk_anthropic_api_key`)
+3. Environment variable (`OPENAI_API_KEY` / `ANTHROPIC_API_KEY`)
+
+See full guide: [docs/CLERK.md](docs/CLERK.md)
 
 ---
 

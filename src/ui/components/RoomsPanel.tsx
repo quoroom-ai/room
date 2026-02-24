@@ -168,8 +168,8 @@ export function RoomsPanel({ selectedRoomId, onSelectRoom }: RoomsPanelProps): R
           />
           <input
             value={createName}
-            onChange={(e) => setCreateName(e.target.value)}
-            placeholder="Room name..."
+            onChange={(e) => setCreateName(e.target.value.replace(/\s/g, '').toLowerCase())}
+            placeholder="roomname..."
             className="w-full bg-surface-primary border border-border-primary rounded-lg px-2.5 py-1.5 text-sm text-text-primary"
             onKeyDown={(e) => e.key === 'Enter' && handleCreate()}
           />
