@@ -173,6 +173,54 @@ function windowsQuote(arg: string): string {
   return `"${arg.replace(/"/g, '\\"')}"`
 }
 
+function killProcessListeningOnPort(port: number): boolean {
+  if (process.platform === 'win32') {
+    // Preferred path: PowerShell TCP table + Stop-Process.
+    try {
+      execSync(
+        `powershell -NoProfile -Command "Get-NetTCPConnection -LocalPort ${port} -State Listen -ErrorAction SilentlyContinue | Select-Object -ExpandProperty OwningProcess -Unique | ForEach-Object { Stop-Process -Id $_ -Force -ErrorAction SilentlyContinue }"`,
+        { stdio: 'ignore' }
+      )
+      return true
+    } catch {
+      // Fallback to netstat + taskkill for older Windows environments.
+    }
+
+    try {
+      const output = execSync('netstat -ano -p tcp', { encoding: 'utf8' })
+      const pids = new Set<number>()
+      for (const rawLine of output.split(/\r?\n/)) {
+        const line = rawLine.trim()
+        if (!line) continue
+        const match = line.match(/^TCP\s+\S+:(\d+)\s+\S+\s+LISTENING\s+(\d+)$/i)
+        if (!match) continue
+        const linePort = Number.parseInt(match[1] ?? '', 10)
+        const pid = Number.parseInt(match[2] ?? '', 10)
+        if (linePort !== port || !Number.isFinite(pid) || pid <= 0) continue
+        pids.add(pid)
+      }
+      if (pids.size === 0) return false
+      for (const pid of pids) {
+        try {
+          execSync(`taskkill /PID ${pid} /F`, { stdio: 'ignore' })
+        } catch {
+          // Ignore per-process kill failures.
+        }
+      }
+      return true
+    } catch {
+      return false
+    }
+  }
+
+  try {
+    execSync(`lsof -ti :${port} | xargs kill -9`, { stdio: 'ignore' })
+    return true
+  } catch {
+    return false
+  }
+}
+
 function scheduleSelfRestart(): boolean {
   try {
     const args = [...process.execArgv, ...process.argv.slice(1)]
@@ -759,6 +807,7 @@ export function startServer(options: ServerOptions = {}): void {
 
   function listen(): void {
     server.listen(port, bindHost, () => {
+      addrInUseAttempts = 0
       const bound = server.address()
       const boundPort = typeof bound === 'object' && bound ? bound.port : port
       const dashboardUrl = `http://localhost:${boundPort}`
@@ -778,13 +827,20 @@ export function startServer(options: ServerOptions = {}): void {
     })
   }
 
+  let addrInUseAttempts = 0
+  const MAX_ADDR_IN_USE_ATTEMPTS = 3
+
   server.on('error', (err: NodeJS.ErrnoException) => {
     if (err.code === 'EADDRINUSE') {
+      addrInUseAttempts += 1
       console.error(`Port ${port} is in use — killing existing process...`)
-      try {
-        execSync(`lsof -ti :${port} | xargs kill -9`, { stdio: 'ignore' })
-      } catch {
-        // No process found or kill failed — ignore
+      const reclaimed = killProcessListeningOnPort(port)
+      if (!reclaimed) {
+        console.error(`Could not reclaim port ${port} (attempt ${addrInUseAttempts}/${MAX_ADDR_IN_USE_ATTEMPTS}).`)
+      }
+      if (!reclaimed && addrInUseAttempts >= MAX_ADDR_IN_USE_ATTEMPTS) {
+        console.error(`Failed to start: port ${port} is still occupied.`)
+        return
       }
       setTimeout(listen, 500)
     } else {
