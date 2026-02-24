@@ -143,7 +143,6 @@ function App(): React.JSX.Element {
   const [showCreateRoomModal, setShowCreateRoomModal] = useState(false)
   const [swarmInviteNonce, setSwarmInviteNonce] = useState(0)
 
-  const [escalationsUnread, setEscalationsUnread] = useState(0)
   const [messagesUnread, setMessagesUnread] = useState(0)
   const [votesActive, setVotesActive] = useState(0)
   const [totalBalance, setTotalBalance] = useState<number | null>(null)
@@ -207,15 +206,13 @@ function App(): React.JSX.Element {
 
   const fetchRoomBadges = useCallback(async (): Promise<void> => {
     if (!ready || expandedRoomId === null) {
-      setEscalationsUnread(0)
       setMessagesUnread(0)
       setVotesActive(0)
       return
     }
     try {
       const badges = await api.rooms.badges(expandedRoomId)
-      if (tabRef.current !== 'chat') setEscalationsUnread(badges.pendingEscalations)
-      if (tabRef.current !== 'messages') setMessagesUnread(badges.unreadMessages)
+      if (tabRef.current !== 'messages') setMessagesUnread(badges.pendingEscalations + badges.unreadMessages)
       setVotesActive(badges.activeVotes)
     } catch {
       // ignore polling noise
@@ -225,7 +222,6 @@ function App(): React.JSX.Element {
   // Fallback poll for sidebar badges (room message/escalation/vote counts).
   useEffect(() => {
     if (!ready || expandedRoomId === null) {
-      setEscalationsUnread(0)
       setMessagesUnread(0)
       setVotesActive(0)
       return
@@ -484,7 +480,6 @@ function App(): React.JSX.Element {
     setTab(t)
     tabRef.current = t
     storageSet('quoroom_tab', t)
-    if (t === 'chat') setEscalationsUnread(0)
     if (t === 'messages') {
       setMessagesUnread(0)
       if (selectedRoomId !== null) void api.roomMessages.markAllRead(selectedRoomId).catch(() => {})
@@ -795,11 +790,6 @@ function App(): React.JSX.Element {
                         <span className="flex items-center gap-1.5">
                           {tabIcons[t.id]}
                           {t.label}
-                          {t.id === 'chat' && escalationsUnread > 0 && (
-                            <span className="inline-flex items-center justify-center min-w-[16px] h-4 px-1 rounded-full bg-status-error text-text-invert text-[10px] font-bold leading-none">
-                              {escalationsUnread}
-                            </span>
-                          )}
                           {t.id === 'votes' && votesActive > 0 && (
                             <span className="inline-flex items-center justify-center min-w-[16px] h-4 px-1 rounded-full bg-interactive text-text-invert text-[10px] font-bold leading-none">
                               {votesActive}
