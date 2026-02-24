@@ -235,6 +235,22 @@ export const CLERK_TOOL_DEFINITIONS: ToolDef[] = [
   {
     type: 'function',
     function: {
+      name: 'quoroom_send_email',
+      description: 'Send an email from your own clerk address. Use "admin" as the to address to reach the keeper/developer.',
+      parameters: {
+        type: 'object',
+        properties: {
+          to: { type: 'string', description: 'Recipient email address, or "admin" to send to the keeper' },
+          subject: { type: 'string', description: 'Email subject line' },
+          body: { type: 'string', description: 'Email body text' }
+        },
+        required: ['to', 'body']
+      }
+    }
+  },
+  {
+    type: 'function',
+    function: {
       name: 'quoroom_get_setting',
       description: 'Read any global setting by key.',
       parameters: {
@@ -365,10 +381,15 @@ function parseScheduledAt(value: unknown): { scheduledAt: string | null; error?:
   return { scheduledAt: toSqliteLocalDateTime(new Date(timestampMs)) }
 }
 
+export interface ClerkToolContext {
+  sendEmail?: (to: string, content: string, subject?: string) => Promise<boolean>
+}
+
 export async function executeClerkTool(
   db: Database.Database,
   toolName: string,
-  args: ClerkToolArgs
+  args: ClerkToolArgs,
+  ctx?: ClerkToolContext
 ): Promise<ClerkToolResult> {
   try {
     switch (toolName) {
@@ -664,6 +685,18 @@ export async function executeClerkTool(
         })
         const roomNote = room ? ` for room "${room.name}"` : ''
         return { content: `Scheduled keeper reminder #${task.id}${roomNote} at ${scheduledAt}.` }
+      }
+
+      case 'quoroom_send_email': {
+        const to = String(args.to ?? '').trim()
+        if (!to) return { content: 'Error: to is required.', isError: true }
+        const body = String(args.body ?? '').trim()
+        if (!body) return { content: 'Error: body is required.', isError: true }
+        if (!ctx?.sendEmail) return { content: 'Error: email sending is not available in this context.', isError: true }
+        const subject = String(args.subject ?? '').trim() || undefined
+        const sent = await ctx.sendEmail(to, body, subject)
+        if (!sent) return { content: 'Failed to send email. Cloud relay unavailable or no rooms connected.', isError: true }
+        return { content: `Email sent to ${to}.` }
       }
 
       case 'quoroom_get_setting': {

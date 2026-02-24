@@ -764,6 +764,17 @@ export async function executeQueenTool(
 
 // ─── Queen → Keeper external delivery ───────────────────────────────────────
 
+function normalizeClerkOutboundMessage(question: string): string {
+  let text = (question || '').trim()
+  text = text.replace(/^\s*clerk\s*:\s*/i, '')
+  text = text.replace(/^\s*\*{1,2}\s*clerk\s*\*{1,2}\s*:\s*/i, '')
+  text = text.replace(/^\s*<b>\s*clerk\s*<\/b>\s*:\s*/i, '')
+  text = text.replace(/\n?\s*[—-]\s*clerk\s*$/i, '')
+  text = text.replace(/\n?\s*\*{1,2}\s*[—-]?\s*clerk\s*\*{1,2}\s*$/i, '')
+  text = text.replace(/\n?\s*<b>\s*[—-]?\s*clerk\s*<\/b>\s*$/i, '')
+  return text.trim()
+}
+
 async function deliverQueenMessage(db: Database.Database, roomId: number, question: string): Promise<string> {
   try {
     const cloudApiBase = (process.env.QUOROOM_CLOUD_API ?? 'https://quoroom.ai/api').replace(/\/+$/, '')
@@ -796,6 +807,10 @@ async function deliverQueenMessage(db: Database.Database, roomId: number, questi
     if (hasEmail) channels.push('email')
     if (hasTelegram) channels.push('telegram')
 
+    const outgoingQuestion = queenNickname.toLowerCase() === 'clerk'
+      ? normalizeClerkOutboundMessage(question)
+      : question
+
     const res = await fetch(`${cloudApiBase}/contacts/queen-message`, {
       method: 'POST',
       headers: {
@@ -806,7 +821,7 @@ async function deliverQueenMessage(db: Database.Database, roomId: number, questi
         roomId: cloudRoomId,
         queenNickname,
         userNumber: keeperUserNumber,
-        question,
+        question: outgoingQuestion,
         channels,
       }),
       signal: AbortSignal.timeout(10_000),

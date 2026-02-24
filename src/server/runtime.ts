@@ -24,7 +24,7 @@ const SCHEDULER_REFRESH_MS = 15_000
 const WATCH_REFRESH_MS = 15_000
 const TASK_MAINTENANCE_MS = 60_000
 const CLOUD_MESSAGE_SYNC_MS = 60_000
-const QUEEN_INBOX_POLL_MS = 60_000
+const QUEEN_INBOX_POLL_MS = getBoundedIntervalMs('QUOROOM_QUEEN_INBOX_POLL_MS', 2_500, 1_000, 30_000)
 const WATCH_DEBOUNCE_MS = 1_500
 const CLERK_CONTACT_ONBOARDING_START_KEY = 'clerk_contact_onboarding_started_at'
 
@@ -47,6 +47,29 @@ let cloudMessageTimer: ReturnType<typeof setInterval> | null = null
 let queenInboxTimer: ReturnType<typeof setInterval> | null = null
 let cloudSyncInFlight = false
 let queenInboxInFlight = false
+let queenInboxRepollRequested = false
+
+function getBoundedIntervalMs(envKey: string, fallback: number, min: number, max: number): number {
+  const raw = Number.parseInt((process.env[envKey] || '').trim(), 10)
+  if (!Number.isFinite(raw)) return fallback
+  return Math.min(max, Math.max(min, raw))
+}
+
+function queueQueenInboxPoll(db: Database.Database): void {
+  if (queenInboxInFlight) {
+    queenInboxRepollRequested = true
+    return
+  }
+
+  queenInboxInFlight = true
+  void pollQueenInbox(db).finally(() => {
+    queenInboxInFlight = false
+    if (queenInboxRepollRequested) {
+      queenInboxRepollRequested = false
+      queueQueenInboxPoll(db)
+    }
+  })
+}
 
 function getResultsDir(): string {
   return process.env.QUOROOM_RESULTS_DIR || join(homedir(), APP_NAME, 'results')
@@ -420,6 +443,7 @@ export function startServerRuntime(db: Database.Database): void {
   runTaskMaintenance(db)
   refreshWatches(db)
   void syncCloudRoomMessages(db)
+  queueQueenInboxPoll(db)
 
   schedulerTimer = setInterval(() => {
     refreshCronJobs(db)
@@ -443,11 +467,7 @@ export function startServerRuntime(db: Database.Database): void {
   }, CLOUD_MESSAGE_SYNC_MS)
 
   queenInboxTimer = setInterval(() => {
-    if (queenInboxInFlight) return
-    queenInboxInFlight = true
-    void pollQueenInbox(db).finally(() => {
-      queenInboxInFlight = false
-    })
+    queueQueenInboxPoll(db)
   }, QUEEN_INBOX_POLL_MS)
 
   resumeActiveQueens(db)
@@ -495,6 +515,7 @@ export function stopServerRuntime(): void {
   queenInboxTimer = null
   cloudSyncInFlight = false
   queenInboxInFlight = false
+  queenInboxRepollRequested = false
 
   for (const [, entry] of cronJobs) {
     entry.job.stop()

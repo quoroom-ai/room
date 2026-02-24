@@ -631,10 +631,14 @@ function normalizeClerkContactReply(
 
   // Remove leading "Clerk:" label if model adds it.
   text = text.replace(/^\s*clerk\s*:\s*/i, '')
+  text = text.replace(/^\s*\*{1,2}\s*clerk\s*\*{1,2}\s*:\s*/i, '')
+  text = text.replace(/^\s*<b>\s*clerk\s*<\/b>\s*:\s*/i, '')
 
   // Remove trailing signature markers to control per-channel style.
   text = text.replace(/\n?\s*[—-]\s*clerk\s*$/i, '')
   text = text.replace(/\n?\s*clerk\s*$/i, '')
+  text = text.replace(/\n?\s*\*{1,2}\s*[—-]?\s*clerk\s*\*{1,2}\s*$/i, '')
+  text = text.replace(/\n?\s*<b>\s*[—-]?\s*clerk\s*<\/b>\s*$/i, '')
 
   text = text.trim()
   if (!text) text = 'Here and active. What do you want next?'

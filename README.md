@@ -111,7 +111,7 @@ Quoroom is an open research project exploring autonomous agent collectives. Each
 
 **Dashboard** — React SPA served directly by your local Quoroom server at `http://localhost:3700` (or your configured port). Manage rooms, agents, goals, memory, wallet — all from the browser, with local-first data storage.
 
-**Clerk** — A global keeper assistant in the dashboard. Chat across all rooms, trigger management actions (create/update rooms, tasks, reminders, messaging), and receive live commentary about swarm activity.
+**Clerk** — A fully functional keeper assistant in the dashboard. It can chat across all rooms, remember context and history, act proactively, and execute management actions (create/update rooms, tasks, reminders, messaging) while streaming live commentary about swarm activity.
 
 **Cloud Mode** — Deploy to the cloud and control your room remotely. Same dashboard works in both local and cloud mode. Cloud instances auto-detect their environment, support JWT-based auth, and serve the UI over HTTPS with strict CORS. Connect your Claude or Codex subscription from the remote Settings panel.
 
@@ -220,9 +220,13 @@ Open **http://localhost:3700** (or the port shown in your terminal). The dashboa
 
 The **Clerk** tab is your global assistant for the whole local system (not a single room).
 
+- Clerk is a full assistant, not only commentary: it can reason, remember, and execute actions for the keeper
 - Setup paths: Claude subscription (`claude`), Codex subscription (`codex`), OpenAI API (`openai:gpt-4o-mini`), Anthropic API (`anthropic:claude-3-5-sonnet-latest`)
 - API keys entered in Clerk Setup are validated before saving
-- Clerk can both answer and act: room lifecycle, room settings, task creation, reminders, and inter-room messaging
+- Clerk can answer and do: room lifecycle, room settings, task creation, reminders, inter-room messaging, and keeper communication
+- Clerk can act proactively through scheduled tasks/reminders and activity-driven commentary
+- Telegram and Email are important Clerk control channels: connect at least one so Clerk can always reach you, keep reminders flowing, and store those conversations in Clerk memory
+- Email replies are threaded when possible, and Telegram replies are direct/real-time for fast keeper control
 - Live commentary streams over WebSocket channel `clerk` while rooms are running
 
 API key resolution for Clerk API models:
