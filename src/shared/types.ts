@@ -389,7 +389,28 @@ export interface ClerkMessage {
   createdAt: string
 }
 
-export type ClerkMessageSource = 'assistant' | 'commentary' | 'task'
+export type ClerkMessageSource = 'assistant' | 'commentary' | 'task' | 'email' | 'telegram'
+export type ClerkUsageSource = 'chat' | 'commentary'
+
+export interface ClerkUsageEntry {
+  id: number
+  source: ClerkUsageSource
+  model: string
+  inputTokens: number
+  outputTokens: number
+  totalTokens: number
+  success: boolean
+  usedFallback: boolean
+  attempts: number
+  createdAt: string
+}
+
+export interface ClerkUsageSummary {
+  inputTokens: number
+  outputTokens: number
+  totalTokens: number
+  requests: number
+}
 
 // ─── Credential Types ───────────────────────────────────────
 

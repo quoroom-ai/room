@@ -48,6 +48,7 @@ export interface ClerkExecutionOutcome {
   statusCode: number
   error: string | null
   attempts: Array<{ model: string; error: string }>
+  usage: { inputTokens: number; outputTokens: number }
 }
 
 let lastProjectDocSyncAt = 0
@@ -322,6 +323,8 @@ export async function executeClerkWithFallback(options: ClerkExecutionOptions): 
   const preferred = options.preferredModel?.trim() || DEFAULT_CLERK_MODEL
   const candidates = buildExecutionCandidates(options.db, preferred)
   const attempts: Array<{ model: string; error: string }> = []
+  let totalInputTokens = 0
+  let totalOutputTokens = 0
 
   for (let i = 0; i < candidates.length; i++) {
     const candidate = candidates[i]
@@ -336,6 +339,8 @@ export async function executeClerkWithFallback(options: ClerkExecutionOptions): 
       toolDefs: options.toolDefs,
       onToolCall: options.onToolCall
     })
+    totalInputTokens += result.usage?.inputTokens ?? 0
+    totalOutputTokens += result.usage?.outputTokens ?? 0
 
     if (result.exitCode === 0 && !result.timedOut) {
       return {
@@ -347,7 +352,8 @@ export async function executeClerkWithFallback(options: ClerkExecutionOptions): 
         usedFallback: i > 0,
         statusCode: 200,
         error: null,
-        attempts
+        attempts,
+        usage: { inputTokens: totalInputTokens, outputTokens: totalOutputTokens }
       }
     }
 
@@ -365,7 +371,8 @@ export async function executeClerkWithFallback(options: ClerkExecutionOptions): 
         usedFallback: i > 0,
         statusCode: result.timedOut ? 504 : 502,
         error,
-        attempts
+        attempts,
+        usage: { inputTokens: totalInputTokens, outputTokens: totalOutputTokens }
       }
     }
   }
@@ -379,6 +386,7 @@ export async function executeClerkWithFallback(options: ClerkExecutionOptions): 
     usedFallback: false,
     statusCode: 502,
     error: `Clerk execution failed (model: ${preferred})`,
-    attempts
+    attempts,
+    usage: { inputTokens: totalInputTokens, outputTokens: totalOutputTokens }
   }
 }

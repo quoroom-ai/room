@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, type ReactNode } from 'react'
 import { APP_MODE } from '../lib/auth'
 import type { InstallPrompt } from '../hooks/useInstallPrompt'
 import { storageSet } from '../lib/storage'
@@ -35,6 +35,15 @@ const steps = [
     body: 'Clerk is your right hand. Use Clerk to create rooms, update goals, start or pause queens, manage tasks, and steer the swarm from one place. When you are away, connect Telegram or email so Clerk can still help you run everything.',
   },
 ]
+
+function emphasizeRoleWords(text: string): ReactNode[] {
+  return text.split(/(\b(?:clerk|queen|queens)\b)/gi).map((part, index) => {
+    if (/^(clerk|queen|queens)$/i.test(part)) {
+      return <span key={`role-${index}`} className="text-text-primary font-semibold">{part}</span>
+    }
+    return <span key={`text-${index}`}>{part}</span>
+  })
+}
 
 interface WalkthroughModalProps {
   onClose: () => void
@@ -75,7 +84,7 @@ export function WalkthroughModal({ onClose, installPrompt, onNavigateToHelp }: W
           {steps[step].title}
         </h2>
         <p className="text-text-muted text-base leading-relaxed mb-8">
-          {steps[step].body}
+          {emphasizeRoleWords(steps[step].body)}
         </p>
 
         <div className="flex justify-end gap-2">

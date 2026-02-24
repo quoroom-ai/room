@@ -27,6 +27,9 @@ const CONTACT_TELEGRAM_VERIFIED_AT_KEY = 'contact_telegram_verified_at'
 const CONTACT_TELEGRAM_PENDING_HASH_KEY = 'contact_telegram_pending_hash'
 const CONTACT_TELEGRAM_PENDING_EXPIRES_AT_KEY = 'contact_telegram_pending_expires_at'
 const CONTACT_TELEGRAM_BOT_USERNAME_KEY = 'contact_telegram_bot_username'
+const CLERK_EMAIL_WELCOME_SENT_AT_KEY = 'clerk_email_welcome_sent_at'
+const CLERK_TELEGRAM_WELCOME_SENT_AT_KEY = 'clerk_telegram_welcome_sent_at'
+const CLERK_CONTACT_ENTITY_NAME = 'Clerk Contact Inbox'
 
 interface ApiErrorMeta {
   status: number
@@ -477,6 +480,151 @@ async function syncCloudContactBindings(
   }
 }
 
+function getKeeperUserNumber(db: Parameters<typeof queries.getSetting>[0]): number | null {
+  const raw = getSettingTrimmed(db, 'keeper_user_number')
+  if (!/^\d{5,6}$/.test(raw)) return null
+  const parsed = Number.parseInt(raw, 10)
+  return Number.isFinite(parsed) ? parsed : null
+}
+
+async function getAnyCloudRoomAuth(
+  db: Parameters<typeof queries.getSetting>[0],
+): Promise<{ cloudRoomId: string; roomToken: string } | null> {
+  const rooms = queries.listRooms(db)
+  if (rooms.length === 0) return null
+
+  const keeperReferralCodeRaw = getSettingTrimmed(db, 'keeper_referral_code')
+  const keeperReferralCode = keeperReferralCodeRaw || null
+
+  for (const room of rooms) {
+    const cloudRoomId = getRoomCloudId(room.id)
+    let roomToken = getStoredCloudRoomToken(cloudRoomId)
+    if (!roomToken) {
+      const hasToken = await ensureCloudRoomToken({
+        roomId: cloudRoomId,
+        name: room.name,
+        goal: room.goal ?? null,
+        visibility: room.visibility,
+        referredByCode: room.referredByCode,
+        keeperReferralCode,
+      })
+      if (!hasToken) continue
+      roomToken = getStoredCloudRoomToken(cloudRoomId)
+    }
+    if (!roomToken) continue
+    return { cloudRoomId, roomToken }
+  }
+
+  return null
+}
+
+function ensureClerkContactEntityId(db: Parameters<typeof queries.getSetting>[0]): number {
+  const existing = queries
+    .listEntities(db, undefined, 'clerk_contact')
+    .find((entity) => entity.name === CLERK_CONTACT_ENTITY_NAME)
+  if (existing) return existing.id
+  const created = queries.createEntity(db, CLERK_CONTACT_ENTITY_NAME, 'fact', 'clerk_contact')
+  return created.id
+}
+
+function storeClerkContactMemory(
+  db: Parameters<typeof queries.getSetting>[0],
+  input: {
+    direction: 'inbound' | 'outbound'
+    channel: 'email' | 'telegram'
+    content: string
+    senderIdentifier?: string | null
+    timestamp?: string
+  },
+): void {
+  const body = input.content.trim()
+  if (!body) return
+
+  const role = input.direction === 'inbound' ? 'user' : 'assistant'
+  queries.insertClerkMessage(db, role, body, input.channel)
+  if (input.direction === 'inbound') {
+    setSetting(db, 'clerk_last_user_message_at', new Date().toISOString())
+  }
+
+  const when = input.timestamp && parseIsoToMs(input.timestamp) != null
+    ? input.timestamp
+    : new Date().toISOString()
+  const senderPart = input.senderIdentifier?.trim() ? ` from ${input.senderIdentifier.trim()}` : ''
+  const summary = `${input.direction === 'inbound' ? 'Inbound' : 'Outbound'} ${input.channel} message${senderPart} at ${when}`
+  const entityId = ensureClerkContactEntityId(db)
+  queries.addObservation(db, entityId, `${summary}\n${body}`, `clerk_contact_${input.channel}_${input.direction}`)
+}
+
+function clerkWelcomeKey(channel: 'email' | 'telegram'): string {
+  return channel === 'email' ? CLERK_EMAIL_WELCOME_SENT_AT_KEY : CLERK_TELEGRAM_WELCOME_SENT_AT_KEY
+}
+
+function buildClerkWelcomeMessage(channel: 'email' | 'telegram'): string {
+  if (channel === 'email') {
+    return 'Hi, this is your Clerk. Email is now connected. Reply here anytime and I will keep it in your system memory. I can also help you control your swarm — ask me about any task, room, or change.'
+  }
+  return 'Hi, this is your Clerk. Telegram is now connected. Reply here anytime and I will keep it in your system memory. I can also help you control your swarm — ask me about any task, room, or change.'
+}
+
+async function sendClerkWelcome(
+  db: Parameters<typeof queries.getSetting>[0],
+  channel: 'email' | 'telegram',
+): Promise<boolean> {
+  if (isCloudDeployment()) return false
+  if (getSettingTrimmed(db, clerkWelcomeKey(channel))) return true
+
+  const keeperUserNumber = getKeeperUserNumber(db)
+  if (!keeperUserNumber) return false
+
+  const auth = await getAnyCloudRoomAuth(db)
+  if (!auth) return false
+
+  const content = buildClerkWelcomeMessage(channel)
+  const res = await fetch(`${getCloudApiBase()}/contacts/queen-message`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'X-Room-Token': auth.roomToken,
+    },
+    body: JSON.stringify({
+      roomId: auth.cloudRoomId,
+      queenNickname: 'clerk',
+      userNumber: keeperUserNumber,
+      question: content,
+      channels: [channel],
+    }),
+    signal: AbortSignal.timeout(10_000),
+  })
+  if (!res.ok) return false
+
+  const payload = await res.json().catch(() => ({})) as { email?: string; telegram?: string }
+  const sent = channel === 'email'
+    ? payload.email === 'sent'
+    : payload.telegram === 'sent'
+  if (!sent) return false
+
+  setSetting(db, clerkWelcomeKey(channel), new Date().toISOString())
+  storeClerkContactMemory(db, {
+    direction: 'outbound',
+    channel,
+    content,
+    senderIdentifier: 'clerk',
+  })
+  return true
+}
+
+async function sendClerkWelcomeSafe(
+  db: Parameters<typeof queries.getSetting>[0],
+  channel: 'email' | 'telegram',
+): Promise<void> {
+  try {
+    await sendClerkWelcome(db, channel)
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error)
+    console.warn(`[contacts] clerk ${channel} welcome skipped: ${message}`)
+  }
+}
+
 interface QueenInboxMessage {
   id: number
   queenNickname: string
@@ -512,12 +660,26 @@ export async function pollQueenInbox(db: Parameters<typeof queries.getSetting>[0
       if (messages.length === 0) continue
 
       const messageIds: number[] = []
+      let shouldWakeQueen = false
       for (const msg of messages) {
         const nickname = msg.queenNickname || 'Queen'
         const channel = msg.channel || 'external'
-        const body = `[Reply from keeper via ${channel} to ${nickname}]\n${msg.body}`
-        queries.insertChatMessage(db, room.id, 'user', body)
-        queries.logRoomActivity(db, room.id, 'system', `Keeper replied to ${nickname} via ${channel}`, msg.body.slice(0, 200))
+        if (nickname.toLowerCase() === 'clerk') {
+          const safeChannel = channel === 'email' ? 'email' : 'telegram'
+          storeClerkContactMemory(db, {
+            direction: 'inbound',
+            channel: safeChannel,
+            content: msg.body,
+            senderIdentifier: msg.senderIdentifier,
+            timestamp: msg.receivedAt,
+          })
+          queries.logRoomActivity(db, room.id, 'system', `Keeper messaged Clerk via ${safeChannel}`, msg.body.slice(0, 200))
+        } else {
+          const body = `[Reply from keeper via ${channel} to ${nickname}]\n${msg.body}`
+          queries.insertChatMessage(db, room.id, 'user', body)
+          queries.logRoomActivity(db, room.id, 'system', `Keeper replied to ${nickname} via ${channel}`, msg.body.slice(0, 200))
+          shouldWakeQueen = true
+        }
         messageIds.push(msg.id)
       }
 
@@ -531,7 +693,7 @@ export async function pollQueenInbox(db: Parameters<typeof queries.getSetting>[0
         }).catch(() => { /* best-effort */ })
 
         // Wake the queen immediately — bypasses gap sleep and quiet hours
-        if (room.queenWorkerId) {
+        if (shouldWakeQueen && room.queenWorkerId) {
           triggerAgent(db, room.id, room.queenWorkerId)
         }
       }
@@ -604,7 +766,7 @@ export function registerContactRoutes(router: Router): void {
     }
   })
 
-  router.post('/api/contacts/email/verify', (ctx) => {
+  router.post('/api/contacts/email/verify', async (ctx) => {
     const body = (ctx.body as Record<string, unknown>) ?? {}
     const code = typeof body.code === 'string' ? body.code.trim() : ''
     if (!/^\d{6}$/.test(code)) {
@@ -633,7 +795,8 @@ export function registerContactRoutes(router: Router): void {
     setSetting(ctx.db, CONTACT_EMAIL_VERIFIED_AT_KEY, verifiedAt)
     clearSetting(ctx.db, CONTACT_EMAIL_CODE_HASH_KEY)
     clearSetting(ctx.db, CONTACT_EMAIL_CODE_EXPIRES_AT_KEY)
-    void syncCloudContactBindingsSafe(ctx.db)
+    await syncCloudContactBindingsSafe(ctx.db)
+    await sendClerkWelcomeSafe(ctx.db, 'email')
     return {
       data: {
         ok: true,
@@ -697,7 +860,8 @@ export function registerContactRoutes(router: Router): void {
         setSetting(ctx.db, CONTACT_TELEGRAM_VERIFIED_AT_KEY, status.verifiedAt ?? new Date().toISOString())
         clearSetting(ctx.db, CONTACT_TELEGRAM_PENDING_HASH_KEY)
         clearSetting(ctx.db, CONTACT_TELEGRAM_PENDING_EXPIRES_AT_KEY)
-        void syncCloudContactBindingsSafe(ctx.db)
+        await syncCloudContactBindingsSafe(ctx.db)
+        await sendClerkWelcomeSafe(ctx.db, 'telegram')
         return {
           data: {
             ok: true,

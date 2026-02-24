@@ -210,6 +210,25 @@ function buildClerkContext(db: Database.Database, projectDocsSnapshot?: string):
 }
 
 export function registerClerkRoutes(router: Router): void {
+  router.get('/api/clerk/usage', (ctx) => {
+    return {
+      data: {
+        total: queries.getClerkUsageSummary(ctx.db),
+        today: queries.getClerkUsageToday(ctx.db),
+        bySource: {
+          chat: {
+            total: queries.getClerkUsageSummary(ctx.db, 'chat'),
+            today: queries.getClerkUsageToday(ctx.db, 'chat'),
+          },
+          commentary: {
+            total: queries.getClerkUsageSummary(ctx.db, 'commentary'),
+            today: queries.getClerkUsageToday(ctx.db, 'commentary'),
+          },
+        },
+      }
+    }
+  })
+
   // List clerk messages
   router.get('/api/clerk/messages', (ctx) => {
     const limitRaw = typeof ctx.query.limit === 'string' ? Number.parseInt(ctx.query.limit, 10) : undefined
@@ -268,6 +287,16 @@ export function registerClerkRoutes(router: Router): void {
         const out = await executeClerkTool(ctx.db, toolName, args)
         return out.isError ? `Error: ${out.content}` : out.content
       }
+    })
+
+    queries.insertClerkUsage(ctx.db, {
+      source: 'chat',
+      model: result.model,
+      inputTokens: result.usage.inputTokens,
+      outputTokens: result.usage.outputTokens,
+      success: result.ok,
+      usedFallback: result.usedFallback,
+      attempts: result.ok ? result.attempts.length + 1 : Math.max(1, result.attempts.length),
     })
 
     if (!result.ok) {

@@ -36,6 +36,15 @@ interface LogEntry {
 
 type CommentaryFormatMode = 'cinematic' | 'scoreboard' | 'timeline' | 'bullet'
 
+interface CommentaryGenerationResult {
+  commentary: string | null
+  usage: { inputTokens: number; outputTokens: number }
+  model: string
+  success: boolean
+  usedFallback: boolean
+  attempts: number
+}
+
 let commentaryTimer: ReturnType<typeof setInterval> | null = null
 let unsubscribeEvents: (() => void) | null = null
 let logBuffer: LogEntry[] = []
@@ -65,6 +74,37 @@ function getWorkerName(db: Database.Database, workerId: number): string {
   const name = worker?.name ?? `Worker #${workerId}`
   workerNameCache.set(workerId, name)
   return name
+}
+
+function normalizeRoomLabel(name: string): string {
+  const normalized = (name || '')
+    .toLowerCase()
+    .replace(/[^a-z0-9]/g, '')
+  return normalized || 'room'
+}
+
+function normalizeActorLabel(workerName: string, roomName: string): string {
+  const raw = (workerName || '').trim()
+  if (!raw) return 'queen'
+
+  const lower = raw.toLowerCase()
+  const compact = lower.replace(/[^a-z0-9]/g, '')
+  const roomCompact = normalizeRoomLabel(roomName)
+
+  if (
+    lower === 'queen'
+    || lower.endsWith(' queen')
+    || lower.endsWith('_queen')
+    || lower.endsWith('-queen')
+    || compact === `${roomCompact}queen`
+    || compact === roomCompact
+  ) {
+    return 'queen'
+  }
+
+  const actor = compact.replace(/queen$/, '')
+  if (!actor || actor === roomCompact) return 'queen'
+  return actor
 }
 
 /** Extract room ID from channel like 'room:42' */
@@ -188,6 +228,15 @@ function sanitizeContent(text: string): string {
     .replace(/\bquoroom_(\w+)/g, (_, name) => friendlyName(`quoroom_${name}`))
 }
 
+function normalizeCommentaryOutput(text: string): string {
+  return text
+    // Never allow expanded queen labels like "Test Commentary Room Queen"
+    .replace(/\*\*[^*\n]*\bqueen\b[^*\n]*\*\*/gi, '**queen**')
+    .replace(/\b[A-Za-z][A-Za-z0-9 ]{0,50}\s+Queen\b/g, 'queen')
+    // Force room labels after "in `...`" into one-word lowercase style
+    .replace(/\bin\s+`([^`\n]+)`/gi, (_full, room) => `in \`${normalizeRoomLabel(String(room))}\``)
+}
+
 /** Drop entries that are clearly keeper/user-input echoes. */
 function isKeeperInputEcho(content: string): boolean {
   const lower = content.toLowerCase()
@@ -210,9 +259,10 @@ function formatRawLogs(entries: LogEntry[]): string {
   // Group by worker (flatten rooms — room name shown inline on worker label)
   const workers = new Map<string, { roomName: string; entries: LogEntry[] }>()
   for (const entry of actionable) {
-    const who = entry.workerName || 'queen'
+    const roomLabel = normalizeRoomLabel(entry.roomName)
+    const who = normalizeActorLabel(entry.workerName, roomLabel)
     const key = `${entry.roomId}:${who}`
-    if (!workers.has(key)) workers.set(key, { roomName: entry.roomName, entries: [] })
+    if (!workers.has(key)) workers.set(key, { roomName: roomLabel, entries: [] })
     workers.get(key)!.entries.push(entry)
   }
 
@@ -227,8 +277,8 @@ function formatRawLogs(entries: LogEntry[]): string {
 
   const lines: string[] = []
   for (const [, { roomName, entries: wEntries }] of sorted) {
-    const who = wEntries[0]?.workerName || 'queen'
-    const label = who === 'queen' ? `queen in \`${roomName}\`` : `${who} (in \`${roomName}\`)`
+    const who = normalizeActorLabel(wEntries[0]?.workerName || '', roomName)
+    const label = who === 'queen' ? `queen in \`${roomName}\`` : `${who} in \`${roomName}\``
     lines.push(`[${label}]`)
     for (const entry of wEntries) {
       switch (entry.entryType) {
@@ -275,6 +325,8 @@ function formatDirectCommentary(entries: LogEntry[]): string | null {
   })
 
   for (const [worker, wEntries] of sorted) {
+    const roomName = normalizeRoomLabel(wEntries[0]?.roomName || '')
+    const actor = normalizeActorLabel(worker, roomName)
     const parts: string[] = []
     for (const entry of wEntries) {
       switch (entry.entryType) {
@@ -294,7 +346,7 @@ function formatDirectCommentary(entries: LogEntry[]): string | null {
       }
     }
     if (parts.length > 0) {
-      lines.push(`**${worker}**: ${parts.join(' → ')}`)
+      lines.push(`**${actor}** in \`${roomName}\`: ${parts.join(' → ')}`)
     }
   }
 
@@ -359,7 +411,7 @@ function formatModeInstruction(mode: CommentaryFormatMode): string {
   }
 }
 
-async function generateCommentary(rawLogs: string): Promise<string | null> {
+async function generateCommentary(rawLogs: string): Promise<CommentaryGenerationResult | null> {
   if (!dbRef) return null
   const formatMode = pickFormatMode(rawLogs)
   const contextNote = lastCommentary
@@ -384,12 +436,35 @@ async function generateCommentary(rawLogs: string): Promise<string | null> {
     if (result.error) {
       console.warn(`[commentary] generation failed on ${result.model}: ${result.error}`)
     }
-    return null
+    return {
+      commentary: null,
+      usage: result.usage,
+      model: result.model,
+      success: false,
+      usedFallback: result.usedFallback,
+      attempts: Math.max(1, result.attempts.length),
+    }
   }
-  if (!result.output?.trim()) return null
+  if (!result.output?.trim()) {
+    return {
+      commentary: null,
+      usage: result.usage,
+      model: result.model,
+      success: false,
+      usedFallback: result.usedFallback,
+      attempts: result.attempts.length + 1,
+    }
+  }
   lastFormatMode = formatMode
   commentaryCount += 1
-  return boldCaps(result.output.trim())
+  return {
+    commentary: normalizeCommentaryOutput(boldCaps(result.output.trim())),
+    usage: result.usage,
+    model: result.model,
+    success: true,
+    usedFallback: result.usedFallback,
+    attempts: result.attempts.length + 1,
+  }
 }
 
 export function startCommentaryEngine(db: Database.Database): void {
@@ -558,7 +633,19 @@ async function emitCommentary(): Promise<void> {
 
     // Try LLM narration if enough content
     if (entries.length >= MIN_ENTRIES_FOR_LLM) {
-      commentary = await generateCommentary(rawLogs)
+      const llmResult = await generateCommentary(rawLogs)
+      if (llmResult && dbRef) {
+        queries.insertClerkUsage(dbRef, {
+          source: 'commentary',
+          model: llmResult.model,
+          inputTokens: llmResult.usage.inputTokens,
+          outputTokens: llmResult.usage.outputTokens,
+          success: llmResult.success,
+          usedFallback: llmResult.usedFallback,
+          attempts: llmResult.attempts,
+        })
+        commentary = llmResult.commentary
+      }
     }
 
     // Fallback to direct formatting

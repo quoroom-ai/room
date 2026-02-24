@@ -470,6 +470,22 @@ CREATE TABLE IF NOT EXISTS clerk_messages (
 );
 CREATE INDEX IF NOT EXISTS idx_clerk_messages_created ON clerk_messages(created_at);
 
+-- Clerk token usage (tracks burn across chat/commentary calls)
+CREATE TABLE IF NOT EXISTS clerk_usage (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    source TEXT NOT NULL CHECK(source IN ('chat', 'commentary')),
+    model TEXT NOT NULL,
+    input_tokens INTEGER NOT NULL DEFAULT 0,
+    output_tokens INTEGER NOT NULL DEFAULT 0,
+    total_tokens INTEGER NOT NULL DEFAULT 0,
+    success INTEGER NOT NULL DEFAULT 1,
+    used_fallback INTEGER NOT NULL DEFAULT 0,
+    attempts INTEGER NOT NULL DEFAULT 1,
+    created_at DATETIME DEFAULT (datetime('now','localtime'))
+);
+CREATE INDEX IF NOT EXISTS idx_clerk_usage_created ON clerk_usage(created_at);
+CREATE INDEX IF NOT EXISTS idx_clerk_usage_source_created ON clerk_usage(source, created_at);
+
 -- Schema version tracking
 CREATE TABLE IF NOT EXISTS schema_version (
     version INTEGER PRIMARY KEY,

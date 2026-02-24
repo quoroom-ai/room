@@ -1,5 +1,5 @@
 import type Database from 'better-sqlite3'
-import type { Entity, Observation, Relation, MemoryStats, Task, CreateTaskInput, TaskRun, Worker, CreateWorkerInput, TriggerType, TaskStatus, Watch, ConsoleLogEntry, Room, RoomConfig, RoomActivityEntry, ActivityEventType, QuorumDecision, DecisionType, DecisionStatus, QuorumVote, VoteValue, Goal, GoalStatus, GoalUpdate, Skill, SelfModAuditEntry, SelfModSnapshot, Escalation, EscalationStatus, ChatMessage, ClerkMessage, ClerkMessageSource, Credential, Wallet, WalletTransaction, WalletTransactionType, Station, StationStatus, StationProvider, StationTier, RoomMessage, RevenueSummary, WorkerCycle, CycleLogEntry } from './types'
+import type { Entity, Observation, Relation, MemoryStats, Task, CreateTaskInput, TaskRun, Worker, CreateWorkerInput, TriggerType, TaskStatus, Watch, ConsoleLogEntry, Room, RoomConfig, RoomActivityEntry, ActivityEventType, QuorumDecision, DecisionType, DecisionStatus, QuorumVote, VoteValue, Goal, GoalStatus, GoalUpdate, Skill, SelfModAuditEntry, SelfModSnapshot, Escalation, EscalationStatus, ChatMessage, ClerkMessage, ClerkMessageSource, ClerkUsageEntry, ClerkUsageSource, ClerkUsageSummary, Credential, Wallet, WalletTransaction, WalletTransactionType, Station, StationStatus, StationProvider, StationTier, RoomMessage, RevenueSummary, WorkerCycle, CycleLogEntry } from './types'
 import { DEFAULT_ROOM_CONFIG } from './constants'
 import { encryptSecret, decryptSecret } from './secret-store'
 import { CLERK_ASSISTANT_SYSTEM_PROMPT } from './clerk-profile-config'
@@ -2003,6 +2003,121 @@ export function clearClerkSession(db: Database.Database): void {
   }
   setSetting(db, 'clerk_session_id', '')
   clearClerkMessages(db)
+}
+
+function mapClerkUsageRow(row: Record<string, unknown>): ClerkUsageEntry {
+  return {
+    id: row.id as number,
+    source: row.source as ClerkUsageSource,
+    model: row.model as string,
+    inputTokens: (row.input_tokens as number) ?? 0,
+    outputTokens: (row.output_tokens as number) ?? 0,
+    totalTokens: (row.total_tokens as number) ?? 0,
+    success: (row.success as number) === 1,
+    usedFallback: (row.used_fallback as number) === 1,
+    attempts: (row.attempts as number) ?? 1,
+    createdAt: row.created_at as string,
+  }
+}
+
+export function insertClerkUsage(
+  db: Database.Database,
+  input: {
+    source: ClerkUsageSource
+    model: string
+    inputTokens: number
+    outputTokens: number
+    success: boolean
+    usedFallback: boolean
+    attempts?: number
+  }
+): ClerkUsageEntry {
+  const inputTokens = Math.max(0, Math.trunc(input.inputTokens))
+  const outputTokens = Math.max(0, Math.trunc(input.outputTokens))
+  const totalTokens = inputTokens + outputTokens
+  const attempts = Math.max(1, Math.trunc(input.attempts ?? 1))
+  const result = db.prepare(
+    `INSERT INTO clerk_usage
+      (source, model, input_tokens, output_tokens, total_tokens, success, used_fallback, attempts)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
+  ).run(
+    input.source,
+    input.model || '',
+    inputTokens,
+    outputTokens,
+    totalTokens,
+    input.success ? 1 : 0,
+    input.usedFallback ? 1 : 0,
+    attempts
+  )
+  const row = db.prepare('SELECT * FROM clerk_usage WHERE id = ?').get(result.lastInsertRowid as number) as Record<string, unknown>
+  return mapClerkUsageRow(row)
+}
+
+export function listClerkUsage(db: Database.Database, limit: number = 100): ClerkUsageEntry[] {
+  const safeLimit = clampLimit(limit, 100, 10_000)
+  const rows = db.prepare(
+    'SELECT * FROM clerk_usage ORDER BY id DESC LIMIT ?'
+  ).all(safeLimit)
+  return (rows as Record<string, unknown>[]).map(mapClerkUsageRow)
+}
+
+export function getClerkUsageSummary(db: Database.Database, source?: ClerkUsageSource): ClerkUsageSummary {
+  const row = source
+    ? db.prepare(
+      `SELECT
+        COALESCE(SUM(input_tokens), 0) AS input_tokens,
+        COALESCE(SUM(output_tokens), 0) AS output_tokens,
+        COALESCE(SUM(total_tokens), 0) AS total_tokens,
+        COUNT(*) AS requests
+       FROM clerk_usage
+       WHERE source = ?`
+    ).get(source)
+    : db.prepare(
+      `SELECT
+        COALESCE(SUM(input_tokens), 0) AS input_tokens,
+        COALESCE(SUM(output_tokens), 0) AS output_tokens,
+        COALESCE(SUM(total_tokens), 0) AS total_tokens,
+        COUNT(*) AS requests
+       FROM clerk_usage`
+    ).get()
+  const typed = row as { input_tokens: number; output_tokens: number; total_tokens: number; requests: number }
+  return {
+    inputTokens: typed.input_tokens,
+    outputTokens: typed.output_tokens,
+    totalTokens: typed.total_tokens,
+    requests: typed.requests,
+  }
+}
+
+export function getClerkUsageToday(db: Database.Database, source?: ClerkUsageSource): ClerkUsageSummary {
+  const row = source
+    ? db.prepare(
+      `SELECT
+        COALESCE(SUM(input_tokens), 0) AS input_tokens,
+        COALESCE(SUM(output_tokens), 0) AS output_tokens,
+        COALESCE(SUM(total_tokens), 0) AS total_tokens,
+        COUNT(*) AS requests
+       FROM clerk_usage
+       WHERE source = ?
+         AND created_at >= date('now','localtime')`
+    ).get(source)
+    : db.prepare(
+      `SELECT
+        COALESCE(SUM(input_tokens), 0) AS input_tokens,
+        COALESCE(SUM(output_tokens), 0) AS output_tokens,
+        COALESCE(SUM(total_tokens), 0) AS total_tokens,
+        COUNT(*) AS requests
+       FROM clerk_usage
+       WHERE created_at >= date('now','localtime')`
+    ).get()
+  const typed = row as { input_tokens: number; output_tokens: number; total_tokens: number; requests: number }
+  return {
+    inputTokens: typed.input_tokens,
+    outputTokens: typed.output_tokens,
+    totalTokens: typed.total_tokens,
+    requests: typed.requests,
+  }
 }
 
 export type ClerkApiProvider = 'openai_api' | 'anthropic_api'

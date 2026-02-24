@@ -1,4 +1,4 @@
-export type ClerkMessageSource = 'assistant' | 'commentary' | 'task'
+export type ClerkMessageSource = 'assistant' | 'commentary' | 'task' | 'email' | 'telegram'
 
 export interface ClerkProjectDocSpec {
   entityName: string
@@ -77,12 +77,16 @@ YOUR VOICE:
 
 FORMAT RULES — very important:
 - Every sentence on its own line — NO walls of text
-- For MILESTONE moments (account created, email sent, goal reached): ALL CAPS header, then agent-by-agent breakdown, then score/reaction
-- For PROGRESS moments: narrative opener + bullet list per agent
+- Rotate structure aggressively. Do NOT reuse the same template in consecutive updates.
+- For MILESTONE moments (account created, email sent, goal reached): ALL CAPS header, then concise breakdown, then score/reaction
+- For PROGRESS moments: prefer narrative, timeline, or scoreboard formats. Do NOT default to bullets.
 - For QUIET moments (routine checks): short punchy 2-3 line observation
+- Bullet lists are occasional only: never two updates in a row, and at most once every 3 updates.
 - Use (Step N) naturally when describing agent actions — gives useful context
 - **Bold** every agent name
 - \`code\` for emails, URLs, domain names, and room names
+- Strict name style: room names must be one lowercase word in \`code\` (example: \`domains\`)
+- The queen label is ONLY **queen**. Never write expanded labels like "Test Commentary Room Queen" or "domains Queen"
 - Emojis that match mood: 🎉 wins, 🔍 search, 🚨 problems, 🤔 confusion, 💾 saves, ⚡ speed, 🏆 milestones
 - UPPERCASE for emotion — use GENEROUSLY: THIS IS INCREDIBLE, NAILED IT, WHAT A MOVE, STUCK AGAIN, FIRST CONTACT, BREAKTHROUGH, SPINNING WHEELS, MISSION COMPLETE, GOLD MINE, DANGEROUS MOVE, THIS IS BAD, FINALLY
 
@@ -94,12 +98,18 @@ ACCOUNT CREATED! 🎉
 **lead-finder** in \`outreach\` (Step 12): Found \`hello@e2b.dev\`, stored to shared memory.
 Score so far: 1 account, 3 leads. This is REAL progress.
 
-Progress:
-Agents are deep in it — here's what I'm seeing:
-- **queen** in \`domains\`: checking memory and inbox, resetting after a hiccup
-- **scout** in \`outreach\` (Step 8): 🔍 web search for AI startup contacts, found flowhunt and agentops
-- **browser-bot** in \`domains\`: struggling with Tutanota's checkbox CSS — real-world friction
-The tape doesn't lie — browser work is slow but the leads are GOLD.
+Progress (narrative):
+Watch this closely — **queen** in \`domains\` (Step 8) just reset the plan after a failed tool run.
+**scout** in \`outreach\` (Step 10) pulled new leads from web search and saved them to memory.
+**browser-bot** in \`domains\` is fighting signup friction, but the contact list is getting stronger.
+My read: slow execution, strong signal quality.
+
+Progress (scoreboard):
+MOMENTUM CHECK ⚡
+Rooms active: 2.
+Fresh leads found: 4.
+Blocks: signup friction + rate limit noise.
+Verdict: positive trend, but execution speed must improve.
 
 Quiet:
 Routine maintenance across both rooms.

@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect, useRef, type ReactNode } from 'react'
 import { APP_MODE } from '../lib/auth'
 import { api } from '../lib/client'
 import { storageSet } from '../lib/storage'
@@ -11,6 +11,15 @@ type Step = 'email' | 'code' | 'telegram'
 interface ContactPromptModalProps {
   onClose: () => void
   onNavigateToClerk: () => void
+}
+
+function emphasizeRoleWords(text: string): ReactNode[] {
+  return text.split(/(\b(?:clerk|queen|queens)\b)/gi).map((part, index) => {
+    if (/^(clerk|queen|queens)$/i.test(part)) {
+      return <span key={`role-${index}`} className="text-text-primary font-semibold">{part}</span>
+    }
+    return <span key={`text-${index}`}>{part}</span>
+  })
 }
 
 export function ContactPromptModal({ onClose, onNavigateToClerk }: ContactPromptModalProps): React.JSX.Element {
@@ -151,7 +160,7 @@ export function ContactPromptModal({ onClose, onNavigateToClerk }: ContactPrompt
           <>
             <h2 className="text-2xl font-bold text-text-primary mb-2">Stay Reachable</h2>
             <p className="text-text-muted text-sm leading-relaxed mb-6">
-              Clerk can help rule your swarm even when you're away from desktop. Add your email so Clerk can reach you for approvals, credentials, and key updates.
+              {emphasizeRoleWords("Clerk can help rule your swarm even when you're away from desktop. Add your email so Clerk can reach you for approvals, credentials, and key updates.")}
             </p>
             <div className="mb-4">
               <label className="block text-sm text-text-secondary mb-1">Email</label>
@@ -230,10 +239,12 @@ export function ContactPromptModal({ onClose, onNavigateToClerk }: ContactPrompt
               {isCloud ? 'Stay Reachable' : emailVerified ? 'One More Thing' : 'Connect Telegram'}
             </h2>
             <p className="text-text-muted text-sm leading-relaxed mb-6">
-              {isCloud
-                ? 'Clerk can help run your swarm while you are away from desktop. Telegram is the fastest path for Clerk to reach you with approvals, credentials, and progress updates.'
-                : 'Clerk can help rule your swarm while you are away from desktop. Telegram is the fastest way to stay connected.'
-              } Click below to open our bot, press <span className="text-text-primary font-medium">Start</span>, then come back and check status.
+              {emphasizeRoleWords(
+                isCloud
+                  ? 'Clerk can help run your swarm while you are away from desktop. Telegram is the fastest path for Clerk to reach you with approvals, credentials, and progress updates.'
+                  : 'Clerk can help rule your swarm while you are away from desktop. Telegram is the fastest way to stay connected.'
+              )}{' '}
+              Click below to open our bot, press <span className="text-text-primary font-medium">Start</span>, then come back and check status.
             </p>
 
             {telegramVerified ? (
