@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { getToken, clearToken, API_BASE, APP_MODE, isLocalHost } from './lib/auth'
 import { TabBar, mainTabs, tabIcons, type Tab } from './components/TabBar'
 import { StatusPanel } from './components/StatusPanel'
@@ -119,6 +119,7 @@ function App(): React.JSX.Element {
     if (saved && ALL_TAB_IDS.includes(saved as Tab)) return saved as Tab
     return 'swarm'
   })
+  const tabRef = useRef(tab)
   const [advancedMode, setAdvancedMode] = useState(false)
   const [autonomyMode, setAutonomyMode] = useState<'auto' | 'semi'>('auto')
   const [ready, setReady] = useState(false)
@@ -213,8 +214,8 @@ function App(): React.JSX.Element {
     }
     try {
       const badges = await api.rooms.badges(expandedRoomId)
-      setEscalationsUnread(badges.pendingEscalations)
-      setMessagesUnread(badges.unreadMessages)
+      if (tabRef.current !== 'chat') setEscalationsUnread(badges.pendingEscalations)
+      if (tabRef.current !== 'messages') setMessagesUnread(badges.unreadMessages)
       setVotesActive(badges.activeVotes)
     } catch {
       // ignore polling noise
@@ -481,9 +482,13 @@ function App(): React.JSX.Element {
 
   function handleTabChange(t: Tab): void {
     setTab(t)
+    tabRef.current = t
     storageSet('quoroom_tab', t)
     if (t === 'chat') setEscalationsUnread(0)
-    if (t === 'messages') setMessagesUnread(0)
+    if (t === 'messages') {
+      setMessagesUnread(0)
+      if (selectedRoomId !== null) void api.roomMessages.markAllRead(selectedRoomId).catch(() => {})
+    }
     setSidebarOpen(false)
   }
 

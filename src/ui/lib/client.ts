@@ -661,6 +661,8 @@ export const api = {
       request<RoomMessage>('POST', `/api/rooms/${roomId}/messages`, { toRoomId, body, subject }),
     markRead: (roomId: number, messageId: number) =>
       request<{ ok: true }>('POST', `/api/rooms/${roomId}/messages/${messageId}/read`),
+    markAllRead: (roomId: number) =>
+      request<{ ok: true; count: number }>('POST', `/api/rooms/${roomId}/messages/read-all`),
     reply: (messageId: number, body: string, subject?: string, toRoomId?: string) =>
       request<RoomMessage>('POST', `/api/messages/${messageId}/reply`, { body, subject, toRoomId }),
   },

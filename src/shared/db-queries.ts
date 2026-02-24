@@ -2023,6 +2023,11 @@ export function markRoomMessageRead(db: Database.Database, id: number): void {
   db.prepare("UPDATE room_messages SET status = 'read' WHERE id = ?").run(id)
 }
 
+export function markAllRoomMessagesRead(db: Database.Database, roomId: number): number {
+  const result = db.prepare("UPDATE room_messages SET status = 'read' WHERE room_id = ? AND status = 'unread'").run(roomId)
+  return result.changes
+}
+
 export function replyToRoomMessage(db: Database.Database, id: number): void {
   db.prepare("UPDATE room_messages SET status = 'replied' WHERE id = ?").run(id)
 }

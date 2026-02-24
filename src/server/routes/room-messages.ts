@@ -30,6 +30,13 @@ export function registerRoomMessageRoutes(router: Router): void {
     return { data: msg }
   })
 
+  router.post('/api/rooms/:roomId/messages/read-all', (ctx) => {
+    const roomId = Number(ctx.params.roomId)
+    const count = queries.markAllRoomMessagesRead(ctx.db, roomId)
+    if (count > 0) eventBus.emit(`room:${roomId}`, 'room_message:updated', { roomId, allRead: true })
+    return { data: { ok: true, count } }
+  })
+
   router.post('/api/rooms/:roomId/messages/:id/read', (ctx) => {
     const roomId = Number(ctx.params.roomId)
     const id = Number(ctx.params.id)

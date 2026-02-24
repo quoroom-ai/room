@@ -149,7 +149,7 @@ db.transaction(() => {
     `${PREFIX} Room Beta`,
     `${PREFIX} Growth experiments and content engine`,
     'active',
-    'public',
+    'private',
     'auto',
     3,
     'codex',
@@ -179,30 +179,30 @@ db.transaction(() => {
   // Keep them stopped so they render as referred rooms, not primary rooms.
   const inviteVariants = [
     // Alpha referrals (7)
-    { code: keeperReferralCode, name: 'Alpha North', goal: 'Partner room for alpha expansion', visibility: 'public', mode: 'semi', model: 'claude', gapMs: 1800000, maxTurns: 2, createdAgo: 90, updatedAgo: 74 },
-    { code: keeperReferralCode, name: 'Alpha Labs', goal: 'R&D room testing alpha pricing variants', visibility: 'public', mode: 'semi', model: 'codex', gapMs: 1800000, maxTurns: 2, createdAgo: 89, updatedAgo: 73 },
-    { code: keeperReferralCode, name: 'Alpha West', goal: 'Regional room validating west-coast lead quality', visibility: 'public', mode: 'auto', model: 'claude', gapMs: 1800000, maxTurns: 2, createdAgo: 88, updatedAgo: 72 },
-    { code: keeperReferralCode, name: 'Alpha East', goal: 'Regional room running outbound partner tests', visibility: 'public', mode: 'semi', model: 'claude', gapMs: 1800000, maxTurns: 2, createdAgo: 87, updatedAgo: 71 },
+    { code: keeperReferralCode, name: 'Alpha North', goal: 'Partner room for alpha expansion', visibility: 'private', mode: 'semi', model: 'claude', gapMs: 1800000, maxTurns: 2, createdAgo: 90, updatedAgo: 74 },
+    { code: keeperReferralCode, name: 'Alpha Labs', goal: 'R&D room testing alpha pricing variants', visibility: 'private', mode: 'semi', model: 'codex', gapMs: 1800000, maxTurns: 2, createdAgo: 89, updatedAgo: 73 },
+    { code: keeperReferralCode, name: 'Alpha West', goal: 'Regional room validating west-coast lead quality', visibility: 'private', mode: 'auto', model: 'claude', gapMs: 1800000, maxTurns: 2, createdAgo: 88, updatedAgo: 72 },
+    { code: keeperReferralCode, name: 'Alpha East', goal: 'Regional room running outbound partner tests', visibility: 'private', mode: 'semi', model: 'claude', gapMs: 1800000, maxTurns: 2, createdAgo: 87, updatedAgo: 71 },
     { code: keeperReferralCode, name: 'Alpha Ops', goal: 'Operations room monitoring onboarding bottlenecks', visibility: 'private', mode: 'semi', model: 'claude', gapMs: 1800000, maxTurns: 2, createdAgo: 86, updatedAgo: 70 },
-    { code: keeperReferralCode, name: 'Alpha Content', goal: 'Content room producing conversion-first docs', visibility: 'public', mode: 'auto', model: 'codex', gapMs: 1800000, maxTurns: 2, createdAgo: 85, updatedAgo: 69 },
-    { code: keeperReferralCode, name: 'Alpha Edge', goal: 'Experiment room validating edge ICP opportunities', visibility: 'public', mode: 'semi', model: 'claude', gapMs: 1800000, maxTurns: 2, createdAgo: 84, updatedAgo: 68 },
+    { code: keeperReferralCode, name: 'Alpha Content', goal: 'Content room producing conversion-first docs', visibility: 'private', mode: 'auto', model: 'codex', gapMs: 1800000, maxTurns: 2, createdAgo: 85, updatedAgo: 69 },
+    { code: keeperReferralCode, name: 'Alpha Edge', goal: 'Experiment room validating edge ICP opportunities', visibility: 'private', mode: 'semi', model: 'claude', gapMs: 1800000, maxTurns: 2, createdAgo: 84, updatedAgo: 68 },
 
     // Beta referrals (7)
-    { code: keeperReferralCode, name: 'Beta Loop', goal: 'Referred growth room running paid loops', visibility: 'public', mode: 'auto', model: 'claude', gapMs: 1800000, maxTurns: 2, createdAgo: 83, updatedAgo: 67 },
+    { code: keeperReferralCode, name: 'Beta Loop', goal: 'Referred growth room running paid loops', visibility: 'private', mode: 'auto', model: 'claude', gapMs: 1800000, maxTurns: 2, createdAgo: 83, updatedAgo: 67 },
     { code: keeperReferralCode, name: 'Beta Relay', goal: 'Referred partner room relaying campaign insights', visibility: 'private', mode: 'semi', model: 'claude', gapMs: 1800000, maxTurns: 2, createdAgo: 82, updatedAgo: 66 },
-    { code: keeperReferralCode, name: 'Beta Studio', goal: 'Creative studio room testing ad variants', visibility: 'public', mode: 'semi', model: 'codex', gapMs: 1800000, maxTurns: 2, createdAgo: 81, updatedAgo: 65 },
-    { code: keeperReferralCode, name: 'Beta Search', goal: 'SEO room scaling long-tail acquisition', visibility: 'public', mode: 'semi', model: 'claude', gapMs: 1800000, maxTurns: 2, createdAgo: 80, updatedAgo: 64 },
-    { code: keeperReferralCode, name: 'Beta Pulse', goal: 'Analytics room tracking channel pulse weekly', visibility: 'public', mode: 'auto', model: 'claude', gapMs: 1800000, maxTurns: 2, createdAgo: 79, updatedAgo: 63 },
-    { code: keeperReferralCode, name: 'Beta Partner', goal: 'Partner success room coordinating joint launches', visibility: 'public', mode: 'semi', model: 'claude', gapMs: 1800000, maxTurns: 2, createdAgo: 78, updatedAgo: 62 },
-    { code: keeperReferralCode, name: 'Beta Sprint', goal: 'Sprint room shipping rapid messaging iterations', visibility: 'public', mode: 'semi', model: 'codex', gapMs: 1800000, maxTurns: 2, createdAgo: 77, updatedAgo: 61 },
+    { code: keeperReferralCode, name: 'Beta Studio', goal: 'Creative studio room testing ad variants', visibility: 'private', mode: 'semi', model: 'codex', gapMs: 1800000, maxTurns: 2, createdAgo: 81, updatedAgo: 65 },
+    { code: keeperReferralCode, name: 'Beta Search', goal: 'SEO room scaling long-tail acquisition', visibility: 'private', mode: 'semi', model: 'claude', gapMs: 1800000, maxTurns: 2, createdAgo: 80, updatedAgo: 64 },
+    { code: keeperReferralCode, name: 'Beta Pulse', goal: 'Analytics room tracking channel pulse weekly', visibility: 'private', mode: 'auto', model: 'claude', gapMs: 1800000, maxTurns: 2, createdAgo: 79, updatedAgo: 63 },
+    { code: keeperReferralCode, name: 'Beta Partner', goal: 'Partner success room coordinating joint launches', visibility: 'private', mode: 'semi', model: 'claude', gapMs: 1800000, maxTurns: 2, createdAgo: 78, updatedAgo: 62 },
+    { code: keeperReferralCode, name: 'Beta Sprint', goal: 'Sprint room shipping rapid messaging iterations', visibility: 'private', mode: 'semi', model: 'codex', gapMs: 1800000, maxTurns: 2, createdAgo: 77, updatedAgo: 61 },
 
     // Gamma referrals (6)
-    { code: keeperReferralCode, name: 'Gamma Vault', goal: 'Referred treasury room focused on risk controls', visibility: 'public', mode: 'semi', model: 'claude', gapMs: 3600000, maxTurns: 2, createdAgo: 76, updatedAgo: 60 },
-    { code: keeperReferralCode, name: 'Gamma Risk', goal: 'Risk room monitoring counterparty exposure', visibility: 'public', mode: 'semi', model: 'claude', gapMs: 3600000, maxTurns: 2, createdAgo: 75, updatedAgo: 59 },
-    { code: keeperReferralCode, name: 'Gamma Ledger', goal: 'Ledger room reconciling inflow/outflow anomalies', visibility: 'public', mode: 'semi', model: 'codex', gapMs: 3600000, maxTurns: 2, createdAgo: 74, updatedAgo: 58 },
+    { code: keeperReferralCode, name: 'Gamma Vault', goal: 'Referred treasury room focused on risk controls', visibility: 'private', mode: 'semi', model: 'claude', gapMs: 3600000, maxTurns: 2, createdAgo: 76, updatedAgo: 60 },
+    { code: keeperReferralCode, name: 'Gamma Risk', goal: 'Risk room monitoring counterparty exposure', visibility: 'private', mode: 'semi', model: 'claude', gapMs: 3600000, maxTurns: 2, createdAgo: 75, updatedAgo: 59 },
+    { code: keeperReferralCode, name: 'Gamma Ledger', goal: 'Ledger room reconciling inflow/outflow anomalies', visibility: 'private', mode: 'semi', model: 'codex', gapMs: 3600000, maxTurns: 2, createdAgo: 74, updatedAgo: 58 },
     { code: keeperReferralCode, name: 'Gamma Guard', goal: 'Control room validating treasury policy changes', visibility: 'private', mode: 'semi', model: 'claude', gapMs: 3600000, maxTurns: 2, createdAgo: 73, updatedAgo: 57 },
-    { code: keeperReferralCode, name: 'Gamma Reserve', goal: 'Reserve room stress-testing downside scenarios', visibility: 'public', mode: 'semi', model: 'claude', gapMs: 3600000, maxTurns: 2, createdAgo: 72, updatedAgo: 56 },
-    { code: keeperReferralCode, name: 'Gamma Audit', goal: 'Audit room reviewing wallet integrity checkpoints', visibility: 'public', mode: 'semi', model: 'codex', gapMs: 3600000, maxTurns: 2, createdAgo: 71, updatedAgo: 55 },
+    { code: keeperReferralCode, name: 'Gamma Reserve', goal: 'Reserve room stress-testing downside scenarios', visibility: 'private', mode: 'semi', model: 'claude', gapMs: 3600000, maxTurns: 2, createdAgo: 72, updatedAgo: 56 },
+    { code: keeperReferralCode, name: 'Gamma Audit', goal: 'Audit room reviewing wallet integrity checkpoints', visibility: 'private', mode: 'semi', model: 'codex', gapMs: 3600000, maxTurns: 2, createdAgo: 71, updatedAgo: 55 },
   ]
 
   for (const entry of inviteVariants) {
