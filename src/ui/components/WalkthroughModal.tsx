@@ -32,7 +32,7 @@ const steps = [
   },
   {
     title: 'Control everything with Clerk',
-    body: 'You are the Keeper, and Clerk is your control panel. Use Clerk to create rooms, update goals, start or pause queens, manage tasks, and steer the swarm from one place. When you are away, connect Telegram or email so Clerk can still help you run everything.',
+    body: 'Clerk is your right hand. Use Clerk to create rooms, update goals, start or pause queens, manage tasks, and steer the swarm from one place. When you are away, connect Telegram or email so Clerk can still help you run everything.',
   },
 ]
 
