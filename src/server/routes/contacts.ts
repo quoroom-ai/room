@@ -4,12 +4,14 @@ import * as queries from '../../shared/db-queries'
 import { isCloudDeployment, getToken } from '../auth'
 import { ensureCloudRoomToken, getRoomCloudId, getStoredCloudRoomToken } from '../../shared/cloud-sync'
 import { triggerAgent } from '../../shared/agent-loop'
+import { runClerkAssistantTurn } from './clerk'
 
 const EMAIL_VERIFY_CODE_TTL_MINUTES = 15
 const EMAIL_RESEND_COOLDOWN_SECONDS = 60
 const EMAIL_MAX_SENDS_PER_HOUR = 6
 const TELEGRAM_VERIFY_TTL_MINUTES = 20
 const DEFAULT_TELEGRAM_BOT_USERNAME = 'quoroom_ai_bot'
+const CLERK_TELEGRAM_TYPING_INTERVAL_MS = 3_500
 
 const CONTACT_EMAIL_KEY = 'contact_email'
 const CONTACT_EMAIL_VERIFIED_AT_KEY = 'contact_email_verified_at'
@@ -29,7 +31,6 @@ const CONTACT_TELEGRAM_PENDING_EXPIRES_AT_KEY = 'contact_telegram_pending_expire
 const CONTACT_TELEGRAM_BOT_USERNAME_KEY = 'contact_telegram_bot_username'
 const CLERK_EMAIL_WELCOME_SENT_AT_KEY = 'clerk_email_welcome_sent_at'
 const CLERK_TELEGRAM_WELCOME_SENT_AT_KEY = 'clerk_telegram_welcome_sent_at'
-const CLERK_CONTACT_ENTITY_NAME = 'Clerk Contact Inbox'
 
 interface ApiErrorMeta {
   status: number
@@ -518,23 +519,12 @@ async function getAnyCloudRoomAuth(
   return null
 }
 
-function ensureClerkContactEntityId(db: Parameters<typeof queries.getSetting>[0]): number {
-  const existing = queries
-    .listEntities(db, undefined, 'clerk_contact')
-    .find((entity) => entity.name === CLERK_CONTACT_ENTITY_NAME)
-  if (existing) return existing.id
-  const created = queries.createEntity(db, CLERK_CONTACT_ENTITY_NAME, 'fact', 'clerk_contact')
-  return created.id
-}
-
 function storeClerkContactMemory(
   db: Parameters<typeof queries.getSetting>[0],
   input: {
     direction: 'inbound' | 'outbound'
     channel: 'email' | 'telegram'
     content: string
-    senderIdentifier?: string | null
-    timestamp?: string
   },
 ): void {
   const body = input.content.trim()
@@ -545,14 +535,6 @@ function storeClerkContactMemory(
   if (input.direction === 'inbound') {
     setSetting(db, 'clerk_last_user_message_at', new Date().toISOString())
   }
-
-  const when = input.timestamp && parseIsoToMs(input.timestamp) != null
-    ? input.timestamp
-    : new Date().toISOString()
-  const senderPart = input.senderIdentifier?.trim() ? ` from ${input.senderIdentifier.trim()}` : ''
-  const summary = `${input.direction === 'inbound' ? 'Inbound' : 'Outbound'} ${input.channel} message${senderPart} at ${when}`
-  const entityId = ensureClerkContactEntityId(db)
-  queries.addObservation(db, entityId, `${summary}\n${body}`, `clerk_contact_${input.channel}_${input.direction}`)
 }
 
 function clerkWelcomeKey(channel: 'email' | 'telegram'): string {
@@ -601,15 +583,15 @@ async function sendClerkWelcome(
   const sent = channel === 'email'
     ? payload.email === 'sent'
     : payload.telegram === 'sent'
-  if (!sent) return false
 
-  setSetting(db, clerkWelcomeKey(channel), new Date().toISOString())
   storeClerkContactMemory(db, {
     direction: 'outbound',
     channel,
-    content,
-    senderIdentifier: 'clerk',
+    content
   })
+  if (!sent) return false
+
+  setSetting(db, clerkWelcomeKey(channel), new Date().toISOString())
   return true
 }
 
@@ -625,13 +607,128 @@ async function sendClerkWelcomeSafe(
   }
 }
 
+function buildClerkReplyFallback(
+  db: Parameters<typeof queries.getSetting>[0],
+  inbound: { body: string },
+): string {
+  const activeRooms = queries.listRooms(db, 'active')
+  const roomSummary = activeRooms.length > 0
+    ? activeRooms.slice(0, 4).map((room) => room.name).join(', ')
+    : 'no active rooms right now'
+  return [
+    `I got your message: "${inbound.body.trim().slice(0, 220)}"`,
+    `Current swarm snapshot: ${roomSummary}.`,
+    'I can create rooms, update settings, stop/delete rooms, send messages, and schedule reminders for you.',
+    'Tell me exactly what action you want next and I will execute it.',
+  ].join('\n')
+}
+
+function normalizeClerkContactReply(
+  channel: 'email' | 'telegram',
+  content: string,
+): string {
+  let text = content.trim()
+
+  // Remove leading "Clerk:" label if model adds it.
+  text = text.replace(/^\s*clerk\s*:\s*/i, '')
+
+  // Remove trailing signature markers to control per-channel style.
+  text = text.replace(/\n?\s*[—-]\s*clerk\s*$/i, '')
+  text = text.replace(/\n?\s*clerk\s*$/i, '')
+
+  text = text.trim()
+  if (!text) text = 'Here and active. What do you want next?'
+
+  // Telegram: no signature, plain direct message.
+  if (channel === 'telegram') {
+    return text
+  }
+
+  // Email: keep a traditional signature.
+  if (!/\n\s*[—-]\s*clerk\s*$/i.test(text)) {
+    text = `${text}\n\n— Clerk`
+  }
+  return text
+}
+
+async function sendClerkContactReply(
+  db: Parameters<typeof queries.getSetting>[0],
+  input: {
+    cloudRoomId: string
+    roomToken: string
+    channel: 'email' | 'telegram'
+    content: string
+  },
+): Promise<boolean> {
+  const keeperUserNumber = getKeeperUserNumber(db)
+  const formattedContent = normalizeClerkContactReply(input.channel, input.content)
+  const res = await fetch(`${getCloudApiBase()}/contacts/queen-message`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'X-Room-Token': input.roomToken,
+    },
+    body: JSON.stringify({
+      roomId: input.cloudRoomId,
+      queenNickname: 'clerk',
+      userNumber: keeperUserNumber,
+      question: formattedContent,
+      channels: [input.channel],
+    }),
+    signal: AbortSignal.timeout(10_000),
+  })
+  if (!res.ok) return false
+  const payload = await res.json().catch(() => ({})) as { email?: string; telegram?: string }
+  return input.channel === 'email'
+    ? payload.email === 'sent'
+    : payload.telegram === 'sent'
+}
+
+async function sendClerkTelegramTyping(
+  input: {
+    cloudRoomId: string
+    roomToken: string
+  },
+): Promise<void> {
+  await fetch(`${getCloudApiBase()}/contacts/queen-typing`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'X-Room-Token': input.roomToken,
+    },
+    body: JSON.stringify({
+      roomId: input.cloudRoomId,
+      channel: 'telegram',
+    }),
+    signal: AbortSignal.timeout(10_000),
+  }).catch(() => { /* best effort */ })
+}
+
+function startClerkTelegramTypingLoop(
+  input: {
+    cloudRoomId: string
+    roomToken: string
+  },
+): () => void {
+  let stopped = false
+  const tick = () => {
+    if (stopped) return
+    void sendClerkTelegramTyping(input)
+  }
+
+  tick()
+  const interval = setInterval(tick, CLERK_TELEGRAM_TYPING_INTERVAL_MS)
+  return () => {
+    stopped = true
+    clearInterval(interval)
+  }
+}
+
 interface QueenInboxMessage {
   id: number
   queenNickname: string
   channel: string
-  senderIdentifier: string | null
   body: string
-  receivedAt: string
 }
 
 interface QueenInboxResponse {
@@ -639,10 +736,18 @@ interface QueenInboxResponse {
   ok?: boolean
 }
 
-export async function pollQueenInbox(db: Parameters<typeof queries.getSetting>[0]): Promise<void> {
-  if (isCloudDeployment()) return
+interface PollQueenInboxOptions {
+  runClerkTurn?: typeof runClerkAssistantTurn
+}
 
-  const rooms = queries.listRooms(db, 'active')
+export async function pollQueenInbox(
+  db: Parameters<typeof queries.getSetting>[0],
+  options: PollQueenInboxOptions = {},
+): Promise<void> {
+  if (isCloudDeployment()) return
+  const runClerkTurn = options.runClerkTurn ?? runClerkAssistantTurn
+
+  const rooms = queries.listRooms(db)
   for (const room of rooms) {
     try {
       const cloudRoomId = getRoomCloudId(room.id)
@@ -669,11 +774,49 @@ export async function pollQueenInbox(db: Parameters<typeof queries.getSetting>[0
           storeClerkContactMemory(db, {
             direction: 'inbound',
             channel: safeChannel,
-            content: msg.body,
-            senderIdentifier: msg.senderIdentifier,
-            timestamp: msg.receivedAt,
+            content: msg.body
           })
           queries.logRoomActivity(db, room.id, 'system', `Keeper messaged Clerk via ${safeChannel}`, msg.body.slice(0, 200))
+
+          const stopTyping = safeChannel === 'telegram'
+            ? startClerkTelegramTypingLoop({ cloudRoomId, roomToken })
+            : null
+
+          try {
+            const turn = await runClerkTurn(db, msg.body, {
+              skipUserInsert: true,
+            })
+            let reply = turn.ok ? (turn.response ?? '').trim() : ''
+            if (!reply) {
+              reply = buildClerkReplyFallback(db, { body: msg.body })
+            }
+            const replyToSend = normalizeClerkContactReply(safeChannel, reply)
+
+            const sent = await sendClerkContactReply(db, {
+              cloudRoomId,
+              roomToken,
+              channel: safeChannel,
+              content: replyToSend,
+            })
+            storeClerkContactMemory(db, {
+              direction: 'outbound',
+              channel: safeChannel,
+              content: replyToSend,
+            })
+            if (sent) {
+              queries.logRoomActivity(db, room.id, 'system', `Clerk replied via ${safeChannel}`, replyToSend.slice(0, 200))
+            } else {
+              queries.logRoomActivity(
+                db,
+                room.id,
+                'system',
+                `Clerk reply delivery failed via ${safeChannel}`,
+                turn.error?.slice(0, 200) ?? 'Unable to deliver Clerk reply'
+              )
+            }
+          } finally {
+            stopTyping?.()
+          }
         } else {
           const body = `[Reply from keeper via ${channel} to ${nickname}]\n${msg.body}`
           queries.insertChatMessage(db, room.id, 'user', body)
