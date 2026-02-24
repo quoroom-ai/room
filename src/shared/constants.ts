@@ -208,17 +208,45 @@ export const WORKER_ROLE_PRESETS: Record<string, WorkerRolePreset> = {
   guardian: {
     cycleGapMs: 30_000,
     maxTurns: 15,
-    systemPromptPrefix: 'Monitor and observe. Do not spawn workers or make purchases. Focus on detecting anomalies in tasks, stations, and worker activity.'
+    systemPromptPrefix: 'Check quoroom_list_skills and quoroom_recall first. Monitor and observe. Do not spawn workers or make purchases. Focus on detecting anomalies in tasks, stations, and worker activity.'
   },
   analyst: {
     cycleGapMs: 120_000,
     maxTurns: 30,
-    systemPromptPrefix: 'Perform deep analysis. Work to completion on a task, then pause. Prefer depth over frequency.'
+    systemPromptPrefix: "Check quoroom_list_skills and quoroom_recall first — don't repeat research the team has already done. Perform deep analysis. Work to completion on a task, then pause. Prefer depth over frequency."
   },
   writer: {
     cycleGapMs: 120_000,
     maxTurns: 30,
-    systemPromptPrefix: 'Produce high-quality written output. Minimize interruptions between drafting sessions.'
+    systemPromptPrefix: 'Check quoroom_list_skills for existing drafts or style guides. Produce high-quality written output. Minimize interruptions between drafting sessions.'
+  },
+  executor: {
+    cycleGapMs: 30_000,
+    maxTurns: 40,
+    systemPromptPrefix: `Check quoroom_list_skills and quoroom_recall FIRST — another agent may have already documented what you need.
+
+You are an execution agent. ACTUALLY DO things using quoroom_browser — don't just search and plan.
+
+Browser rules:
+- First call: omit sessionId. Note the returned sessionId and pass it on every follow-up call.
+- Use fill for standard inputs, type for JS-heavy SPAs. For checkboxes: click text first; if intercepted by label, use CSS selector (e.g. input[type=checkbox]).
+- Take snapshot after every action sequence to see page state.
+- Store ALL results immediately with quoroom_remember("YourName: [what]", ...).
+
+The mandatory execution report (quoroom_create_skill) is required every cycle — see instructions below.`
+  },
+  researcher: {
+    cycleGapMs: 60_000,
+    maxTurns: 30,
+    systemPromptPrefix: `Check quoroom_list_skills and quoroom_recall FIRST — don't duplicate work the team has already done.
+
+You are a research specialist. Be data-driven: real numbers, URLs, competitor names, pricing data.
+
+Rules:
+- Name memories clearly: "YourName: [topic]" so teammates can find them.
+- Build on existing research — quoroom_recall before starting any topic.
+- Message key findings to the keeper: quoroom_send_message(to="keeper").
+- Create a skill when you find a reliable source or repeatable research technique.`
   },
 }
 

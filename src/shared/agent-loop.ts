@@ -573,6 +573,7 @@ export async function runCycle(
       : ['quoroom_web_search', 'quoroom_web_fetch', 'quoroom_browser']
     if (isCli) {
       if (has('quoroom_web_search') || has('quoroom_web_fetch')) toolLines.push('**Web:** (use your built-in web search and fetch tools)')
+      if (has('quoroom_browser')) toolLines.push('**Browser:** quoroom_browser (interactive — navigate, click, fill forms, submit, scroll, screenshot, persistent sessions via sessionId)')
     } else {
       const filteredWeb = (webToolNames || []).filter(has)
       if (filteredWeb.length) toolLines.push(`**Web:** ${filteredWeb.join(', ')}`)
@@ -586,9 +587,66 @@ export async function runCycle(
       else toolLines.push(`**Comms:** ${filteredComms.join(', ')}`)
     }
     if (has('quoroom_configure_room')) toolLines.push(`**Settings:** quoroom_configure_room${selfRegulateHint}`)
+    const skillToolNames = ['quoroom_create_skill', 'quoroom_list_skills', 'quoroom_edit_skill', 'quoroom_activate_skill', 'quoroom_deactivate_skill'].filter(has)
+    if (skillToolNames.length) toolLines.push(`**Skills:** ${skillToolNames.join(', ')} — write execution reports (MANDATORY each cycle)`)
     const toolList = toolLines.join('\n')
 
     contextParts.push(`## Instructions\nBased on the current state, decide what to do next and call the appropriate tools. Available tools:\n\n${toolList}\n\nDo NOT "stand by" or wait for anyone — every cycle must make progress. Act autonomously: make decisions and execute. Inform the keeper of progress or important updates using quoroom_send_message (to="keeper"), but never block on a response. If the keeper hasn't replied, proceed with your best judgment.\n\nRevenue is always a priority. Every room must sustain itself financially. Actively seek ways to earn: offer services to the keeper, propose paid work to other rooms, or find monetizable opportunities in your domain. Check your wallet balance and report financial status to the keeper.\n\n${toolCallInstruction}`)
+
+    // Browser tips — shown whenever quoroom_browser is available
+    if (has('quoroom_browser')) {
+      contextParts.push(`## Browser Tool — quoroom_browser
+You have a persistent browser tool. Use it to interact with websites: navigate, click, fill forms, submit, scroll, take screenshots.
+
+**Session persistence:**
+- First call: omit sessionId → starts fresh session. Note the returned sessionId.
+- Follow-up calls: pass sessionId back → keeps cookies, login state, localStorage.
+- Sessions expire after 10 min of inactivity. If expired, start a new session and re-login.
+
+**Reliable form filling (learned techniques):**
+- Always end action sequences with a \`snapshot\` to see current page state.
+- Use \`fill\` for standard inputs. Use \`type\` for JS-heavy SPAs (types char-by-char, triggers events).
+- For checkboxes: use \`click\` with text selector first. If intercepted by label, try CSS \`selector\` (e.g. \`input[type=checkbox]\`).
+- For contenteditable/rich text areas (email body, editors): use \`click\` on the area first, then \`type\` to enter text. \`fill\` often fails on contenteditable.
+- Use \`waitForSelector\` before interacting with dynamically loaded elements.
+- Use \`press\` with key name (Tab, Enter, Escape) to navigate forms.
+
+**CAPTCHAs:**
+- Some sites show visual CAPTCHAs. Use \`screenshot\` to save a PNG, then use Read tool to view the image and answer.
+- Clock CAPTCHAs: read the hour/minute hands and enter time as hh:mm.
+- If a CAPTCHA is unsolvable, try a different service.
+
+**Screenshots:** Use \`screenshot\` action → saves PNG to /tmp. View with Read tool (it can display images).
+
+**Store everything:** After creating accounts, finding contacts, or completing any action — immediately use quoroom_remember to save credentials, URLs, and results so the team and future cycles can access them.`)
+    }
+
+    // Knowledge persistence — skills + memory
+    if (skillToolNames.length || memTools.length) {
+      const parts: string[] = ['## Knowledge Persistence']
+      parts.push('You lose context between cycles. Save important discoveries so you and your teammates can reuse them.')
+      if (memTools.length) {
+        parts.push(`\n**Memory** (quoroom_remember/recall): Store facts, credentials, contacts, research results. Check memory with quoroom_recall before starting work — don't repeat what's already done. Also call quoroom_list_skills — skills contain the team's execution algorithms and may have exactly the recipe you need.`)
+      }
+      if (skillToolNames.length) {
+        parts.push(`\n**Skills — Execution Reports** (quoroom_create_skill): At the END of each cycle, create a skill documenting what you did. Skills are injected into every agent's system prompt — the whole team reads them next cycle.
+
+**MANDATORY: Before your cycle ends, call quoroom_create_skill with a report:**
+- Title: "[task]: [site/service name]" (e.g. "Tuta signup", "Email scraping from GitHub")
+- Body: step-by-step algorithm you used, including:
+  1. What you tried FIRST (and why it failed, with exact error or behavior)
+  2. What you tried NEXT (and whether it worked)
+  3. The WORKING approach with exact selectors, URLs, field names
+  4. Gotchas and warnings (e.g. "checkbox click intercepted by label — use CSS selector instead")
+- Set \`autoActivate: true\` and \`activationContext\` with keywords (e.g. ["tuta", "signup", "email", "checkbox"])
+
+Example skill body:
+"## Tuta Free Account Signup\\n1. Navigate to app.tuta.com → click 'Sign up'\\n2. Select Free plan (3rd radio) → click 'Continue'\\n3. Username: use 'fill' on textbox labeled 'Email address'\\n4. Password: use 'type' (not fill) — SPA input needs char-by-char\\n5. Checkboxes: text click fails (label intercepts). USE CSS: input[type=checkbox]:nth-of-type(1) and :nth-of-type(2)\\n6. CAPTCHA: clock type — screenshot it, read time as hh:mm\\nFAILED: Ctrl+A to clear field (doesn't work in this SPA). Use triple-click or reload page instead."
+
+This is NOT optional — every cycle must produce at least one skill report.`)
+      }
+      contextParts.push(parts.join('\n'))
+    }
 
     const prompt = contextParts.join('\n\n')
 
