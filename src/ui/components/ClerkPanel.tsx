@@ -37,6 +37,19 @@ function senderTagClass(role: ClerkMessage['role']): string {
   return 'bg-surface-secondary text-text-muted border-border-primary'
 }
 
+function dedupeById(items: ClerkMessage[]): ClerkMessage[] {
+  const seen = new Set<number>()
+  const out: ClerkMessage[] = []
+  for (const item of items) {
+    if (item.id > 0) {
+      if (seen.has(item.id)) continue
+      seen.add(item.id)
+    }
+    out.push(item)
+  }
+  return out
+}
+
 /** Process inline markdown: **bold**, *italic*, `code`, [text](url) */
 function processInline(text: string): React.ReactNode[] {
   const parts: React.ReactNode[] = []
@@ -299,7 +312,7 @@ export function ClerkPanel({ setupLaunchKey = 0 }: ClerkPanelProps): React.JSX.E
   useEffect(() => {
     api.clerk.messages().then((msgs) => {
       seenMessageIdsRef.current = new Set(msgs.map((m) => m.id))
-      setMessages(msgs)
+      setMessages(dedupeById(msgs))
       setInitialLoaded(true)
       // Scroll to bottom after initial load
       requestAnimationFrame(() => {
@@ -421,7 +434,20 @@ export function ClerkPanel({ setupLaunchKey = 0 }: ClerkPanelProps): React.JSX.E
         if (!message || typeof message.id !== 'number') return
         setMessages((prev) => {
           if (prev.some((item) => item.id === message.id)) return prev
-          return [...prev, message]
+
+          // Reconcile optimistic keeper message (negative id) with server-acked user message.
+          if (message.role === 'user') {
+            const optimisticIdx = prev.findIndex(
+              (item) => item.id < 0 && item.role === 'user' && item.content === message.content
+            )
+            if (optimisticIdx >= 0) {
+              const next = [...prev]
+              next[optimisticIdx] = message
+              return dedupeById(next)
+            }
+          }
+
+          return dedupeById([...prev, message])
         })
       }
     })
@@ -446,7 +472,7 @@ export function ClerkPanel({ setupLaunchKey = 0 }: ClerkPanelProps): React.JSX.E
 
     try {
       const result = await api.clerk.send(message)
-      setMessages(result.messages)
+      setMessages(dedupeById(result.messages))
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to send')
     } finally {
