@@ -5,7 +5,7 @@ export const mainTabs: { id: Tab; label: string; advanced?: boolean }[] = [
   { id: 'chat', label: 'Queen' },
   { id: 'goals', label: 'Goals' },
   { id: 'votes', label: 'Votes' },
-  { id: 'messages', label: 'Messages', advanced: true },
+  { id: 'messages', label: 'Messages' },
   { id: 'workers', label: 'Workers', advanced: true },
   { id: 'tasks', label: 'Tasks', advanced: true },
   { id: 'skills', label: 'Skills', advanced: true },
