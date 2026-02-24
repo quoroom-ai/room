@@ -513,20 +513,21 @@ export const api = {
       request<{
         configured: boolean
         model: string | null
+        autoConfigured?: boolean
         commentaryEnabled: boolean
         commentaryMode: 'auto' | 'light'
         commentaryPace: 'active' | 'light'
         apiAuth: {
-          openai: { hasRoomCredential: boolean; hasSavedKey: boolean; hasEnvKey: boolean; ready: boolean }
-          anthropic: { hasRoomCredential: boolean; hasSavedKey: boolean; hasEnvKey: boolean; ready: boolean }
+          openai: { hasRoomCredential: boolean; hasSavedKey: boolean; hasEnvKey: boolean; ready: boolean; maskedKey: string | null }
+          anthropic: { hasRoomCredential: boolean; hasSavedKey: boolean; hasEnvKey: boolean; ready: boolean; maskedKey: string | null }
         }
       }>('GET', '/api/clerk/status'),
     setApiKey: (provider: 'openai_api' | 'anthropic_api', key: string) =>
       request<{
         ok: true
         apiAuth: {
-          openai: { hasRoomCredential: boolean; hasSavedKey: boolean; hasEnvKey: boolean; ready: boolean }
-          anthropic: { hasRoomCredential: boolean; hasSavedKey: boolean; hasEnvKey: boolean; ready: boolean }
+          openai: { hasRoomCredential: boolean; hasSavedKey: boolean; hasEnvKey: boolean; ready: boolean; maskedKey: string | null }
+          anthropic: { hasRoomCredential: boolean; hasSavedKey: boolean; hasEnvKey: boolean; ready: boolean; maskedKey: string | null }
         }
       }>('POST', '/api/clerk/api-key', { provider, key }),
     updateSettings: (settings: { model?: string; commentaryEnabled?: boolean; commentaryMode?: 'auto' | 'light' }) =>
@@ -536,8 +537,8 @@ export const api = {
         commentaryMode: 'auto' | 'light'
         commentaryPace: 'active' | 'light'
         apiAuth: {
-          openai: { hasRoomCredential: boolean; hasSavedKey: boolean; hasEnvKey: boolean; ready: boolean }
-          anthropic: { hasRoomCredential: boolean; hasSavedKey: boolean; hasEnvKey: boolean; ready: boolean }
+          openai: { hasRoomCredential: boolean; hasSavedKey: boolean; hasEnvKey: boolean; ready: boolean; maskedKey: string | null }
+          anthropic: { hasRoomCredential: boolean; hasSavedKey: boolean; hasEnvKey: boolean; ready: boolean; maskedKey: string | null }
         }
       }>('PUT', '/api/clerk/settings', settings),
   },

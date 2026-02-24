@@ -1,6 +1,7 @@
-import { describe, it, expect, beforeAll, afterAll, beforeEach } from 'vitest'
+import { describe, it, expect, beforeAll, afterAll, beforeEach, afterEach, vi } from 'vitest'
 import { createTestServer, request, type TestContext } from '../helpers/test-server'
 import * as queries from '../../../shared/db-queries'
+import * as providerCli from '../../provider-cli'
 
 let ctx: TestContext
 
@@ -16,6 +17,13 @@ beforeEach(() => {
   // Clear clerk messages and relevant settings between tests
   ctx.db.prepare("DELETE FROM clerk_messages").run()
   ctx.db.prepare("DELETE FROM settings WHERE key LIKE 'clerk_%'").run()
+  // Prevent auto-configure from detecting local CLI installs by default
+  vi.spyOn(providerCli, 'probeProviderInstalled').mockReturnValue({ installed: false })
+  vi.spyOn(providerCli, 'probeProviderConnected').mockReturnValue(null)
+})
+
+afterEach(() => {
+  vi.restoreAllMocks()
 })
 
 describe('Clerk routes', () => {
@@ -139,6 +147,63 @@ describe('Clerk routes', () => {
       const res = await request(ctx, 'GET', '/api/clerk/status')
       expect(res.status).toBe(200)
       expect((res.body as any).commentaryPace).toBe('active')
+    })
+
+    it('auto-configures claude when CLI is installed', async () => {
+      vi.spyOn(providerCli, 'probeProviderInstalled').mockImplementation((p) =>
+        p === 'claude' ? { installed: true, version: '1.0.0' } : { installed: false }
+      )
+
+      const res = await request(ctx, 'GET', '/api/clerk/status')
+      expect(res.status).toBe(200)
+      const body = res.body as any
+      expect(body.configured).toBe(true)
+      expect(body.model).toBe('claude')
+      expect(body.autoConfigured).toBe(true)
+    })
+
+    it('auto-configures codex when codex CLI is installed and connected', async () => {
+      vi.spyOn(providerCli, 'probeProviderInstalled').mockImplementation((p) =>
+        p === 'codex' ? { installed: true, version: '1.0.0' } : { installed: false }
+      )
+      vi.spyOn(providerCli, 'probeProviderConnected').mockImplementation((p) =>
+        p === 'codex' ? true : null
+      )
+
+      const res = await request(ctx, 'GET', '/api/clerk/status')
+      expect(res.status).toBe(200)
+      const body = res.body as any
+      expect(body.configured).toBe(true)
+      expect(body.model).toBe('codex')
+      expect(body.autoConfigured).toBe(true)
+    })
+
+    it('does not auto-configure when model is already set', async () => {
+      queries.setSetting(ctx.db, 'clerk_model', 'openai:gpt-4o-mini')
+      vi.spyOn(providerCli, 'probeProviderInstalled').mockReturnValue({ installed: true, version: '1.0.0' })
+
+      const res = await request(ctx, 'GET', '/api/clerk/status')
+      expect(res.status).toBe(200)
+      const body = res.body as any
+      expect(body.model).toBe('openai:gpt-4o-mini')
+      expect(body.autoConfigured).toBe(false)
+    })
+
+    it('persists auto-configured model so second call skips detection', async () => {
+      vi.spyOn(providerCli, 'probeProviderInstalled').mockImplementation((p) =>
+        p === 'claude' ? { installed: true, version: '1.0.0' } : { installed: false }
+      )
+
+      const first = await request(ctx, 'GET', '/api/clerk/status')
+      expect((first.body as any).autoConfigured).toBe(true)
+
+      // Second call — model is now in DB, no probing needed
+      const probeSpy = vi.spyOn(providerCli, 'probeProviderInstalled').mockReturnValue({ installed: false })
+      const second = await request(ctx, 'GET', '/api/clerk/status')
+      expect((second.body as any).model).toBe('claude')
+      expect((second.body as any).autoConfigured).toBe(false)
+      // probeProviderInstalled should NOT have been called since model is set
+      expect(probeSpy).not.toHaveBeenCalled()
     })
   })
 

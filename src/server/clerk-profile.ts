@@ -5,6 +5,7 @@ import type Database from 'better-sqlite3'
 import { executeAgent } from '../shared/agent-executor'
 import * as queries from '../shared/db-queries'
 import { getModelProvider } from '../shared/model-provider'
+import { probeProviderConnected, probeProviderInstalled } from './provider-cli'
 import type { ToolDef } from '../shared/queen-tools'
 import {
   CLERK_FALLBACK_ANTHROPIC_MODEL,
@@ -24,6 +25,7 @@ export interface ClerkApiAuthState {
   hasSavedKey: boolean
   hasEnvKey: boolean
   ready: boolean
+  maskedKey: string | null
 }
 
 export interface ClerkExecutionOptions {
@@ -66,17 +68,26 @@ function findAnyRoomCredential(db: Database.Database, credentialName: 'openai_ap
   return null
 }
 
+function maskKey(key: string | null): string | null {
+  if (!key) return null
+  const trimmed = key.trim()
+  if (trimmed.length <= 8) return `${trimmed.slice(0, 3)}...`
+  return `${trimmed.slice(0, 7)}...${trimmed.slice(-4)}`
+}
+
 function getClerkApiAuthState(db: Database.Database, provider: ClerkApiProvider): ClerkApiAuthState {
   const credentialName = provider === 'openai_api' ? 'openai_api_key' : 'anthropic_api_key'
   const envVar = provider === 'openai_api' ? 'OPENAI_API_KEY' : 'ANTHROPIC_API_KEY'
-  const hasRoomCredential = Boolean(findAnyRoomCredential(db, credentialName))
-  const hasSavedKey = Boolean(queries.getClerkApiKey(db, provider))
-  const hasEnvKey = Boolean((process.env[envVar] || '').trim())
+  const roomCredential = findAnyRoomCredential(db, credentialName)
+  const savedKey = queries.getClerkApiKey(db, provider)
+  const envKey = (process.env[envVar] || '').trim() || null
+  const activeKey = roomCredential || savedKey || envKey
   return {
-    hasRoomCredential,
-    hasSavedKey,
-    hasEnvKey,
-    ready: hasRoomCredential || hasSavedKey || hasEnvKey
+    hasRoomCredential: Boolean(roomCredential),
+    hasSavedKey: Boolean(savedKey),
+    hasEnvKey: Boolean(envKey),
+    ready: Boolean(activeKey),
+    maskedKey: maskKey(activeKey),
   }
 }
 
@@ -85,6 +96,20 @@ export function getClerkApiAuth(db: Database.Database): { openai: ClerkApiAuthSt
     openai: getClerkApiAuthState(db, 'openai_api'),
     anthropic: getClerkApiAuthState(db, 'anthropic_api')
   }
+}
+
+/**
+ * Detect the best available provider and return a model string, or null if nothing usable.
+ * Priority: claude CLI → codex CLI → openai API key → anthropic API key.
+ */
+export function autoConfigureClerkModel(db: Database.Database): string | null {
+  if (probeProviderInstalled('claude').installed) return DEFAULT_CLERK_MODEL
+  const codex = probeProviderInstalled('codex')
+  if (codex.installed && probeProviderConnected('codex') === true) return CLERK_FALLBACK_SUBSCRIPTION_MODEL
+  const apiAuth = getClerkApiAuth(db)
+  if (apiAuth.openai.ready) return CLERK_FALLBACK_OPENAI_MODEL
+  if (apiAuth.anthropic.ready) return CLERK_FALLBACK_ANTHROPIC_MODEL
+  return null
 }
 
 export function getClerkPreferredModel(db: Database.Database, fallbackModel: string = DEFAULT_CLERK_MODEL): string {

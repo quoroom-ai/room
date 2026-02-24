@@ -39,6 +39,7 @@ interface ApiAuthSignal {
   hasSavedKey: boolean
   hasEnvKey: boolean
   ready: boolean
+  maskedKey: string | null
 }
 
 interface SetupPath {
@@ -490,26 +491,40 @@ export function ClerkSetupGuide({
                 )}
 
                 {/* API key path */}
-                {isApiPath(selectedPathId) && (
-                  <div className="mt-3 pt-3 border-t border-border-primary space-y-2">
-                    <label className="block text-xs font-medium text-text-secondary">
-                      {selectedPathId === 'openai_api' ? 'OpenAI API key' : 'Anthropic API key'}
-                    </label>
-                    <input
-                      type="password"
-                      value={apiKeyInput}
-                      onChange={(e) => setApiKeyInput(e.target.value)}
-                      placeholder={status.ready ? 'Optional: paste a new key to replace' : 'Paste API key'}
-                      disabled={busy}
-                      className="w-full px-2.5 py-2 text-sm border border-border-primary rounded-lg focus:outline-none focus:border-text-muted bg-surface-primary text-text-primary placeholder:text-text-muted disabled:opacity-70"
-                    />
-                    <p className="text-xs text-text-muted">
-                      {status.ready
-                        ? 'A key is already available. Leave blank to reuse it; this key is shared with room setup.'
-                        : 'Key is validated and saved when you connect.'}
-                    </p>
-                  </div>
-                )}
+                {isApiPath(selectedPathId) && (() => {
+                  const auth = selectedPathId === 'openai_api' ? apiAuth?.openai : apiAuth?.anthropic
+                  return (
+                    <div className="mt-3 pt-3 border-t border-border-primary space-y-2">
+                      <label className="block text-xs font-medium text-text-secondary">
+                        {selectedPathId === 'openai_api' ? 'OpenAI API key' : 'Anthropic API key'}
+                      </label>
+                      {auth?.maskedKey && (
+                        <div className="flex items-center gap-2 text-xs">
+                          <span className="text-text-muted">Current:</span>
+                          <code className="px-1.5 py-0.5 rounded bg-surface-primary border border-border-primary text-text-secondary font-mono">
+                            {auth.maskedKey}
+                          </code>
+                          <span className="text-text-muted">
+                            ({describeApiAuthSource(auth)})
+                          </span>
+                        </div>
+                      )}
+                      <input
+                        type="password"
+                        value={apiKeyInput}
+                        onChange={(e) => setApiKeyInput(e.target.value)}
+                        placeholder={status.ready ? 'Paste new key to replace' : 'Paste API key'}
+                        disabled={busy}
+                        className="w-full px-2.5 py-2 text-sm border border-border-primary rounded-lg focus:outline-none focus:border-text-muted bg-surface-primary text-text-primary placeholder:text-text-muted disabled:opacity-70"
+                      />
+                      <p className="text-xs text-text-muted">
+                        {status.ready
+                          ? 'Key is shared with room setup. Paste a new key to replace it.'
+                          : 'Key is validated and saved when you connect.'}
+                      </p>
+                    </div>
+                  )
+                })()}
 
                 {!status.ready && !isSubPath(selectedPathId) && (
                   <p className="text-xs text-status-warning mt-2">

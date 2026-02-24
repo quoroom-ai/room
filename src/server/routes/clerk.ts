@@ -5,6 +5,7 @@ import { eventBus } from '../event-bus'
 import { CLERK_TOOL_DEFINITIONS, executeClerkTool } from '../../shared/clerk-tools'
 import { sendKeeperEmail } from '../keeper-email'
 import {
+  autoConfigureClerkModel,
   executeClerkWithFallback,
   getClerkApiAuth,
   syncProjectDocsMemory,
@@ -467,7 +468,22 @@ export function registerClerkRoutes(router: Router): void {
   // Get clerk status
   router.get('/api/clerk/status', (ctx) => {
     const clerkWorkerId = queries.getSetting(ctx.db, 'clerk_worker_id')
-    const model = queries.getSetting(ctx.db, 'clerk_model')
+    let model = queries.getSetting(ctx.db, 'clerk_model')
+
+    // Auto-configure: if no model set, detect best available provider and persist
+    let autoConfigured = false
+    if (!model) {
+      const detected = autoConfigureClerkModel(ctx.db)
+      if (detected) {
+        queries.setSetting(ctx.db, 'clerk_model', detected)
+        queries.setSetting(ctx.db, 'queen_model', detected)
+        const clerk = queries.ensureClerkWorker(ctx.db)
+        queries.updateWorker(ctx.db, clerk.id, { model: detected })
+        model = detected
+        autoConfigured = true
+      }
+    }
+
     const commentaryEnabled = queries.getSetting(ctx.db, 'clerk_commentary_enabled') !== 'false'
     const commentaryMode = getCommentaryMode(ctx.db)
     const commentaryPace = commentaryEnabled ? getCommentaryPace(ctx.db) : 'light'
@@ -476,6 +492,7 @@ export function registerClerkRoutes(router: Router): void {
       data: {
         configured: Boolean(clerkWorkerId) || Boolean(model),
         model: model || null,
+        autoConfigured,
         commentaryEnabled,
         commentaryMode,
         commentaryPace,
