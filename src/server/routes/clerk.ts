@@ -3,6 +3,7 @@ import type Database from 'better-sqlite3'
 import * as queries from '../../shared/db-queries'
 import { eventBus } from '../event-bus'
 import { CLERK_TOOL_DEFINITIONS, executeClerkTool } from '../../shared/clerk-tools'
+import { sendKeeperEmail } from '../keeper-email'
 import {
   executeClerkWithFallback,
   getClerkApiAuth,
@@ -14,6 +15,8 @@ const VALIDATION_TIMEOUT_MS = 8000
 const CLERK_RECENT_LOG_LIMIT = 120
 const CLERK_LOG_LINE_MAX = 240
 const CLERK_SUMMARY_ITEM_LIMIT = 8
+const CLERK_COMMENTARY_HOLD_COUNT_KEY = 'clerk_commentary_hold_count'
+const CLERK_LAST_ASSISTANT_REPLY_AT_KEY = 'clerk_last_assistant_reply_at'
 
 function extractApiError(payload: unknown): string | null {
   if (!payload || typeof payload !== 'object') return null
@@ -209,6 +212,129 @@ function buildClerkContext(db: Database.Database, projectDocsSnapshot?: string):
   return parts.join('\n')
 }
 
+function getCommentaryHoldCount(db: Database.Database): number {
+  const raw = queries.getSetting(db, CLERK_COMMENTARY_HOLD_COUNT_KEY) ?? '0'
+  const parsed = Number.parseInt(raw, 10)
+  if (!Number.isFinite(parsed) || parsed < 1) return 0
+  return parsed
+}
+
+function setCommentaryHoldCount(db: Database.Database, count: number): void {
+  const safe = Math.max(0, Math.trunc(count))
+  queries.setSetting(db, CLERK_COMMENTARY_HOLD_COUNT_KEY, String(safe))
+}
+
+function acquireCommentaryHold(db: Database.Database): () => void {
+  const next = getCommentaryHoldCount(db) + 1
+  setCommentaryHoldCount(db, next)
+  eventBus.emit('clerk', 'clerk:commentary_hold', { count: next })
+
+  let released = false
+  return () => {
+    if (released) return
+    released = true
+    const remaining = Math.max(0, getCommentaryHoldCount(db) - 1)
+    setCommentaryHoldCount(db, remaining)
+    eventBus.emit('clerk', 'clerk:commentary_hold', { count: remaining })
+  }
+}
+
+export interface ClerkAssistantTurnOptions {
+  skipUserInsert?: boolean
+  userSource?: 'assistant' | 'commentary' | 'task' | 'email' | 'telegram'
+}
+
+export interface ClerkAssistantTurnResult {
+  ok: boolean
+  statusCode: number
+  response: string | null
+  error: string | null
+}
+
+export async function runClerkAssistantTurn(
+  db: Database.Database,
+  message: string,
+  options: ClerkAssistantTurnOptions = {},
+): Promise<ClerkAssistantTurnResult> {
+  const trimmed = message.trim()
+  if (!trimmed) return { ok: false, statusCode: 400, response: null, error: 'message must not be empty' }
+
+  const releaseCommentaryHold = acquireCommentaryHold(db)
+  try {
+    // Ensure clerk worker exists
+    const clerk = queries.ensureClerkWorker(db)
+    const model = queries.getSetting(db, 'clerk_model') || clerk.model || DEFAULT_CLERK_MODEL
+
+    if (!options.skipUserInsert) {
+      queries.insertClerkMessage(db, 'user', trimmed, options.userSource)
+    }
+
+    // Pause commentary immediately when keeper writes.
+    queries.setSetting(db, 'clerk_last_user_message_at', new Date().toISOString())
+    eventBus.emit('clerk', 'clerk:user_message', { timestamp: Date.now() })
+
+    // Build context
+    const projectDocsSnapshot = syncProjectDocsMemory(db)
+    const context = buildClerkContext(db, projectDocsSnapshot)
+    const history = queries.listClerkMessages(db)
+    const historyBeforeLatest = (() => {
+      if (options.skipUserInsert) return history
+      const last = history[history.length - 1]
+      if (last && last.role === 'user' && last.content === trimmed) return history.slice(0, -1)
+      return history
+    })()
+    const logContext = buildClerkLogContext(historyBeforeLatest)
+    const fullPrompt = `## Current System State\n${context}\n\n## Older Clerk Log Summary (full log is retained in DB)\n${logContext.summary}\n\n## Recent Clerk Log (capped for productivity)\n${logContext.recent}\n\n## Keeper's Latest Message\n${trimmed}`
+
+    const sessionId = queries.getSetting(db, 'clerk_session_id') || undefined
+
+    const result = await executeClerkWithFallback({
+      db,
+      preferredModel: model,
+      prompt: fullPrompt,
+      systemPrompt: clerk.systemPrompt,
+      resumeSessionId: sessionId,
+      maxTurns: 10,
+      timeoutMs: 3 * 60 * 1000,
+      toolDefs: CLERK_TOOL_DEFINITIONS,
+      onToolCall: async (toolName: string, args: Record<string, unknown>): Promise<string> => {
+        const out = await executeClerkTool(db, toolName, args, {
+          sendEmail: (to, content, subject) => sendKeeperEmail(db, to, content, subject),
+        })
+        return out.isError ? `Error: ${out.content}` : out.content
+      }
+    })
+
+    queries.insertClerkUsage(db, {
+      source: 'chat',
+      model: result.model,
+      inputTokens: result.usage.inputTokens,
+      outputTokens: result.usage.outputTokens,
+      success: result.ok,
+      usedFallback: result.usedFallback,
+      attempts: result.ok ? result.attempts.length + 1 : Math.max(1, result.attempts.length),
+    })
+
+    if (!result.ok) {
+      const reason = result.error || `Clerk execution failed (model: ${result.model})`
+      return { ok: false, statusCode: result.statusCode, response: null, error: reason.slice(0, 500) }
+    }
+
+    const response = result.output || 'No response'
+    queries.insertClerkMessage(db, 'assistant', response, 'assistant')
+    queries.setSetting(db, CLERK_LAST_ASSISTANT_REPLY_AT_KEY, new Date().toISOString())
+    eventBus.emit('clerk', 'clerk:assistant_reply', { timestamp: Date.now() })
+
+    if (result.sessionId) {
+      queries.setSetting(db, 'clerk_session_id', result.sessionId)
+    }
+
+    return { ok: true, statusCode: 200, response, error: null }
+  } finally {
+    releaseCommentaryHold()
+  }
+}
+
 export function registerClerkRoutes(router: Router): void {
   router.get('/api/clerk/usage', (ctx) => {
     return {
@@ -237,6 +363,19 @@ export function registerClerkRoutes(router: Router): void {
     return { data: messages }
   })
 
+  // Heartbeat while user has the page open — controls commentary active/light mode
+  router.post('/api/clerk/presence', (ctx) => {
+    queries.setSetting(ctx.db, 'clerk_user_last_seen_at', new Date().toISOString())
+    return { data: { ok: true } }
+  })
+
+  // Notify clerk that keeper started typing (pause commentary early)
+  router.post('/api/clerk/typing', (ctx) => {
+    queries.setSetting(ctx.db, 'clerk_last_user_message_at', new Date().toISOString())
+    eventBus.emit('clerk', 'clerk:user_typing', { timestamp: Date.now() })
+    return { data: { ok: true } }
+  })
+
   // Send a message to the clerk and get a response
   router.post('/api/clerk/chat', async (ctx) => {
     const body = ctx.body as Record<string, unknown> || {}
@@ -249,73 +388,11 @@ export function registerClerkRoutes(router: Router): void {
       return { status: 400, error: 'message must not be empty' }
     }
 
-    // Ensure clerk worker exists
-    const clerk = queries.ensureClerkWorker(ctx.db)
-    const model = queries.getSetting(ctx.db, 'clerk_model') || clerk.model || DEFAULT_CLERK_MODEL
-
-    // Save user message
-    queries.insertClerkMessage(ctx.db, 'user', message)
-
-    // Pause commentary
-    queries.setSetting(ctx.db, 'clerk_last_user_message_at', new Date().toISOString())
-    eventBus.emit('clerk', 'clerk:user_message', { timestamp: Date.now() })
-
-    // Build context
-    const projectDocsSnapshot = syncProjectDocsMemory(ctx.db)
-    const context = buildClerkContext(ctx.db, projectDocsSnapshot)
-    const history = queries.listClerkMessages(ctx.db)
-    const historyBeforeLatest = (() => {
-      const last = history[history.length - 1]
-      if (last && last.role === 'user' && last.content === message) return history.slice(0, -1)
-      return history
-    })()
-    const logContext = buildClerkLogContext(historyBeforeLatest)
-    const fullPrompt = `## Current System State\n${context}\n\n## Older Clerk Log Summary (full log is retained in DB)\n${logContext.summary}\n\n## Recent Clerk Log (capped for productivity)\n${logContext.recent}\n\n## Keeper's Latest Message\n${message}`
-
-    const sessionId = queries.getSetting(ctx.db, 'clerk_session_id') || undefined
-
-    const result = await executeClerkWithFallback({
-      db: ctx.db,
-      preferredModel: model,
-      prompt: fullPrompt,
-      systemPrompt: clerk.systemPrompt,
-      resumeSessionId: sessionId,
-      maxTurns: 10,
-      timeoutMs: 3 * 60 * 1000,
-      toolDefs: CLERK_TOOL_DEFINITIONS,
-      onToolCall: async (toolName: string, args: Record<string, unknown>): Promise<string> => {
-        const out = await executeClerkTool(ctx.db, toolName, args)
-        return out.isError ? `Error: ${out.content}` : out.content
-      }
-    })
-
-    queries.insertClerkUsage(ctx.db, {
-      source: 'chat',
-      model: result.model,
-      inputTokens: result.usage.inputTokens,
-      outputTokens: result.usage.outputTokens,
-      success: result.ok,
-      usedFallback: result.usedFallback,
-      attempts: result.ok ? result.attempts.length + 1 : Math.max(1, result.attempts.length),
-    })
-
-    if (!result.ok) {
-      const reason = result.error || `Clerk execution failed (model: ${result.model})`
-      return { status: result.statusCode, error: reason.slice(0, 500) }
-    }
-
-    const response = result.output || 'No response'
-
-    // Save assistant response
-    queries.insertClerkMessage(ctx.db, 'assistant', response, 'assistant')
-
-    // Save session for continuity
-    if (result.sessionId) {
-      queries.setSetting(ctx.db, 'clerk_session_id', result.sessionId)
-    }
+    const turn = await runClerkAssistantTurn(ctx.db, message)
+    if (!turn.ok) return { status: turn.statusCode, error: turn.error ?? 'Clerk execution failed' }
 
     const messages = queries.listClerkMessages(ctx.db)
-    return { data: { response, messages } }
+    return { data: { response: turn.response ?? 'No response', messages } }
   })
 
   // Reset clerk session and messages

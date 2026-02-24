@@ -18,11 +18,17 @@ import {
 } from '../shared/clerk-profile-config'
 import { executeClerkWithFallback } from './clerk-profile'
 
-const COMMENTARY_INTERVAL_MS = 8_000    // Check every 8s
+const COMMENTARY_INTERVAL_MIN_MS = 8_000              // Min delay between commentary (active)
+const COMMENTARY_INTERVAL_MAX_MS = 30_000             // Max delay between commentary (active)
+const COMMENTARY_LIGHT_INTERVAL_MIN_MS = 2 * 60 * 60 * 1000  // 2h (light mode)
+const COMMENTARY_LIGHT_INTERVAL_MAX_MS = 3 * 60 * 60 * 1000  // 3h (light mode)
+const USER_PRESENCE_TIMEOUT_MS = 90_000               // 90s without heartbeat = user gone
 const SILENCE_THRESHOLD_MS = 60_000    // Resume after 60s of user silence
 const MAX_BUFFER_SIZE = 200             // Max log entries to buffer
 const MIN_ENTRIES_FOR_LLM = 1           // Always use LLM when API keys available
 const LLM_TIMEOUT_MS = 20_000           // Max wait for LLM response
+const COMMENTARY_HOLD_COUNT_KEY = 'clerk_commentary_hold_count'
+const LAST_ASSISTANT_REPLY_AT_KEY = 'clerk_last_assistant_reply_at'
 
 interface LogEntry {
   roomName: string
@@ -45,10 +51,11 @@ interface CommentaryGenerationResult {
   attempts: number
 }
 
-let commentaryTimer: ReturnType<typeof setInterval> | null = null
+let commentaryTimer: ReturnType<typeof setTimeout> | null = null
 let unsubscribeEvents: (() => void) | null = null
 let logBuffer: LogEntry[] = []
 let lastUserMessageAt = 0
+let lastAssistantReplyAt = 0
 let dbRef: Database.Database | null = null
 let generating = false
 let lastCommentary = '' // Track last output to avoid repetition
@@ -105,6 +112,25 @@ function normalizeActorLabel(workerName: string, roomName: string): string {
   const actor = compact.replace(/queen$/, '')
   if (!actor || actor === roomCompact) return 'queen'
   return actor
+}
+
+function getCommentaryHoldCount(db: Database.Database): number {
+  const raw = queries.getSetting(db, COMMENTARY_HOLD_COUNT_KEY) ?? '0'
+  const parsed = Number.parseInt(raw, 10)
+  if (!Number.isFinite(parsed) || parsed < 1) return 0
+  return parsed
+}
+
+function isCommentaryHeld(db: Database.Database): boolean {
+  return getCommentaryHoldCount(db) > 0
+}
+
+function requeueEntries(entries: LogEntry[]): void {
+  if (entries.length === 0) return
+  logBuffer = [...entries, ...logBuffer]
+  if (logBuffer.length > MAX_BUFFER_SIZE) {
+    logBuffer = logBuffer.slice(-MAX_BUFFER_SIZE)
+  }
 }
 
 /** Extract room ID from channel like 'room:42' */
@@ -470,18 +496,31 @@ async function generateCommentary(rawLogs: string): Promise<CommentaryGeneration
 export function startCommentaryEngine(db: Database.Database): void {
   if (commentaryTimer) return
   dbRef = db
+  if (getCommentaryHoldCount(db) > 0) {
+    queries.setSetting(db, COMMENTARY_HOLD_COUNT_KEY, '0')
+  }
   const lastUserIso = queries.getSetting(db, 'clerk_last_user_message_at')
   if (lastUserIso) {
     const parsed = Date.parse(lastUserIso)
     if (Number.isFinite(parsed)) lastUserMessageAt = parsed
   }
+  const lastReplyIso = queries.getSetting(db, LAST_ASSISTANT_REPLY_AT_KEY)
+  if (lastReplyIso) {
+    const parsed = Date.parse(lastReplyIso)
+    if (Number.isFinite(parsed)) lastAssistantReplyAt = parsed
+  }
 
   // Subscribe to all events
   unsubscribeEvents = eventBus.onAny((event: WsEvent) => {
     // Listen for user message notifications to pause commentary
-    if (event.type === 'clerk:user_message') {
+    if (event.type === 'clerk:user_message' || event.type === 'clerk:user_typing') {
       const payload = event.data as { timestamp?: number } | null
       lastUserMessageAt = typeof payload?.timestamp === 'number' ? payload.timestamp : Date.now()
+      return
+    }
+    if (event.type === 'clerk:assistant_reply') {
+      const payload = event.data as { timestamp?: number } | null
+      lastAssistantReplyAt = typeof payload?.timestamp === 'number' ? payload.timestamp : Date.now()
       return
     }
 
@@ -600,10 +639,26 @@ export function startCommentaryEngine(db: Database.Database): void {
     }
   })
 
-  // Emit commentary at regular intervals
-  commentaryTimer = setInterval(() => {
-    void emitCommentary()
-  }, COMMENTARY_INTERVAL_MS)
+  function isUserPresent(): boolean {
+    if (!dbRef) return false
+    const lastSeen = queries.getSetting(dbRef, 'clerk_user_last_seen_at')
+    if (!lastSeen) return false
+    return Date.now() - new Date(lastSeen).getTime() < USER_PRESENCE_TIMEOUT_MS
+  }
+
+  // Emit commentary at random intervals — active pace when user is online, light mode otherwise
+  function scheduleNext(): void {
+    const active = isUserPresent()
+    const min = active ? COMMENTARY_INTERVAL_MIN_MS : COMMENTARY_LIGHT_INTERVAL_MIN_MS
+    const max = active ? COMMENTARY_INTERVAL_MAX_MS : COMMENTARY_LIGHT_INTERVAL_MAX_MS
+    const delay = min + Math.random() * (max - min)
+    commentaryTimer = setTimeout(() => {
+      void emitCommentary().finally(() => {
+        if (commentaryTimer !== null) scheduleNext()
+      })
+    }, delay)
+  }
+  scheduleNext()
 }
 
 async function emitCommentary(): Promise<void> {
@@ -611,9 +666,12 @@ async function emitCommentary(): Promise<void> {
   if (logBuffer.length === 0) return
   if (generating) return // Don't overlap
 
+  if (isCommentaryHeld(dbRef)) return
+
   // Respect silence threshold
   const now = Date.now()
-  if (now - lastUserMessageAt < SILENCE_THRESHOLD_MS) return
+  const lastKeeperOrReplyAt = Math.max(lastUserMessageAt, lastAssistantReplyAt)
+  if (now - lastKeeperOrReplyAt < SILENCE_THRESHOLD_MS) return
 
   // Check if commentary is enabled
   const enabled = queries.getSetting(dbRef, 'clerk_commentary_enabled')
@@ -654,6 +712,10 @@ async function emitCommentary(): Promise<void> {
     }
 
     if (commentary && dbRef) {
+      if (isCommentaryHeld(dbRef)) {
+        requeueEntries(entries)
+        return
+      }
       lastCommentary = commentary
       queries.insertClerkMessage(dbRef, 'commentary', commentary, 'commentary')
       eventBus.emit('clerk', 'clerk:commentary', { content: commentary, source: 'commentary' })
@@ -664,6 +726,10 @@ async function emitCommentary(): Promise<void> {
     // On failure, try direct formatting as last resort
     const fallback = formatDirectCommentary(entries)
     if (fallback && dbRef) {
+      if (isCommentaryHeld(dbRef)) {
+        requeueEntries(entries)
+        return
+      }
       queries.insertClerkMessage(dbRef, 'commentary', fallback, 'commentary')
       eventBus.emit('clerk', 'clerk:commentary', { content: fallback, source: 'commentary' })
       emitRoomCommentaryEvents(entries, fallback)
@@ -685,6 +751,7 @@ export function stopCommentaryEngine(): void {
   logBuffer = []
   dbRef = null
   generating = false
+  lastAssistantReplyAt = 0
   lastCommentary = ''
   lastFormatMode = null
   commentaryCount = 0

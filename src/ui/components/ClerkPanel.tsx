@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
 import { api } from '../lib/client'
 import { usePolling } from '../hooks/usePolling'
+import { useDocumentVisible } from '../hooks/useDocumentVisible'
 import { wsClient, type WsMessage } from '../lib/ws'
 import { ClerkSetupGuide } from './ClerkSetupGuide'
 import type { ClerkMessage } from '@shared/types'
@@ -16,6 +17,25 @@ interface ClerkPanelProps {
 
 const HIGH_SPEED_TYPING_STEP_MS = 12
 const HIGH_SPEED_TYPING_CHARS_PER_TICK = 4
+
+function channelTag(source: ClerkMessage['source']): string | null {
+  if (!source) return null
+  if (source === 'email') return 'email'
+  if (source === 'telegram') return 'telegram'
+  return null
+}
+
+function senderLabel(role: ClerkMessage['role']): string {
+  if (role === 'user') return 'keeper'
+  if (role === 'assistant') return 'clerk'
+  return 'commentary'
+}
+
+function senderTagClass(role: ClerkMessage['role']): string {
+  if (role === 'user') return 'bg-surface-primary text-text-primary border-text-muted'
+  if (role === 'assistant') return 'bg-surface-tertiary text-text-secondary border-border-primary'
+  return 'bg-surface-secondary text-text-muted border-border-primary'
+}
 
 /** Process inline markdown: **bold**, *italic*, `code`, [text](url) */
 function processInline(text: string): React.ReactNode[] {
@@ -220,6 +240,7 @@ export function ClerkPanel({ setupLaunchKey = 0 }: ClerkPanelProps): React.JSX.E
   const scrollRef = useRef<HTMLDivElement>(null)
   const autoScrollRef = useRef(true)
   const inputRef = useRef<HTMLInputElement>(null)
+  const loadingRef = useRef(false)
   const seenMessageIdsRef = useRef<Set<number>>(new Set())
   const completedTypingIdsRef = useRef<Set<number>>(new Set())
   const [typingMessageIds, setTypingMessageIds] = useState<Set<number>>(new Set())
@@ -279,6 +300,38 @@ export function ClerkPanel({ setupLaunchKey = 0 }: ClerkPanelProps): React.JSX.E
     }
   }, [messages, loading])
 
+  useEffect(() => {
+    loadingRef.current = loading
+  }, [loading])
+
+  // Presence heartbeat — keeps commentary in active mode while the page is open
+  const isVisible = useDocumentVisible()
+  useEffect(() => {
+    if (!isVisible) return
+    void api.clerk.presence().catch(() => {})
+    const timer = window.setInterval(() => {
+      void api.clerk.presence().catch(() => {})
+    }, 30_000)
+    return () => window.clearInterval(timer)
+  }, [isVisible])
+
+  const typingActive = input.trim().length > 0 && !loading
+  useEffect(() => {
+    if (!typingActive) return
+
+    const pingTyping = () => {
+      void api.clerk.typing().catch(() => {})
+    }
+
+    // Pause commentary as soon as keeper starts typing.
+    pingTyping()
+    const timer = window.setInterval(pingTyping, 10_000)
+
+    return () => {
+      window.clearInterval(timer)
+    }
+  }, [typingActive])
+
   const handleScroll = useCallback(() => {
     const el = scrollRef.current
     if (!el) return
@@ -315,6 +368,7 @@ export function ClerkPanel({ setupLaunchKey = 0 }: ClerkPanelProps): React.JSX.E
   useEffect(() => {
     return wsClient.subscribe('clerk', (event: WsMessage) => {
       if (event.type === 'clerk:commentary') {
+        if (loadingRef.current) return
         const data = event.data as { content: string; source?: string }
         setMessages(prev => [...prev, {
           id: Date.now(),
@@ -434,34 +488,60 @@ export function ClerkPanel({ setupLaunchKey = 0 }: ClerkPanelProps): React.JSX.E
               : 'Connect a model to start using your Clerk.'}
           </div>
         ) : (
-          messages.map((msg) => (
-            <div key={msg.id} className="mb-7">
-              {msg.role === 'user' ? (
-                <div className="text-[16px] text-text-primary leading-relaxed font-medium">
-                  {msg.content}
-                </div>
-              ) : msg.role === 'assistant' ? (
-                <div className="text-[16px] leading-[1.7] text-text-secondary">
-                  <AnimatedMarkdownMessage
-                    id={msg.id}
-                    content={msg.content}
-                    shouldAnimate={typingMessageIds.has(msg.id)}
-                    onDone={handleTypingDone}
-                  />
-                </div>
-              ) : (
-                /* Commentary */
-                <div className="text-[16px] leading-[1.7] text-text-secondary border-l-2 border-border-primary pl-3">
-                  <AnimatedMarkdownMessage
-                    id={msg.id}
-                    content={msg.content}
-                    shouldAnimate={typingMessageIds.has(msg.id)}
-                    onDone={handleTypingDone}
-                  />
-                </div>
-              )}
-            </div>
-          ))
+          messages.map((msg) => {
+            const sourceTag = channelTag(msg.source)
+            const sender = senderLabel(msg.role)
+            const showSenderBadge = msg.role !== 'commentary'
+            const showHeader = showSenderBadge || Boolean(sourceTag)
+            return (
+              <div key={msg.id} className="mb-7">
+                {showHeader && (
+                  <div className={`flex items-center gap-2 ${msg.role === 'user' ? 'justify-end mb-0.5 pr-1' : 'mb-1.5'}`}>
+                    {showSenderBadge && (
+                      <span className={`inline-flex items-center px-2 py-0.5 rounded-full border text-[11px] uppercase tracking-wide ${senderTagClass(msg.role)}`}>
+                        {sender}
+                      </span>
+                    )}
+                    {sourceTag && (
+                      <span className="inline-flex items-center px-2 py-0.5 rounded-full border border-border-primary text-[11px] uppercase tracking-wide text-text-muted bg-surface-tertiary">
+                        {sourceTag}
+                      </span>
+                    )}
+                  </div>
+                )}
+                {msg.role === 'user' ? (
+                  <div className="max-w-[82%] ml-auto px-4 py-3 rounded-2xl border border-border-primary bg-surface-secondary">
+                    <div className="text-[16px] text-text-primary leading-relaxed font-medium">
+                      {msg.content}
+                    </div>
+                  </div>
+                ) : msg.role === 'assistant' ? (
+                  <div className="max-w-[88%] px-4 py-3 rounded-2xl border border-border-primary bg-surface-secondary">
+                    <div className="text-[16px] leading-[1.7] text-text-secondary">
+                      <AnimatedMarkdownMessage
+                        id={msg.id}
+                        content={msg.content}
+                        shouldAnimate={typingMessageIds.has(msg.id)}
+                        onDone={handleTypingDone}
+                      />
+                    </div>
+                  </div>
+                ) : (
+                  /* Commentary */
+                  <div className="max-w-[90%] px-4 py-3 rounded-xl border-l-2 border-border-primary bg-surface-primary">
+                    <div className="text-[16px] leading-[1.7] text-text-secondary">
+                      <AnimatedMarkdownMessage
+                        id={msg.id}
+                        content={msg.content}
+                        shouldAnimate={typingMessageIds.has(msg.id)}
+                        onDone={handleTypingDone}
+                      />
+                    </div>
+                  </div>
+                )}
+              </div>
+            )
+          })
         )}
         {loading && (
           <div className="text-[16px] text-text-muted animate-pulse mb-4">Thinking...</div>

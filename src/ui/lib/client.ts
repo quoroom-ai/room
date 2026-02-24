@@ -497,6 +497,10 @@ export const api = {
   clerk: {
     messages: () =>
       request<ClerkMessage[]>('GET', '/api/clerk/messages'),
+    presence: () =>
+      request<{ ok: true }>('POST', '/api/clerk/presence'),
+    typing: () =>
+      request<{ ok: true }>('POST', '/api/clerk/typing'),
     send: (message: string) =>
       request<{ response: string; messages: ClerkMessage[] }>('POST', '/api/clerk/chat', { message }),
     reset: () =>
