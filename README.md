@@ -188,8 +188,8 @@ brew install quoroom-ai/quoroom/quoroom
 Download from [GitHub Releases](https://github.com/quoroom-ai/room/releases). Installers add `quoroom` to your PATH automatically. No dependencies needed.
 
 Installer launchers:
-- macOS `.pkg`: open `/Applications/Quoroom.app`
-- Windows `.exe`: Start Menu -> Quoroom -> Open Quoroom
+- macOS `.pkg`: open `/Applications/Quoroom Server.app`
+- Windows `.exe`: Start Menu -> Quoroom Server -> Open Quoroom Server
 
 | Platform | Installer | Archive |
 |----------|-----------|---------|

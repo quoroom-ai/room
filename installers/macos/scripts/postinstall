@@ -8,13 +8,17 @@ PORT="${QUOROOM_PORT:-3700}"
 URL="http://localhost:${PORT}"
 
 create_launcher_app() {
-  APP_PATH="/Applications/Quoroom.app"
+  # Remove legacy launcher name to avoid duplicate Dock entries after upgrade.
+  rm -rf "/Applications/Quoroom.app"
+
+  APP_PATH="/Applications/Quoroom Server.app"
   APP_CONTENTS="${APP_PATH}/Contents"
   APP_MACOS="${APP_CONTENTS}/MacOS"
   APP_RESOURCES="${APP_CONTENTS}/Resources"
-  APP_EXEC="${APP_MACOS}/Quoroom"
-  ICON_SRC="/usr/local/lib/quoroom/ui/quoroom.icns"
-  ICON_DST="${APP_RESOURCES}/quoroom.icns"
+  APP_EXEC="${APP_MACOS}/QuoroomServerLauncher"
+  ICON_SRC_SERVER="/usr/local/lib/quoroom/ui/quoroom-server.icns"
+  ICON_SRC_DEFAULT="/usr/local/lib/quoroom/ui/quoroom.icns"
+  ICON_DST="${APP_RESOURCES}/quoroom-server.icns"
 
   mkdir -p "${APP_MACOS}" "${APP_RESOURCES}"
 
@@ -39,8 +43,10 @@ open "${URL}"
 APP
   chmod 755 "${APP_EXEC}"
 
-  if [ -f "${ICON_SRC}" ]; then
-    cp -f "${ICON_SRC}" "${ICON_DST}"
+  if [ -f "${ICON_SRC_SERVER}" ]; then
+    cp -f "${ICON_SRC_SERVER}" "${ICON_DST}"
+  elif [ -f "${ICON_SRC_DEFAULT}" ]; then
+    cp -f "${ICON_SRC_DEFAULT}" "${ICON_DST}"
   fi
 
   cat > "${APP_CONTENTS}/Info.plist" << 'PLIST'
@@ -49,15 +55,15 @@ APP
 <plist version="1.0">
   <dict>
     <key>CFBundleDisplayName</key>
-    <string>Quoroom</string>
+    <string>Quoroom Server</string>
     <key>CFBundleExecutable</key>
-    <string>Quoroom</string>
+    <string>QuoroomServerLauncher</string>
     <key>CFBundleIdentifier</key>
-    <string>ai.quoroom.launcher</string>
+    <string>ai.quoroom.server-launcher</string>
     <key>CFBundleName</key>
-    <string>Quoroom</string>
+    <string>Quoroom Server</string>
     <key>CFBundleIconFile</key>
-    <string>quoroom.icns</string>
+    <string>quoroom-server.icns</string>
     <key>CFBundlePackageType</key>
     <string>APPL</string>
     <key>CFBundleShortVersionString</key>

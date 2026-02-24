@@ -21,7 +21,7 @@ VIAddVersionKey "LegalCopyright" "MIT License"
 !define MUI_ABORTWARNING
 
 ; Welcome copy
-!define MUI_WELCOMEPAGE_TEXT "This installer adds Quoroom to your PATH.$\r$\n$\r$\nAfter install, the local server starts automatically and your browser opens http://localhost:3700.$\r$\n$\r$\nAny time later, reopen from Start Menu -> Quoroom -> Open Quoroom, or use the Quoroom desktop shortcut (no terminal window).$\r$\n$\r$\nYour browser controls Quoroom locally on this PC. Room data stays on your machine and is not sent to the internet by default."
+!define MUI_WELCOMEPAGE_TEXT "This installer adds Quoroom to your PATH.$\r$\n$\r$\nAfter install, the local server starts automatically and your browser opens http://localhost:3700.$\r$\n$\r$\nAny time later, reopen from Start Menu -> Quoroom Server -> Open Quoroom Server, or use the Quoroom Server desktop shortcut (no terminal window).$\r$\n$\r$\nYour browser controls Quoroom locally on this PC. Room data stays on your machine and is not sent to the internet by default."
 
 ; Pages
 !insertmacro MUI_PAGE_WELCOME
@@ -46,12 +46,16 @@ Section "Install"
   ; Create uninstaller
   WriteUninstaller "$INSTDIR\uninstall.exe"
 
+  ; Cleanup old launcher names from previous versions
+  RMDir /r "$SMPROGRAMS\Quoroom"
+  Delete "$DESKTOP\Quoroom.lnk"
+
   ; Start Menu
-  CreateDirectory "$SMPROGRAMS\Quoroom"
+  CreateDirectory "$SMPROGRAMS\Quoroom Server"
   Call CreateLauncherScript
-  CreateShortcut "$SMPROGRAMS\Quoroom\Open Quoroom.lnk" "$SYSDIR\wscript.exe" '"$INSTDIR\bin\quoroom-launch.vbs"' "$INSTDIR\ui\favicon.ico" 0
-  CreateShortcut "$SMPROGRAMS\Quoroom\Uninstall.lnk" "$INSTDIR\uninstall.exe"
-  CreateShortcut "$DESKTOP\Quoroom.lnk" "$SYSDIR\wscript.exe" '"$INSTDIR\bin\quoroom-launch.vbs"' "$INSTDIR\ui\favicon.ico" 0
+  CreateShortcut "$SMPROGRAMS\Quoroom Server\Open Quoroom Server.lnk" "$SYSDIR\wscript.exe" '"$INSTDIR\bin\quoroom-launch.vbs"' "$INSTDIR\ui\quoroom-server.ico" 0
+  CreateShortcut "$SMPROGRAMS\Quoroom Server\Uninstall.lnk" "$INSTDIR\uninstall.exe"
+  CreateShortcut "$DESKTOP\Quoroom Server.lnk" "$SYSDIR\wscript.exe" '"$INSTDIR\bin\quoroom-launch.vbs"' "$INSTDIR\ui\quoroom-server.ico" 0
 
   ; Add bin\ to system PATH via registry
   ReadRegStr $0 HKLM "SYSTEM\CurrentControlSet\Control\Session Manager\Environment" "Path"
@@ -103,7 +107,9 @@ Section "Uninstall"
   RMDir /r "$INSTDIR"
 
   ; Remove Start Menu
+  RMDir /r "$SMPROGRAMS\Quoroom Server"
   RMDir /r "$SMPROGRAMS\Quoroom"
+  Delete "$DESKTOP\Quoroom Server.lnk"
   Delete "$DESKTOP\Quoroom.lnk"
 
   ; Remove registry
