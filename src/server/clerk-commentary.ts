@@ -34,6 +34,8 @@ interface LogEntry {
   timestamp: string
 }
 
+type CommentaryFormatMode = 'cinematic' | 'scoreboard' | 'timeline' | 'bullet'
+
 let commentaryTimer: ReturnType<typeof setInterval> | null = null
 let unsubscribeEvents: (() => void) | null = null
 let logBuffer: LogEntry[] = []
@@ -41,6 +43,8 @@ let lastUserMessageAt = 0
 let dbRef: Database.Database | null = null
 let generating = false
 let lastCommentary = '' // Track last output to avoid repetition
+let lastFormatMode: CommentaryFormatMode | null = null
+let commentaryCount = 0
 
 // Caches
 const roomNameCache = new Map<number, string>()
@@ -304,13 +308,68 @@ function boldCaps(text: string): string {
   return text.replace(/\b([A-Z]{4,}(?:\s+[A-Z]{2,})*)\b/g, '**$1**')
 }
 
+function emitRoomCommentaryEvents(entries: LogEntry[], commentary: string): void {
+  const compact = commentary.replace(/\s+/g, ' ').trim()
+  if (!compact) return
+  const roomIds = new Set<number>()
+  for (const entry of entries) {
+    if (Number.isFinite(entry.roomId)) roomIds.add(entry.roomId)
+  }
+  if (roomIds.size === 0) return
+  const summary = compact.length > 480 ? `${compact.slice(0, 477)}...` : compact
+  for (const roomId of roomIds) {
+    eventBus.emit(`room:${roomId}`, 'clerk:commentary', {
+      roomId,
+      summary,
+      content: commentary,
+      source: 'commentary',
+    })
+  }
+}
+
+function countActorSections(rawLogs: string): number {
+  const matches = rawLogs.match(/^\[[^\n]+\]$/gm)
+  return matches?.length ?? 0
+}
+
+function pickFormatMode(rawLogs: string): CommentaryFormatMode {
+  const nonBulletModes: CommentaryFormatMode[] = ['cinematic', 'scoreboard', 'timeline']
+  const defaultMode = nonBulletModes[commentaryCount % nonBulletModes.length]
+  let selected = defaultMode
+  if (selected === lastFormatMode) {
+    const idx = nonBulletModes.indexOf(defaultMode)
+    selected = nonBulletModes[(idx + 1) % nonBulletModes.length]
+  }
+
+  const actorCount = countActorSections(rawLogs)
+  const allowBullet = actorCount >= 3 && commentaryCount > 0 && commentaryCount % 4 === 0 && lastFormatMode !== 'bullet'
+  return allowBullet ? 'bullet' : selected
+}
+
+function formatModeInstruction(mode: CommentaryFormatMode): string {
+  switch (mode) {
+    case 'cinematic':
+      return 'FORMAT MODE FOR THIS UPDATE: Cinematic narrative. No bullet list. Use 4-7 short lines with strong flow and clear turns.'
+    case 'scoreboard':
+      return 'FORMAT MODE FOR THIS UPDATE: Scoreboard snapshot. No bullet list. Use a short uppercase header, then compact metric-like lines, then verdict.'
+    case 'timeline':
+      return 'FORMAT MODE FOR THIS UPDATE: Play-by-play timeline. No bullet list. Use sequence-style lines that progress step-by-step.'
+    case 'bullet':
+      return 'FORMAT MODE FOR THIS UPDATE: Bullet board allowed. Keep to max 4 bullets, each meaningful. Add opener and closer lines.'
+  }
+}
+
 async function generateCommentary(rawLogs: string): Promise<string | null> {
   if (!dbRef) return null
+  const formatMode = pickFormatMode(rawLogs)
   const contextNote = lastCommentary
     ? `\n\n--- Your previous update (DO NOT reuse the same opener, phrases, or sentence structure) ---\n${lastCommentary.slice(0, 400)}`
     : ''
-
-  const prompt = `Here are the latest agent activity logs:\n\n${rawLogs}${contextNote}\n\nWrite your live commentary as the Clerk. Use the format from your instructions — milestone header if something big happened, bullet list per agent if it's progress, short punchy take if it's routine. Every sentence on its own line. Your opinion, your voice. Pick a fresh opener from your rotation — never the same one twice in a row.`
+  const antiRepeatNote = lastFormatMode
+    ? `\nPrevious format mode used: ${lastFormatMode}. Do NOT use it again now.`
+    : ''
+  const modeInstruction = formatModeInstruction(formatMode)
+  const prompt = `Here are the latest agent activity logs:\n\n${rawLogs}${contextNote}${antiRepeatNote}\n\n${modeInstruction}\n\nWrite your live commentary as the Clerk. Keep every sentence on its own line. Vary rhythm and sentence length. Avoid template repetition. Bullet points are allowed only when explicitly requested by the mode instruction.`
   const preferredModel = queries.getSetting(dbRef, 'clerk_model') || DEFAULT_CLERK_MODEL
   const result = await executeClerkWithFallback({
     db: dbRef,
@@ -327,7 +386,10 @@ async function generateCommentary(rawLogs: string): Promise<string | null> {
     }
     return null
   }
-  return result.output?.trim() ? boldCaps(result.output.trim()) : null
+  if (!result.output?.trim()) return null
+  lastFormatMode = formatMode
+  commentaryCount += 1
+  return boldCaps(result.output.trim())
 }
 
 export function startCommentaryEngine(db: Database.Database): void {
@@ -508,6 +570,7 @@ async function emitCommentary(): Promise<void> {
       lastCommentary = commentary
       queries.insertClerkMessage(dbRef, 'commentary', commentary, 'commentary')
       eventBus.emit('clerk', 'clerk:commentary', { content: commentary, source: 'commentary' })
+      emitRoomCommentaryEvents(entries, commentary)
     }
   } catch (err) {
     console.warn('[commentary] Generation failed:', err instanceof Error ? err.message : err)
@@ -516,6 +579,7 @@ async function emitCommentary(): Promise<void> {
     if (fallback && dbRef) {
       queries.insertClerkMessage(dbRef, 'commentary', fallback, 'commentary')
       eventBus.emit('clerk', 'clerk:commentary', { content: fallback, source: 'commentary' })
+      emitRoomCommentaryEvents(entries, fallback)
     }
   } finally {
     generating = false
@@ -535,6 +599,8 @@ export function stopCommentaryEngine(): void {
   dbRef = null
   generating = false
   lastCommentary = ''
+  lastFormatMode = null
+  commentaryCount = 0
   roomNameCache.clear()
   workerNameCache.clear()
   cycleWorkerCache.clear()

@@ -39,6 +39,7 @@ const CLOUD_EVENT_MAP: Record<string, string> = {
   'self_mod:reverted': 'self_mod',
   'wallet:sent': 'money_sent',
   'wallet:received': 'money_received',
+  'clerk:commentary': 'clerk_commentary',
 }
 
 // ─── Activity push via eventBus ─────────────────────────────
@@ -49,7 +50,7 @@ function startActivityPush(db: Database.Database): void {
   stopActivityPush()
 
   // Rate limit: max 1 push per second per room
-  const lastPush = new Map<number, number>()
+  const lastPush = new Map<string, number>()
 
   eventBusUnsub = eventBus.onAny((event) => {
     const match = event.channel.match(/^room:(\d+)$/)
@@ -59,12 +60,13 @@ function startActivityPush(db: Database.Database): void {
     if (!cloudEventType) return
 
     const localRoomId = parseInt(match[1], 10)
+    const rateKey = `${localRoomId}:${cloudEventType}`
 
-    // Rate limit
+    // Rate limit per room + event type.
     const now = Date.now()
-    const last = lastPush.get(localRoomId) ?? 0
+    const last = lastPush.get(rateKey) ?? 0
     if (now - last < 1000) return
-    lastPush.set(localRoomId, now)
+    lastPush.set(rateKey, now)
 
     // Check if room is public
     const room = getRoom(db, localRoomId)
@@ -75,6 +77,14 @@ function startActivityPush(db: Database.Database): void {
 
     // Build summary from event data
     let summary = cloudEventType.replace(/_/g, ' ')
+    if (cloudEventType === 'clerk_commentary') {
+      const clerkSummary = typeof data.summary === 'string'
+        ? data.summary
+        : typeof data.content === 'string'
+          ? data.content
+          : ''
+      if (clerkSummary.trim()) summary = clerkSummary.replace(/\s+/g, ' ').trim()
+    }
     if (data.workerName) summary = `${data.workerName}: ${summary}`
     if (typeof data.summary === 'string') summary = data.summary
     if (typeof data.name === 'string') summary = `${cloudEventType.replace(/_/g, ' ')}: ${data.name}`
