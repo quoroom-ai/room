@@ -97,6 +97,8 @@ describe('Clerk routes', () => {
       expect(typeof body.configured).toBe('boolean')
       expect(typeof body.commentaryEnabled).toBe('boolean')
       expect(body.commentaryEnabled).toBe(true) // default is enabled
+      expect(body.commentaryMode).toBe('auto')
+      expect(body.commentaryPace).toBe('light')
       expect(body.model).toBeNull()
       expect(body.apiAuth).toBeDefined()
     })
@@ -107,6 +109,36 @@ describe('Clerk routes', () => {
       const res = await request(ctx, 'GET', '/api/clerk/status')
       expect(res.status).toBe(200)
       expect((res.body as any).commentaryEnabled).toBe(false)
+    })
+
+    it('reflects commentaryMode=light after setting it', async () => {
+      queries.setSetting(ctx.db, 'clerk_commentary_mode', 'light')
+
+      const res = await request(ctx, 'GET', '/api/clerk/status')
+      expect(res.status).toBe(200)
+      expect((res.body as any).commentaryMode).toBe('light')
+      expect((res.body as any).commentaryPace).toBe('light')
+    })
+
+    it('switches commentaryPace to active after presence heartbeat', async () => {
+      const before = await request(ctx, 'GET', '/api/clerk/status')
+      expect(before.status).toBe(200)
+      expect((before.body as any).commentaryPace).toBe('light')
+
+      const presence = await request(ctx, 'POST', '/api/clerk/presence')
+      expect(presence.status).toBe(200)
+
+      const after = await request(ctx, 'GET', '/api/clerk/status')
+      expect(after.status).toBe(200)
+      expect((after.body as any).commentaryPace).toBe('active')
+    })
+
+    it('treats recent clerk_last_user_message_at as active presence', async () => {
+      queries.setSetting(ctx.db, 'clerk_last_user_message_at', new Date().toISOString())
+
+      const res = await request(ctx, 'GET', '/api/clerk/status')
+      expect(res.status).toBe(200)
+      expect((res.body as any).commentaryPace).toBe('active')
     })
   })
 
@@ -126,6 +158,21 @@ describe('Clerk routes', () => {
       const res = await request(ctx, 'PUT', '/api/clerk/settings', { commentaryEnabled: true })
       expect(res.status).toBe(200)
       expect((res.body as any).commentaryEnabled).toBe(true)
+    })
+
+    it('updates commentaryMode', async () => {
+      const res = await request(ctx, 'PUT', '/api/clerk/settings', { commentaryMode: 'light' })
+      expect(res.status).toBe(200)
+      expect((res.body as any).commentaryMode).toBe('light')
+
+      const stored = queries.getSetting(ctx.db, 'clerk_commentary_mode')
+      expect(stored).toBe('light')
+    })
+
+    it('rejects invalid commentaryMode', async () => {
+      const res = await request(ctx, 'PUT', '/api/clerk/settings', { commentaryMode: 'fast' })
+      expect(res.status).toBe(400)
+      expect(String((res.body as any).error || '')).toContain('commentaryMode')
     })
 
     it('updates model', async () => {

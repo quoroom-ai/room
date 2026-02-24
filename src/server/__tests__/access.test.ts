@@ -85,6 +85,8 @@ describe('isAllowedForRole', () => {
 
     it('allows clerk control endpoints', () => {
       expect(isAllowedForRole('user', 'POST', '/api/clerk/chat', db)).toBe(true)
+      expect(isAllowedForRole('user', 'POST', '/api/clerk/presence', db)).toBe(true)
+      expect(isAllowedForRole('user', 'POST', '/api/clerk/typing', db)).toBe(true)
       expect(isAllowedForRole('user', 'POST', '/api/clerk/reset', db)).toBe(true)
       expect(isAllowedForRole('user', 'PUT', '/api/clerk/settings', db)).toBe(true)
       expect(isAllowedForRole('user', 'POST', '/api/clerk/api-key', db)).toBe(true)

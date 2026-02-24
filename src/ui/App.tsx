@@ -29,6 +29,7 @@ import { ContactPromptModal, CONTACT_PROMPT_SEEN_KEY } from './components/Contac
 import { useNotifications } from './hooks/useNotifications'
 import { semverGt } from './lib/releases'
 import { useInstallPrompt } from './hooks/useInstallPrompt'
+import { useDocumentVisible } from './hooks/useDocumentVisible'
 import { api } from './lib/client'
 import { wsClient, type WsMessage } from './lib/ws'
 import {
@@ -153,6 +154,7 @@ function App(): React.JSX.Element {
 
   useNotifications()
   const installPrompt = useInstallPrompt()
+  const isVisible = useDocumentVisible()
   const [installDismissed, setInstallDismissed] = useState(() => storageGet('quoroom_install_dismissed') === 'true')
 
   const [showKeepInDockTip, setShowKeepInDockTip] = useState(false)
@@ -362,6 +364,16 @@ function App(): React.JSX.Element {
       }
     }).catch(() => {})
   }, [gate, ready]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Global Clerk presence heartbeat while the app page is visible (all tabs).
+  useEffect(() => {
+    if (gate !== 'app' || !ready || !isVisible) return
+    void api.clerk.presence().catch(() => {})
+    const interval = window.setInterval(() => {
+      void api.clerk.presence().catch(() => {})
+    }, 30_000)
+    return () => window.clearInterval(interval)
+  }, [gate, ready, isVisible])
 
   useEffect(() => {
     if (gate !== 'app' || !ready) return

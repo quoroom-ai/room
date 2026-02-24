@@ -23,11 +23,13 @@ const COMMENTARY_INTERVAL_MAX_MS = 30_000             // Max delay between comme
 const COMMENTARY_LIGHT_INTERVAL_MIN_MS = 2 * 60 * 60 * 1000  // 2h (light mode)
 const COMMENTARY_LIGHT_INTERVAL_MAX_MS = 3 * 60 * 60 * 1000  // 3h (light mode)
 const USER_PRESENCE_TIMEOUT_MS = 90_000               // 90s without heartbeat = user gone
+const ACTIVE_MODE_RESCHEDULE_THRESHOLD_MS = COMMENTARY_INTERVAL_MAX_MS + 1_000
 const SILENCE_THRESHOLD_MS = 60_000    // Resume after 60s of user silence
 const MAX_BUFFER_SIZE = 200             // Max log entries to buffer
 const MIN_ENTRIES_FOR_LLM = 1           // Always use LLM when API keys available
 const LLM_TIMEOUT_MS = 20_000           // Max wait for LLM response
 const COMMENTARY_HOLD_COUNT_KEY = 'clerk_commentary_hold_count'
+const COMMENTARY_MODE_KEY = 'clerk_commentary_mode'
 const LAST_ASSISTANT_REPLY_AT_KEY = 'clerk_last_assistant_reply_at'
 
 interface LogEntry {
@@ -51,7 +53,11 @@ interface CommentaryGenerationResult {
   attempts: number
 }
 
+type CommentaryMode = 'auto' | 'light'
+type CommentaryPace = 'active' | 'light'
+
 let commentaryTimer: ReturnType<typeof setTimeout> | null = null
+let nextCommentaryDueAtMs: number | null = null
 let unsubscribeEvents: (() => void) | null = null
 let logBuffer: LogEntry[] = []
 let lastUserMessageAt = 0
@@ -123,6 +129,31 @@ function getCommentaryHoldCount(db: Database.Database): number {
 
 function isCommentaryHeld(db: Database.Database): boolean {
   return getCommentaryHoldCount(db) > 0
+}
+
+function getCommentaryMode(db: Database.Database): CommentaryMode {
+  const raw = (queries.getSetting(db, COMMENTARY_MODE_KEY) ?? '').trim().toLowerCase()
+  return raw === 'light' ? 'light' : 'auto'
+}
+
+function parseIsoMs(value: string | null | undefined): number | null {
+  if (!value) return null
+  const ms = Date.parse(value)
+  return Number.isFinite(ms) ? ms : null
+}
+
+function isUserPresent(db: Database.Database): boolean {
+  const lastSeenMs = parseIsoMs(queries.getSetting(db, 'clerk_user_last_seen_at'))
+  const lastInteractionMs = parseIsoMs(queries.getSetting(db, 'clerk_last_user_message_at'))
+  const newest = Math.max(lastSeenMs ?? 0, lastInteractionMs ?? 0)
+  if (newest <= 0) return false
+  return Date.now() - newest < USER_PRESENCE_TIMEOUT_MS
+}
+
+function getCommentaryPace(db: Database.Database): CommentaryPace {
+  const mode = getCommentaryMode(db)
+  if (mode === 'light') return 'light'
+  return isUserPresent(db) ? 'active' : 'light'
 }
 
 function requeueEntries(entries: LogEntry[]): void {
@@ -515,7 +546,62 @@ export function startCommentaryEngine(db: Database.Database): void {
   }
 
   // Subscribe to all events
+  const clearSchedule = () => {
+    if (commentaryTimer) {
+      clearTimeout(commentaryTimer)
+      commentaryTimer = null
+    }
+    nextCommentaryDueAtMs = null
+  }
+
+  const scheduleNext = () => {
+    if (!dbRef) return
+    const pace = getCommentaryPace(dbRef)
+    const min = pace === 'active' ? COMMENTARY_INTERVAL_MIN_MS : COMMENTARY_LIGHT_INTERVAL_MIN_MS
+    const max = pace === 'active' ? COMMENTARY_INTERVAL_MAX_MS : COMMENTARY_LIGHT_INTERVAL_MAX_MS
+    const delay = min + Math.random() * (max - min)
+    nextCommentaryDueAtMs = Date.now() + delay
+    commentaryTimer = setTimeout(() => {
+      commentaryTimer = null
+      nextCommentaryDueAtMs = null
+      void emitCommentary().finally(() => {
+        if (dbRef && commentaryTimer == null) scheduleNext()
+      })
+    }, delay)
+  }
+
+  const rescheduleIfPresenceRecovered = () => {
+    if (!dbRef) return
+    if (getCommentaryMode(dbRef) !== 'auto') return
+    if (!isUserPresent(dbRef)) return
+    if (commentaryTimer == null || nextCommentaryDueAtMs == null) {
+      scheduleNext()
+      return
+    }
+    const remaining = nextCommentaryDueAtMs - Date.now()
+    // If we were waiting on a long light-mode timer, switch immediately to active pacing.
+    if (remaining > ACTIVE_MODE_RESCHEDULE_THRESHOLD_MS) {
+      clearSchedule()
+      scheduleNext()
+    }
+  }
+
+  const rescheduleForModeChange = () => {
+    if (!dbRef) return
+    clearSchedule()
+    scheduleNext()
+  }
+
   unsubscribeEvents = eventBus.onAny((event: WsEvent) => {
+    if (event.type === 'clerk:presence') {
+      rescheduleIfPresenceRecovered()
+      return
+    }
+    if (event.type === 'clerk:commentary_mode_changed') {
+      rescheduleForModeChange()
+      return
+    }
+
     // Listen for user message notifications to pause commentary
     if (event.type === 'clerk:user_message' || event.type === 'clerk:user_typing') {
       const payload = event.data as { timestamp?: number } | null
@@ -642,26 +728,6 @@ export function startCommentaryEngine(db: Database.Database): void {
       })
     }
   })
-
-  function isUserPresent(): boolean {
-    if (!dbRef) return false
-    const lastSeen = queries.getSetting(dbRef, 'clerk_user_last_seen_at')
-    if (!lastSeen) return false
-    return Date.now() - new Date(lastSeen).getTime() < USER_PRESENCE_TIMEOUT_MS
-  }
-
-  // Emit commentary at random intervals — active pace when user is online, light mode otherwise
-  function scheduleNext(): void {
-    const active = isUserPresent()
-    const min = active ? COMMENTARY_INTERVAL_MIN_MS : COMMENTARY_LIGHT_INTERVAL_MIN_MS
-    const max = active ? COMMENTARY_INTERVAL_MAX_MS : COMMENTARY_LIGHT_INTERVAL_MAX_MS
-    const delay = min + Math.random() * (max - min)
-    commentaryTimer = setTimeout(() => {
-      void emitCommentary().finally(() => {
-        if (commentaryTimer !== null) scheduleNext()
-      })
-    }, delay)
-  }
   scheduleNext()
 }
 
@@ -745,9 +811,10 @@ async function emitCommentary(): Promise<void> {
 
 export function stopCommentaryEngine(): void {
   if (commentaryTimer) {
-    clearInterval(commentaryTimer)
+    clearTimeout(commentaryTimer)
     commentaryTimer = null
   }
+  nextCommentaryDueAtMs = null
   if (unsubscribeEvents) {
     unsubscribeEvents()
     unsubscribeEvents = null

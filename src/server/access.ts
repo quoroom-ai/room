@@ -61,6 +61,7 @@ const AUTO_MODE_USER_WHITELIST = [
   /^POST \/api\/contacts\/telegram\/disconnect$/,     // disconnect telegram
   /^DELETE \/api\/rooms\/\d+\/cloud-stations\/\d+$/, // delete cloud station (archive)
   /^POST \/api\/clerk\/chat$/,                        // send message to clerk
+  /^POST \/api\/clerk\/presence$/,                    // keeper presence heartbeat for auto commentary pace
   /^POST \/api\/clerk\/typing$/,                      // pause commentary while keeper is typing
   /^POST \/api\/clerk\/reset$/,                       // clear clerk session/messages
   /^PUT \/api\/clerk\/settings$/,                     // configure clerk model/commentary

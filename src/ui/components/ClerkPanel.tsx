@@ -6,9 +6,49 @@ import { wsClient, type WsMessage } from '../lib/ws'
 import { ClerkSetupGuide } from './ClerkSetupGuide'
 import type { ClerkMessage } from '@shared/types'
 
+interface ProviderSessionLine {
+  id: number
+  stream: 'stdout' | 'stderr' | 'system'
+  text: string
+  timestamp: string
+}
+
+type ProviderSessionStatus = 'starting' | 'running' | 'completed' | 'failed' | 'canceled' | 'timeout'
+type ProviderName = 'codex' | 'claude'
+
+interface ProviderAuthSession {
+  sessionId: string
+  provider: ProviderName
+  status: ProviderSessionStatus
+  command: string
+  startedAt: string
+  updatedAt: string
+  endedAt: string | null
+  exitCode: number | null
+  verificationUrl: string | null
+  deviceCode: string | null
+  active: boolean
+  lines: ProviderSessionLine[]
+}
+
+interface ProviderInstallSession {
+  sessionId: string
+  provider: ProviderName
+  status: ProviderSessionStatus
+  command: string
+  startedAt: string
+  updatedAt: string
+  endedAt: string | null
+  exitCode: number | null
+  active: boolean
+  lines: ProviderSessionLine[]
+}
+
 interface ProviderStatusEntry {
   installed: boolean
   connected: boolean | null
+  authSession: ProviderAuthSession | null
+  installSession: ProviderInstallSession | null
 }
 
 interface ClerkPanelProps {
@@ -284,6 +324,9 @@ export function ClerkPanel({ setupLaunchKey = 0 }: ClerkPanelProps): React.JSX.E
   const [showSetup, setShowSetup] = useState(false)
   const [clerkModel, setClerkModel] = useState<string | null>(null)
   const [commentaryEnabled, setCommentaryEnabled] = useState(true)
+  const [commentaryMode, setCommentaryMode] = useState<'auto' | 'light'>('auto')
+  const [commentaryPace, setCommentaryPace] = useState<'active' | 'light'>('light')
+  const [updatingCommentaryMode, setUpdatingCommentaryMode] = useState(false)
   const [initialLoaded, setInitialLoaded] = useState(false)
   const scrollRef = useRef<HTMLDivElement>(null)
   const autoScrollRef = useRef(true)
@@ -300,13 +343,143 @@ export function ClerkPanel({ setupLaunchKey = 0 }: ClerkPanelProps): React.JSX.E
   )
 
   // Fetch provider status for setup guide
-  const { data: providerStatus } = usePolling<{
+  const { data: providerStatus, refresh: refreshProviderStatus } = usePolling<{
     codex: ProviderStatusEntry
     claude: ProviderStatusEntry
   } | null>(
     () => api.providers.status().catch(() => null),
     120000
   )
+
+  // Provider session state for install/connect flows
+  const [providerAuthSessions, setProviderAuthSessions] = useState<Partial<Record<ProviderName, ProviderAuthSession | null>>>({})
+  const [providerInstallSessions, setProviderInstallSessions] = useState<Partial<Record<ProviderName, ProviderInstallSession | null>>>({})
+  const providerAuthUnsubsRef = useRef<Map<string, () => void>>(new Map())
+  const providerInstallUnsubsRef = useRef<Map<string, () => void>>(new Map())
+
+  // Seed sessions from provider status
+  useEffect(() => {
+    if (!providerStatus) return
+    setProviderAuthSessions(prev => ({
+      codex: providerStatus.codex.authSession ?? prev.codex ?? null,
+      claude: providerStatus.claude.authSession ?? prev.claude ?? null,
+    }))
+    setProviderInstallSessions(prev => ({
+      codex: providerStatus.codex.installSession ?? prev.codex ?? null,
+      claude: providerStatus.claude.installSession ?? prev.claude ?? null,
+    }))
+  }, [providerStatus])
+
+  // WS subscriptions for active auth sessions
+  useEffect(() => {
+    const unsubs = providerAuthUnsubsRef.current
+    const activeSessions = [providerAuthSessions.codex, providerAuthSessions.claude]
+      .filter((s): s is ProviderAuthSession => Boolean(s?.active))
+    const activeIds = new Set(activeSessions.map(s => s.sessionId))
+
+    for (const [sid, unsubscribe] of [...unsubs.entries()]) {
+      if (!activeIds.has(sid)) { unsubscribe(); unsubs.delete(sid) }
+    }
+
+    for (const session of activeSessions) {
+      if (unsubs.has(session.sessionId)) continue
+      const unsubscribe = wsClient.subscribe(`provider-auth:${session.sessionId}`, (event: WsMessage) => {
+        if (event.type === 'provider_auth:status') {
+          const data = event.data as ProviderAuthSession
+          if (!data?.sessionId || !data?.provider) return
+          setProviderAuthSessions(prev => ({ ...prev, [data.provider]: data }))
+          if (!data.active) void refreshProviderStatus()
+          return
+        }
+        if (event.type === 'provider_auth:line') {
+          const data = event.data as {
+            sessionId: string; provider: ProviderName; id: number
+            stream: 'stdout' | 'stderr' | 'system'; text: string; timestamp: string
+            deviceCode?: string | null; verificationUrl?: string | null
+          }
+          if (!data?.sessionId || !data?.provider) return
+          setProviderAuthSessions(prev => {
+            const current = prev[data.provider]
+            if (!current || current.sessionId !== data.sessionId) return prev
+            if (current.lines.some(l => l.id === data.id)) return prev
+            return {
+              ...prev,
+              [data.provider]: {
+                ...current,
+                updatedAt: data.timestamp,
+                lines: [...current.lines, { id: data.id, stream: data.stream, text: data.text, timestamp: data.timestamp }].slice(-300),
+                deviceCode: data.deviceCode ?? current.deviceCode,
+                verificationUrl: data.verificationUrl ?? current.verificationUrl,
+              },
+            }
+          })
+        }
+      })
+      unsubs.set(session.sessionId, unsubscribe)
+    }
+  }, [
+    providerAuthSessions.codex?.sessionId, providerAuthSessions.codex?.active,
+    providerAuthSessions.claude?.sessionId, providerAuthSessions.claude?.active,
+    refreshProviderStatus,
+  ])
+
+  // WS subscriptions for active install sessions
+  useEffect(() => {
+    const unsubs = providerInstallUnsubsRef.current
+    const activeSessions = [providerInstallSessions.codex, providerInstallSessions.claude]
+      .filter((s): s is ProviderInstallSession => Boolean(s?.active))
+    const activeIds = new Set(activeSessions.map(s => s.sessionId))
+
+    for (const [sid, unsubscribe] of [...unsubs.entries()]) {
+      if (!activeIds.has(sid)) { unsubscribe(); unsubs.delete(sid) }
+    }
+
+    for (const session of activeSessions) {
+      if (unsubs.has(session.sessionId)) continue
+      const unsubscribe = wsClient.subscribe(`provider-install:${session.sessionId}`, (event: WsMessage) => {
+        if (event.type === 'provider_install:status') {
+          const data = event.data as ProviderInstallSession
+          if (!data?.sessionId || !data?.provider) return
+          setProviderInstallSessions(prev => ({ ...prev, [data.provider]: data }))
+          if (!data.active) void refreshProviderStatus()
+          return
+        }
+        if (event.type === 'provider_install:line') {
+          const data = event.data as {
+            sessionId: string; provider: ProviderName; id: number
+            stream: 'stdout' | 'stderr' | 'system'; text: string; timestamp: string
+          }
+          if (!data?.sessionId || !data?.provider) return
+          setProviderInstallSessions(prev => {
+            const current = prev[data.provider]
+            if (!current || current.sessionId !== data.sessionId) return prev
+            if (current.lines.some(l => l.id === data.id)) return prev
+            return {
+              ...prev,
+              [data.provider]: {
+                ...current,
+                updatedAt: data.timestamp,
+                lines: [...current.lines, { id: data.id, stream: data.stream, text: data.text, timestamp: data.timestamp }].slice(-300),
+              },
+            }
+          })
+        }
+      })
+      unsubs.set(session.sessionId, unsubscribe)
+    }
+  }, [
+    providerInstallSessions.codex?.sessionId, providerInstallSessions.codex?.active,
+    providerInstallSessions.claude?.sessionId, providerInstallSessions.claude?.active,
+    refreshProviderStatus,
+  ])
+
+  // Cleanup WS subscriptions on unmount
+  useEffect(() => () => {
+    for (const unsub of providerAuthUnsubsRef.current.values()) unsub()
+    providerAuthUnsubsRef.current.clear()
+    for (const unsub of providerInstallUnsubsRef.current.values()) unsub()
+    providerInstallUnsubsRef.current.clear()
+  }, [])
 
   // Load messages on mount
   useEffect(() => {
@@ -330,6 +503,8 @@ export function ClerkPanel({ setupLaunchKey = 0 }: ClerkPanelProps): React.JSX.E
     if (clerkStatus) {
       setClerkModel(clerkStatus.model)
       setCommentaryEnabled(clerkStatus.commentaryEnabled ?? true)
+      setCommentaryMode(clerkStatus.commentaryMode ?? 'auto')
+      setCommentaryPace(clerkStatus.commentaryPace ?? 'light')
       if (!clerkStatus.model && !clerkStatus.configured && initialLoaded) {
         setShowSetup(true)
       }
@@ -352,16 +527,28 @@ export function ClerkPanel({ setupLaunchKey = 0 }: ClerkPanelProps): React.JSX.E
     loadingRef.current = loading
   }, [loading])
 
+  const pingPresence = useCallback(async (): Promise<void> => {
+    try {
+      await api.clerk.presence()
+      if (commentaryEnabled && commentaryMode === 'auto') {
+        setCommentaryPace('active')
+      }
+      refreshStatus()
+    } catch {
+      // Presence failures are transient; polling will recover.
+    }
+  }, [commentaryEnabled, commentaryMode, refreshStatus])
+
   // Presence heartbeat — keeps commentary in active mode while the page is open
   const isVisible = useDocumentVisible()
   useEffect(() => {
     if (!isVisible) return
-    void api.clerk.presence().catch(() => {})
+    void pingPresence()
     const timer = window.setInterval(() => {
-      void api.clerk.presence().catch(() => {})
+      void pingPresence()
     }, 30_000)
     return () => window.clearInterval(timer)
-  }, [isVisible])
+  }, [isVisible, pingPresence])
 
   const typingActive = input.trim().length > 0 && !loading
   useEffect(() => {
@@ -453,6 +640,41 @@ export function ClerkPanel({ setupLaunchKey = 0 }: ClerkPanelProps): React.JSX.E
     })
   }, [])
 
+  async function handleProviderInstall(provider: ProviderName): Promise<void> {
+    const response = await api.providers.install(provider)
+    if (response.session) {
+      setProviderInstallSessions(prev => ({ ...prev, [provider]: response.session }))
+    }
+    await refreshProviderStatus()
+  }
+
+  async function handleProviderConnect(provider: ProviderName): Promise<void> {
+    const response = await api.providers.connect(provider)
+    setProviderAuthSessions(prev => ({ ...prev, [provider]: response.session }))
+    await refreshProviderStatus()
+  }
+
+  async function handleProviderDisconnect(provider: ProviderName): Promise<void> {
+    await api.providers.disconnect(provider)
+    setProviderAuthSessions(prev => {
+      const current = prev[provider]
+      return { ...prev, [provider]: current ? { ...current, active: false } : null }
+    })
+    await refreshProviderStatus()
+  }
+
+  async function handleProviderAuthCancel(sessionId: string): Promise<void> {
+    const response = await api.providers.cancelSession(sessionId)
+    setProviderAuthSessions(prev => ({ ...prev, [response.session.provider]: response.session }))
+    await refreshProviderStatus()
+  }
+
+  async function handleProviderInstallCancel(sessionId: string): Promise<void> {
+    const response = await api.providers.cancelInstallSession(sessionId)
+    setProviderInstallSessions(prev => ({ ...prev, [response.session.provider]: response.session }))
+    await refreshProviderStatus()
+  }
+
   async function handleSend(): Promise<void> {
     if (!input.trim() || loading) return
     const message = input.trim()
@@ -501,8 +723,42 @@ export function ClerkPanel({ setupLaunchKey = 0 }: ClerkPanelProps): React.JSX.E
 
   async function handleToggleCommentary(): Promise<void> {
     const next = !commentaryEnabled
+    const prev = commentaryEnabled
     setCommentaryEnabled(next)
-    await api.clerk.updateSettings({ commentaryEnabled: next })
+    try {
+      const updated = await api.clerk.updateSettings({ commentaryEnabled: next })
+      setCommentaryEnabled(updated.commentaryEnabled)
+      setCommentaryMode(updated.commentaryMode)
+      setCommentaryPace(updated.commentaryPace)
+    } catch (err) {
+      setCommentaryEnabled(prev)
+      setError(err instanceof Error ? err.message : 'Failed to update commentary')
+    }
+  }
+
+  async function handleToggleCommentaryMode(): Promise<void> {
+    if (updatingCommentaryMode) return
+    const nextMode: 'auto' | 'light' = commentaryMode === 'auto' ? 'light' : 'auto'
+    const prevMode = commentaryMode
+    const prevPace = commentaryPace
+    setUpdatingCommentaryMode(true)
+    setCommentaryMode(nextMode)
+    if (nextMode === 'light') setCommentaryPace('light')
+    try {
+      const updated = await api.clerk.updateSettings({ commentaryMode: nextMode })
+      setCommentaryEnabled(updated.commentaryEnabled)
+      setCommentaryMode(updated.commentaryMode)
+      setCommentaryPace(updated.commentaryPace)
+      if (updated.commentaryEnabled && updated.commentaryMode === 'auto') {
+        void pingPresence()
+      }
+    } catch (err) {
+      setCommentaryMode(prevMode)
+      setCommentaryPace(prevPace)
+      setError(err instanceof Error ? err.message : 'Failed to update commentary mode')
+    } finally {
+      setUpdatingCommentaryMode(false)
+    }
   }
 
   async function handleApplyModel(model: string): Promise<void> {
@@ -549,19 +805,41 @@ export function ClerkPanel({ setupLaunchKey = 0 }: ClerkPanelProps): React.JSX.E
           })()}
           <button
             onClick={() => setShowSetup(true)}
-            className="text-[14px] text-text-muted hover:text-text-secondary transition-colors"
+            className="inline-flex items-center px-2.5 py-1 rounded-md border border-border-primary text-[14px] text-text-muted hover:text-text-secondary hover:border-interactive transition-colors"
           >
-            Setup
+            Clerk Setup
           </button>
+          <span className={`inline-flex items-center px-2 py-0.5 rounded text-[12px] border ${
+            !commentaryEnabled
+              ? 'text-text-muted border-border-primary bg-surface-tertiary'
+              : commentaryMode === 'light'
+                ? 'text-text-muted border-border-primary bg-surface-tertiary'
+                : commentaryPace === 'active'
+                  ? 'text-status-success border-border-primary bg-status-success-bg'
+                  : 'text-text-muted border-border-primary bg-surface-tertiary'
+          }`}>
+            commentator: {!commentaryEnabled ? 'off' : commentaryMode === 'light' ? 'light' : commentaryPace}
+          </span>
           <button
             onClick={handleToggleCommentary}
-            title={commentaryEnabled ? 'Disable commentary' : 'Enable commentary'}
+            title={commentaryEnabled ? 'Disable comments' : 'Enable comments'}
             className="flex items-center gap-1.5 text-[14px] text-text-muted hover:text-text-secondary transition-colors"
           >
             <span className={`inline-block w-7 h-4 rounded-full relative transition-colors ${commentaryEnabled ? 'bg-text-muted' : 'bg-surface-tertiary border border-border-primary'}`}>
               <span className={`absolute top-0.5 w-3 h-3 rounded-full bg-white transition-all ${commentaryEnabled ? 'left-3.5' : 'left-0.5'}`} />
             </span>
-            Commentary
+            Comments
+          </button>
+          <button
+            onClick={handleToggleCommentaryMode}
+            disabled={!commentaryEnabled || updatingCommentaryMode}
+            title={commentaryMode === 'auto' ? 'Switch commentator to manual light mode' : 'Switch commentator back to auto mode'}
+            className="flex items-center gap-1.5 text-[14px] text-text-muted hover:text-text-secondary transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            <span className={`inline-block w-9 h-4 rounded-full relative transition-colors ${commentaryMode === 'auto' ? 'bg-text-muted' : 'bg-surface-tertiary border border-border-primary'}`}>
+              <span className={`absolute top-0.5 w-3 h-3 rounded-full bg-white transition-all ${commentaryMode === 'auto' ? 'left-5' : 'left-0.5'}`} />
+            </span>
+            {commentaryMode === 'auto' ? 'Auto' : 'Light'}
           </button>
         </div>
       </div>
@@ -682,6 +960,14 @@ export function ClerkPanel({ setupLaunchKey = 0 }: ClerkPanelProps): React.JSX.E
           claude={providerStatus?.claude ?? null}
           codex={providerStatus?.codex ?? null}
           apiAuth={clerkStatus?.apiAuth ?? null}
+          providerAuthSessions={providerAuthSessions}
+          providerInstallSessions={providerInstallSessions}
+          onInstall={handleProviderInstall}
+          onConnect={handleProviderConnect}
+          onDisconnect={handleProviderDisconnect}
+          onCancelAuth={handleProviderAuthCancel}
+          onCancelInstall={handleProviderInstallCancel}
+          onRefreshProviders={refreshProviderStatus}
           onApplyModel={handleApplyModel}
           onSaveApiKey={handleSaveApiKey}
           onClose={() => setShowSetup(false)}

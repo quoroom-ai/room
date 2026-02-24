@@ -1,5 +1,6 @@
 import { execFileSync } from 'node:child_process'
-import type { ProviderName } from './provider-auth'
+
+type ProviderName = 'codex' | 'claude'
 
 const CLI_PROBE_TIMEOUT_MS = 1500
 
@@ -7,6 +8,14 @@ export interface CommandResult {
   ok: boolean
   stdout: string
   stderr: string
+}
+
+/** Returns the CLI command name, adding `.cmd` suffix on Windows. */
+export function getProviderCliCommand(
+  provider: ProviderName,
+  platform: NodeJS.Platform = process.platform
+): string {
+  return platform === 'win32' ? `${provider}.cmd` : provider
 }
 
 export function safeExec(cmd: string, args: string[]): CommandResult {
@@ -24,7 +33,8 @@ export function safeExec(cmd: string, args: string[]): CommandResult {
 }
 
 export function probeProviderInstalled(provider: ProviderName): { installed: boolean; version?: string } {
-  const out = safeExec(provider, ['--version'])
+  const cmd = getProviderCliCommand(provider)
+  const out = safeExec(cmd, ['--version'])
   return out.ok ? { installed: true, version: out.stdout || undefined } : { installed: false }
 }
 
@@ -36,11 +46,12 @@ export function probeProviderConnected(provider: ProviderName): boolean | null {
     return probeProviderInstalled('claude').installed ? true : null
   }
 
+  const cmd = getProviderCliCommand(provider)
   const attempts = provider === 'codex'
     ? [['login', 'status'], ['auth', 'status']]
     : [['auth', 'status'], ['login', 'status']]
   for (const args of attempts) {
-    const out = safeExec(provider, args)
+    const out = safeExec(cmd, args)
     if (!out.ok) continue
     const combined = `${out.stdout}\n${out.stderr}`.toLowerCase()
     if (combined.includes('not logged') || combined.includes('logged out') || combined.includes('unauth')) return false
@@ -50,9 +61,10 @@ export function probeProviderConnected(provider: ProviderName): boolean | null {
 }
 
 export function disconnectProvider(provider: ProviderName): { command: string; result: CommandResult } {
+  const cmd = getProviderCliCommand(provider)
   const args = ['logout']
   return {
     command: `${provider} ${args.join(' ')}`,
-    result: safeExec(provider, args),
+    result: safeExec(cmd, args),
   }
 }

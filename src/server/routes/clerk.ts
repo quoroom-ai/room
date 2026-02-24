@@ -18,6 +18,36 @@ const CLERK_LOG_LINE_MAX = 240
 const CLERK_SUMMARY_ITEM_LIMIT = 8
 const CLERK_COMMENTARY_HOLD_COUNT_KEY = 'clerk_commentary_hold_count'
 const CLERK_LAST_ASSISTANT_REPLY_AT_KEY = 'clerk_last_assistant_reply_at'
+const CLERK_COMMENTARY_MODE_KEY = 'clerk_commentary_mode'
+const CLERK_USER_PRESENCE_TIMEOUT_MS = 90_000
+
+type ClerkCommentaryMode = 'auto' | 'light'
+type ClerkCommentaryPace = 'active' | 'light'
+
+function parseIsoMs(value: string | null | undefined): number | null {
+  if (!value) return null
+  const ms = Date.parse(value)
+  return Number.isFinite(ms) ? ms : null
+}
+
+function getCommentaryMode(db: Database.Database): ClerkCommentaryMode {
+  const mode = (queries.getSetting(db, CLERK_COMMENTARY_MODE_KEY) ?? '').trim().toLowerCase()
+  return mode === 'light' ? 'light' : 'auto'
+}
+
+function isKeeperPresent(db: Database.Database): boolean {
+  const lastSeenMs = parseIsoMs(queries.getSetting(db, 'clerk_user_last_seen_at'))
+  const lastInteractionMs = parseIsoMs(queries.getSetting(db, 'clerk_last_user_message_at'))
+  const newest = Math.max(lastSeenMs ?? 0, lastInteractionMs ?? 0)
+  if (newest <= 0) return false
+  return Date.now() - newest < CLERK_USER_PRESENCE_TIMEOUT_MS
+}
+
+function getCommentaryPace(db: Database.Database): ClerkCommentaryPace {
+  const mode = getCommentaryMode(db)
+  if (mode === 'light') return 'light'
+  return isKeeperPresent(db) ? 'active' : 'light'
+}
 
 function extractApiError(payload: unknown): string | null {
   if (!payload || typeof payload !== 'object') return null
@@ -398,6 +428,7 @@ export function registerClerkRoutes(router: Router): void {
   // Heartbeat while user has the page open — controls commentary active/light mode
   router.post('/api/clerk/presence', (ctx) => {
     queries.setSetting(ctx.db, 'clerk_user_last_seen_at', new Date().toISOString())
+    eventBus.emit('clerk', 'clerk:presence', { timestamp: Date.now() })
     return { data: { ok: true } }
   })
 
@@ -438,12 +469,16 @@ export function registerClerkRoutes(router: Router): void {
     const clerkWorkerId = queries.getSetting(ctx.db, 'clerk_worker_id')
     const model = queries.getSetting(ctx.db, 'clerk_model')
     const commentaryEnabled = queries.getSetting(ctx.db, 'clerk_commentary_enabled') !== 'false'
+    const commentaryMode = getCommentaryMode(ctx.db)
+    const commentaryPace = commentaryEnabled ? getCommentaryPace(ctx.db) : 'light'
 
     return {
       data: {
         configured: Boolean(clerkWorkerId) || Boolean(model),
         model: model || null,
         commentaryEnabled,
+        commentaryMode,
+        commentaryPace,
         apiAuth: getClerkApiAuth(ctx.db)
       }
     }
@@ -487,10 +522,21 @@ export function registerClerkRoutes(router: Router): void {
       queries.setSetting(ctx.db, 'clerk_commentary_enabled', body.commentaryEnabled ? 'true' : 'false')
     }
 
+    if (body.commentaryMode !== undefined) {
+      const mode = String(body.commentaryMode).trim().toLowerCase()
+      if (mode !== 'auto' && mode !== 'light') {
+        return { status: 400, error: 'commentaryMode must be auto or light' }
+      }
+      queries.setSetting(ctx.db, CLERK_COMMENTARY_MODE_KEY, mode)
+      eventBus.emit('clerk', 'clerk:commentary_mode_changed', { mode })
+    }
+
     return {
       data: {
         model: queries.getSetting(ctx.db, 'clerk_model') || null,
         commentaryEnabled: queries.getSetting(ctx.db, 'clerk_commentary_enabled') !== 'false',
+        commentaryMode: getCommentaryMode(ctx.db),
+        commentaryPace: getCommentaryPace(ctx.db),
         apiAuth: getClerkApiAuth(ctx.db),
       }
     }

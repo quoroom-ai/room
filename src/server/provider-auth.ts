@@ -1,6 +1,7 @@
 import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process'
 import { randomUUID } from 'node:crypto'
 import { eventBus } from './event-bus'
+import { getProviderCliCommand } from './provider-cli'
 
 export type ProviderName = 'codex' | 'claude'
 export type ProviderAuthStatus = 'starting' | 'running' | 'completed' | 'failed' | 'canceled' | 'timeout'
@@ -68,8 +69,8 @@ function nowIso(): string {
 }
 
 function getProviderCommand(provider: ProviderName): ProviderCommand {
-  if (provider === 'codex') return { command: 'codex', args: ['login'] }
-  return { command: 'claude', args: ['login'] }
+  const command = getProviderCliCommand(provider)
+  return { command, args: ['login'] }
 }
 
 function isActiveStatus(status: ProviderAuthStatus): boolean {

@@ -514,6 +514,8 @@ export const api = {
         configured: boolean
         model: string | null
         commentaryEnabled: boolean
+        commentaryMode: 'auto' | 'light'
+        commentaryPace: 'active' | 'light'
         apiAuth: {
           openai: { hasRoomCredential: boolean; hasSavedKey: boolean; hasEnvKey: boolean; ready: boolean }
           anthropic: { hasRoomCredential: boolean; hasSavedKey: boolean; hasEnvKey: boolean; ready: boolean }
@@ -527,10 +529,12 @@ export const api = {
           anthropic: { hasRoomCredential: boolean; hasSavedKey: boolean; hasEnvKey: boolean; ready: boolean }
         }
       }>('POST', '/api/clerk/api-key', { provider, key }),
-    updateSettings: (settings: { model?: string; commentaryEnabled?: boolean }) =>
+    updateSettings: (settings: { model?: string; commentaryEnabled?: boolean; commentaryMode?: 'auto' | 'light' }) =>
       request<{
         model: string | null
         commentaryEnabled: boolean
+        commentaryMode: 'auto' | 'light'
+        commentaryPace: 'active' | 'light'
         apiAuth: {
           openai: { hasRoomCredential: boolean; hasSavedKey: boolean; hasEnvKey: boolean; ready: boolean }
           anthropic: { hasRoomCredential: boolean; hasSavedKey: boolean; hasEnvKey: boolean; ready: boolean }

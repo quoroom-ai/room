@@ -1328,7 +1328,7 @@ export function RoomSettingsPanel({ roomId }: RoomSettingsPanelProps): React.JSX
                           ? 'text-status-success'
                           : 'text-text-muted'
                         : 'text-status-warning'
-                    }`}>
+                    } ${queenSubscriptionStatus == null ? 'animate-pulse' : ''}`}>
                       {activeQueenAuth.provider === 'claude_subscription' && (
                         queenSubscriptionStatus == null
                           ? 'Checking Claude status...'
