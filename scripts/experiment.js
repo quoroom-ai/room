@@ -33,7 +33,8 @@
  */
 
 const { spawn, execSync } = require('child_process')
-const { existsSync, readFileSync, mkdirSync, rmSync } = require('fs')
+const { existsSync, readFileSync, writeFileSync, mkdirSync, rmSync } = require('fs')
+const { homedir } = require('os')
 const path = require('path')
 const http = require('http')
 
@@ -218,6 +219,43 @@ function build() {
   }
 
   log('BUILD', C.blue, 'Done.')
+}
+
+// ─── MCP DB override ─────────────────────────────────────────────────────────
+// Claude CLI reads MCP config from ~/.claude.json which hardcodes QUOROOM_DB_PATH.
+// For experiments we need MCP tools to point at the temp experiment DB, not the user's real DB.
+
+const CLAUDE_CONFIG_PATH = path.join(homedir(), '.claude.json')
+let originalMcpDbPath = null  // saved for restore
+
+function overrideMcpDbPath(experimentDbPath) {
+  try {
+    const config = JSON.parse(readFileSync(CLAUDE_CONFIG_PATH, 'utf-8'))
+    const quoroom = config.mcpServers?.quoroom
+    if (!quoroom) return
+    originalMcpDbPath = quoroom.env?.QUOROOM_DB_PATH ?? null
+    if (!quoroom.env) quoroom.env = {}
+    quoroom.env.QUOROOM_DB_PATH = experimentDbPath
+    writeFileSync(CLAUDE_CONFIG_PATH, JSON.stringify(config, null, 2) + '\n')
+    log('MCP', C.green, `DB override → ${experimentDbPath}`)
+  } catch (e) {
+    log('MCP', C.yellow, `Could not override MCP DB: ${e.message}`)
+  }
+}
+
+function restoreMcpDbPath() {
+  if (originalMcpDbPath === null) return
+  try {
+    const config = JSON.parse(readFileSync(CLAUDE_CONFIG_PATH, 'utf-8'))
+    const quoroom = config.mcpServers?.quoroom
+    if (!quoroom?.env) return
+    quoroom.env.QUOROOM_DB_PATH = originalMcpDbPath
+    writeFileSync(CLAUDE_CONFIG_PATH, JSON.stringify(config, null, 2) + '\n')
+    log('MCP', C.dim, 'DB restored to original path.')
+  } catch (e) {
+    log('MCP', C.yellow, `Could not restore MCP DB: ${e.message}`)
+  }
+  originalMcpDbPath = null
 }
 
 // ─── Server lifecycle ────────────────────────────────────────────────────────
@@ -1055,6 +1093,9 @@ async function main() {
   const token = getAuthToken()
   log('AUTH', C.green, `Token: ${token.substring(0, 10)}...`)
 
+  // Override MCP DB so Claude CLI tools point at experiment DB (not user's real DB)
+  overrideMcpDbPath(dbPath)
+
   if (isSwarm) {
     // === SWARM MODE ===
     console.log('')
@@ -1090,6 +1131,7 @@ async function main() {
   }
 
   // Cleanup
+  restoreMcpDbPath()
   stopServer()
   if (keepDb) {
     log('CLEANUP', C.dim, `DB preserved: ${dbPath}`)
@@ -1102,6 +1144,7 @@ async function main() {
 // Clean shutdown on Ctrl+C
 process.on('SIGINT', () => {
   console.log(`\n${C.yellow}Interrupted — cleaning up...${C.reset}`)
+  restoreMcpDbPath()
   stopServer()
   if (!keepDb && dataDir) {
     try { rmSync(dataDir, { recursive: true }) } catch {}
@@ -1109,11 +1152,13 @@ process.on('SIGINT', () => {
   process.exit(0)
 })
 process.on('SIGTERM', () => {
+  restoreMcpDbPath()
   stopServer()
   process.exit(0)
 })
 
 main().catch(err => {
+  restoreMcpDbPath()
   console.error(`\n${C.red}Experiment failed: ${err.message}${C.reset}`)
   if (err.stack) console.error(C.dim + err.stack + C.reset)
   stopServer()
