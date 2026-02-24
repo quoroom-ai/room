@@ -13,6 +13,39 @@ export const CLERK_NOTIFY_TELEGRAM_KEY = 'clerk_notify_telegram'
 const CLERK_NOTIFY_ESCALATION_CURSOR_KEY = 'clerk_notify_escalation_cursor'
 const CLERK_NOTIFY_DECISION_CURSOR_KEY = 'clerk_notify_decision_cursor'
 const CLERK_NOTIFY_ROOM_MESSAGE_CURSOR_KEY = 'clerk_notify_room_message_cursor'
+const CLERK_NOTIFY_DIGEST_STYLE_CURSOR_KEY = 'clerk_notify_digest_style_cursor'
+
+type CountPhrase = (count: number) => string
+
+const DIGEST_OPENERS: CountPhrase[] = [
+  (count) => `I need your call on ${count} item${count === 1 ? '' : 's'}.`,
+  (count) => `${count} decision point${count === 1 ? '' : 's'} need${count === 1 ? 's' : ''} your direction right now.`,
+  (count) => `Quick sync: I have ${count} item${count === 1 ? '' : 's'} waiting for your decision.`,
+]
+
+const ESCALATION_HEADERS: CountPhrase[] = [
+  (count) => `Urgent questions (${count}):`,
+  (count) => `Immediate calls needed (${count}):`,
+  (count) => `Escalations that need your answer (${count}):`,
+]
+
+const DECISION_HEADERS: CountPhrase[] = [
+  (count) => `Votes to confirm (${count}):`,
+  (count) => `Pending votes (${count}):`,
+  (count) => `Choices waiting for your vote (${count}):`,
+]
+
+const ROOM_MESSAGE_HEADERS: CountPhrase[] = [
+  (count) => `Incoming room messages (${count}):`,
+  (count) => `Room inbox updates (${count}):`,
+  (count) => `Messages from rooms waiting on you (${count}):`,
+]
+
+const DIGEST_CLOSERS: string[] = [
+  'What do you think we should do next? What are you going to do?',
+  'What direction do you want me to execute?',
+  'Tell me your call and I will carry it out right away.',
+]
 
 function settingEnabled(raw: string | null | undefined, defaultValue: boolean): boolean {
   const value = String(raw ?? '').trim().toLowerCase()
@@ -91,7 +124,6 @@ export function getClerkPreferredNotifyChannels(db: Database.Database): ClerkNot
 
 interface SendClerkAlertInput {
   content: string
-  source: 'escalation' | 'decision' | 'room_message'
 }
 
 async function sendClerkAlert(
@@ -152,48 +184,87 @@ function summarizeRequest(text: string, max: number = 180): string {
   return compact
 }
 
-function roomContext(room: Room): string {
-  const goal = room.goal ? clip(room.goal, 120) : 'no objective set'
-  return `Room "${room.name}" is ${room.status}. Objective: ${goal}.`
+interface PendingEscalationItem {
+  room: Room
+  escalation: ReturnType<typeof queries.getEscalation>
 }
 
-function buildEscalationAlert(db: Database.Database, room: Room, escalation: ReturnType<typeof queries.getEscalation>): string {
-  if (!escalation) return ''
-  const fromName = escalation.fromAgentId
-    ? (queries.getWorker(db, escalation.fromAgentId)?.name ?? `worker #${escalation.fromAgentId}`)
-    : 'one of the room agents'
-  const summary = summarizeRequest(escalation.question, 200)
-  return [
-    'Hi, Clerk here.',
-    `${roomContext(room)}`,
-    `${fromName} needs your guidance now (escalation #${escalation.id}).`,
-    `What they need: ${summary}`,
-    'Reply naturally and I will deliver your instruction back to the room immediately.',
-  ].join('\n')
+interface PendingDecisionItem {
+  room: Room
+  decision: ReturnType<typeof queries.getDecision>
 }
 
-function buildDecisionAlert(room: Room, decision: ReturnType<typeof queries.getDecision>): string {
-  if (!decision) return ''
-  const proposal = summarizeRequest(decision.proposal, 220)
-  return [
-    'Hi, Clerk here.',
-    `${roomContext(room)}`,
-    `Keeper vote is waiting (decision #${decision.id}).`,
-    `Proposal summary: ${proposal}`,
-    `Reply with yes/no/abstain (example: "yes on #${decision.id}") and I will cast it for you.`,
-  ].join('\n')
+interface PendingRoomMessageItem {
+  room: Room
+  message: ReturnType<typeof queries.getRoomMessage>
 }
 
-function buildRoomMessageAlert(room: Room, message: ReturnType<typeof queries.getRoomMessage>): string {
-  if (!message) return ''
-  const subject = summarizeRequest(message.subject, 140)
-  return [
-    'Hi, Clerk here.',
-    `${roomContext(room)}`,
-    `A new inter-room message arrived (message #${message.id}) from ${message.fromRoomId ?? 'another room'}.`,
-    `Topic: ${subject}`,
-    'Reply with what you want me to send back and I will post it through the room inbox.',
-  ].join('\n')
+const DIGEST_SECTION_LIMIT = 4
+
+function pickVariant<T>(variants: readonly T[], cursor: number, offset: number = 0): T {
+  if (variants.length === 0) throw new Error('variants must not be empty')
+  const index = Math.abs(cursor + offset) % variants.length
+  return variants[index]
+}
+
+function buildKeeperDigest(
+  db: Database.Database,
+  input: {
+    escalations: PendingEscalationItem[]
+    decisions: PendingDecisionItem[]
+    roomMessages: PendingRoomMessageItem[]
+  },
+  styleCursor: number,
+): string {
+  const total = input.escalations.length + input.decisions.length + input.roomMessages.length
+  if (total === 0) return ''
+
+  const lines: string[] = []
+  lines.push(pickVariant(DIGEST_OPENERS, styleCursor)(total))
+
+  if (input.escalations.length > 0) {
+    lines.push('', pickVariant(ESCALATION_HEADERS, styleCursor, 1)(input.escalations.length))
+    const visible = input.escalations.slice(0, DIGEST_SECTION_LIMIT)
+    for (const item of visible) {
+      if (!item.escalation) continue
+      const fromName = item.escalation.fromAgentId
+        ? (queries.getWorker(db, item.escalation.fromAgentId)?.name ?? `worker #${item.escalation.fromAgentId}`)
+        : 'agent'
+      lines.push(`- [${item.room.name} #${item.escalation.id}] ${fromName}: ${summarizeRequest(item.escalation.question, 150)}`)
+    }
+    const remaining = input.escalations.length - visible.length
+    if (remaining > 0) lines.push(`- ...and ${remaining} more escalation${remaining === 1 ? '' : 's'}.`)
+  }
+
+  if (input.decisions.length > 0) {
+    lines.push('', pickVariant(DECISION_HEADERS, styleCursor, 2)(input.decisions.length))
+    const visible = input.decisions.slice(0, DIGEST_SECTION_LIMIT)
+    for (const item of visible) {
+      if (!item.decision) continue
+      lines.push(`- [${item.room.name} decision #${item.decision.id}] ${summarizeRequest(item.decision.proposal, 150)}`)
+    }
+    const remaining = input.decisions.length - visible.length
+    if (remaining > 0) lines.push(`- ...and ${remaining} more vote${remaining === 1 ? '' : 's'}.`)
+  }
+
+  if (input.roomMessages.length > 0) {
+    lines.push('', pickVariant(ROOM_MESSAGE_HEADERS, styleCursor, 3)(input.roomMessages.length))
+    const visible = input.roomMessages.slice(0, DIGEST_SECTION_LIMIT)
+    for (const item of visible) {
+      if (!item.message) continue
+      const fromRoom = item.message.fromRoomId ?? 'unknown room'
+      lines.push(`- [${item.room.name} message #${item.message.id}] from ${fromRoom}: ${summarizeRequest(item.message.subject, 140)}`)
+    }
+    const remaining = input.roomMessages.length - visible.length
+    if (remaining > 0) lines.push(`- ...and ${remaining} more inbox item${remaining === 1 ? '' : 's'}.`)
+  }
+
+  lines.push(
+    '',
+    pickVariant(DIGEST_CLOSERS, styleCursor, 4)
+  )
+
+  return lines.join('\n')
 }
 
 export async function relayPendingKeeperRequests(db: Database.Database): Promise<void> {
@@ -202,73 +273,94 @@ export async function relayPendingKeeperRequests(db: Database.Database): Promise
   const channels = getClerkPreferredNotifyChannels(db)
   if (channels.length === 0) return
 
-  let escalationCursor = parseCursor(queries.getSetting(db, CLERK_NOTIFY_ESCALATION_CURSOR_KEY))
-  let decisionCursor = parseCursor(queries.getSetting(db, CLERK_NOTIFY_DECISION_CURSOR_KEY))
-  let roomMessageCursor = parseCursor(queries.getSetting(db, CLERK_NOTIFY_ROOM_MESSAGE_CURSOR_KEY))
+  const escalationCursor = parseCursor(queries.getSetting(db, CLERK_NOTIFY_ESCALATION_CURSOR_KEY))
+  const decisionCursor = parseCursor(queries.getSetting(db, CLERK_NOTIFY_DECISION_CURSOR_KEY))
+  const roomMessageCursor = parseCursor(queries.getSetting(db, CLERK_NOTIFY_ROOM_MESSAGE_CURSOR_KEY))
+  const digestStyleCursor = parseCursor(queries.getSetting(db, CLERK_NOTIFY_DIGEST_STYLE_CURSOR_KEY))
 
+  const pendingEscalations: PendingEscalationItem[] = []
+  const pendingDecisions: PendingDecisionItem[] = []
+  const pendingRoomMessages: PendingRoomMessageItem[] = []
   const rooms = queries.listRooms(db)
   for (const room of rooms) {
-    const pendingEscalations = queries
+    const roomEscalations = queries
       .getPendingEscalations(db, room.id)
       .filter((item) => item.toAgentId == null && item.fromAgentId != null && item.id > escalationCursor)
       .sort((a, b) => a.id - b.id)
-
-    for (const escalation of pendingEscalations) {
-      const content = buildEscalationAlert(db, room, escalation)
-      if (!content) continue
-      const sent = await sendClerkAlert(db, { source: 'escalation', content })
-      if (!sent) return
-      escalationCursor = escalation.id
-      queries.setSetting(db, CLERK_NOTIFY_ESCALATION_CURSOR_KEY, String(escalationCursor))
-      queries.logRoomActivity(
-        db,
-        room.id,
-        'system',
-        `Clerk forwarded escalation #${escalation.id} to keeper channels`,
-        clip(escalation.question, 220)
-      )
+    for (const escalation of roomEscalations) {
+      pendingEscalations.push({ room, escalation })
     }
 
-    const pendingDecisions = queries
+    const roomDecisions = queries
       .listDecisions(db, room.id, 'voting')
       .filter((item) => !item.keeperVote && item.id > decisionCursor)
       .sort((a, b) => a.id - b.id)
-
-    for (const decision of pendingDecisions) {
-      const content = buildDecisionAlert(room, decision)
-      if (!content) continue
-      const sent = await sendClerkAlert(db, { source: 'decision', content })
-      if (!sent) return
-      decisionCursor = decision.id
-      queries.setSetting(db, CLERK_NOTIFY_DECISION_CURSOR_KEY, String(decisionCursor))
-      queries.logRoomActivity(
-        db,
-        room.id,
-        'decision',
-        `Clerk requested keeper vote for decision #${decision.id}`,
-        clip(decision.proposal, 220)
-      )
+    for (const decision of roomDecisions) {
+      pendingDecisions.push({ room, decision })
     }
 
     const unreadInbound = queries
       .listRoomMessages(db, room.id, 'unread')
       .filter((item) => item.direction === 'inbound' && item.id > roomMessageCursor)
       .sort((a, b) => a.id - b.id)
-
     for (const message of unreadInbound) {
-      const content = buildRoomMessageAlert(room, message)
-      if (!content) continue
-      const sent = await sendClerkAlert(db, { source: 'room_message', content })
-      if (!sent) return
-      roomMessageCursor = message.id
-      queries.setSetting(db, CLERK_NOTIFY_ROOM_MESSAGE_CURSOR_KEY, String(roomMessageCursor))
-      queries.logRoomActivity(
-        db,
-        room.id,
-        'system',
-        `Clerk forwarded inbox message #${message.id} to keeper channels`,
-        clip(message.subject, 220)
-      )
+      pendingRoomMessages.push({ room, message })
     }
+  }
+
+  const content = buildKeeperDigest(db, {
+    escalations: pendingEscalations,
+    decisions: pendingDecisions,
+    roomMessages: pendingRoomMessages,
+  }, digestStyleCursor)
+  if (!content) return
+
+  const sent = await sendClerkAlert(db, { content })
+  if (!sent) return
+
+  const nextEscalationCursor = pendingEscalations.reduce((max, item) =>
+    Math.max(max, item.escalation?.id ?? 0), escalationCursor)
+  const nextDecisionCursor = pendingDecisions.reduce((max, item) =>
+    Math.max(max, item.decision?.id ?? 0), decisionCursor)
+  const nextRoomMessageCursor = pendingRoomMessages.reduce((max, item) =>
+    Math.max(max, item.message?.id ?? 0), roomMessageCursor)
+
+  queries.setSetting(db, CLERK_NOTIFY_ESCALATION_CURSOR_KEY, String(nextEscalationCursor))
+  queries.setSetting(db, CLERK_NOTIFY_DECISION_CURSOR_KEY, String(nextDecisionCursor))
+  queries.setSetting(db, CLERK_NOTIFY_ROOM_MESSAGE_CURSOR_KEY, String(nextRoomMessageCursor))
+  queries.setSetting(db, CLERK_NOTIFY_DIGEST_STYLE_CURSOR_KEY, String(digestStyleCursor + 1))
+
+  const byRoom = new Map<number, { room: Room; escalations: number; decisions: number; roomMessages: number }>()
+  for (const item of pendingEscalations) {
+    if (!item.escalation) continue
+    const summary = byRoom.get(item.room.id) ?? { room: item.room, escalations: 0, decisions: 0, roomMessages: 0 }
+    summary.escalations += 1
+    byRoom.set(item.room.id, summary)
+  }
+  for (const item of pendingDecisions) {
+    if (!item.decision) continue
+    const summary = byRoom.get(item.room.id) ?? { room: item.room, escalations: 0, decisions: 0, roomMessages: 0 }
+    summary.decisions += 1
+    byRoom.set(item.room.id, summary)
+  }
+  for (const item of pendingRoomMessages) {
+    if (!item.message) continue
+    const summary = byRoom.get(item.room.id) ?? { room: item.room, escalations: 0, decisions: 0, roomMessages: 0 }
+    summary.roomMessages += 1
+    byRoom.set(item.room.id, summary)
+  }
+
+  for (const summary of byRoom.values()) {
+    const details: string[] = []
+    if (summary.escalations > 0) details.push(`${summary.escalations} escalation${summary.escalations === 1 ? '' : 's'}`)
+    if (summary.decisions > 0) details.push(`${summary.decisions} vote${summary.decisions === 1 ? '' : 's'}`)
+    if (summary.roomMessages > 0) details.push(`${summary.roomMessages} inbox item${summary.roomMessages === 1 ? '' : 's'}`)
+    queries.logRoomActivity(
+      db,
+      summary.room.id,
+      'system',
+      'Clerk sent keeper digest',
+      details.join(', ')
+    )
   }
 }

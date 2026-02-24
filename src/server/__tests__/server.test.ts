@@ -5,6 +5,7 @@ import { join } from 'node:path'
 import { createTestServer, request, requestAsUser, requestNoAuth, type TestContext } from './helpers/test-server'
 import { updateRoom, listRooms, listClerkMessages, listChatMessages } from '../../shared/db-queries'
 import { createRoom as createRoomFull } from '../../shared/room'
+import { eventBus, type WsEvent } from '../event-bus'
 
 let ctx: TestContext
 
@@ -189,6 +190,18 @@ describe('Server integration', () => {
       })
 
       vi.stubGlobal('fetch', fetchMock)
+      const clerkEvents: Array<{ role: string; source: string | null; content: string }> = []
+      const unsubscribe = eventBus.on('clerk', (event: WsEvent) => {
+        if (event.type !== 'clerk:message') return
+        const payload = event.data as { message?: { role?: string; source?: string | null; content?: string } }
+        const message = payload.message
+        if (!message?.role || typeof message.content !== 'string') return
+        clerkEvents.push({
+          role: message.role,
+          source: message.source ?? null,
+          content: message.content
+        })
+      })
       try {
         await pollQueenInbox(ctx.db, {
           runClerkTurn: async () => ({
@@ -215,7 +228,18 @@ describe('Server integration', () => {
         expect(outbound).toBeTruthy()
 
         expect(listChatMessages(ctx.db, created.room.id)).toHaveLength(0)
+        expect(clerkEvents.some((event) =>
+          event.role === 'user'
+          && event.source === 'email'
+          && event.content.includes('metrics tomorrow')
+        )).toBe(true)
+        expect(clerkEvents.some((event) =>
+          event.role === 'assistant'
+          && event.source === 'email'
+          && event.content.includes('Confirmed. I will remind you about metrics tomorrow.')
+        )).toBe(true)
       } finally {
+        unsubscribe()
         vi.unstubAllGlobals()
         vi.restoreAllMocks()
         if (prevDataDir == null) delete process.env.QUOROOM_DATA_DIR
