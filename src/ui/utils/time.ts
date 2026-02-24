@@ -1,8 +1,9 @@
 export function formatRelativeTime(iso: string | null): string {
   if (!iso) return 'never'
-  const date = new Date(iso)
+  const date = new Date(iso.includes('T') || iso.endsWith('Z') ? iso : iso.replace(' ', 'T') + 'Z')
   const diffMs = Date.now() - date.getTime()
 
+  if (diffMs < 0) return 'just now' // clock skew / future timestamp
   if (diffMs < 60_000) return 'just now'
   if (diffMs < 3_600_000) return `${Math.floor(diffMs / 60_000)}m ago`
   if (diffMs < 86_400_000) return `${Math.floor(diffMs / 3_600_000)}h ago`
@@ -10,7 +11,7 @@ export function formatRelativeTime(iso: string | null): string {
 }
 
 export function formatDateTimeShort(iso: string): string {
-  const date = new Date(iso)
+  const date = new Date(iso.includes('T') || iso.endsWith('Z') ? iso : iso.replace(' ', 'T') + 'Z')
   return date.toLocaleString(undefined, {
     month: 'short',
     day: 'numeric',
