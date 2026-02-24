@@ -410,10 +410,14 @@ export async function executeQueenTool(
         if (goalCheck.roomId !== roomId) return { content: `Error: goal #${goalId} belongs to another room. Your room's goals are shown in the Active Goals section — use those goal IDs.`, isError: true }
         const observation = String(args.observation ?? args.progress ?? args.message ?? args.text ?? '')
         const metricValue = args.metricValue != null ? Number(args.metricValue) : (args.metric_value != null ? Number(args.metric_value) : undefined)
+        const subGoals = queries.getSubGoals(db, goalId)
         updateGoalProgress(db, goalId, observation, metricValue, workerId)
         const goal = queries.getGoal(db, goalId)
         const pct = Math.round((goal?.progress ?? 0) * 100)
-        return { content: `Progress logged on goal #${goalId}. Now at ${pct}%.` }
+        const note = subGoals.length > 0 && metricValue != null
+          ? ` (metricValue ignored — goal has ${subGoals.length} sub-goals, progress is calculated from them. Update sub-goals directly.)`
+          : ''
+        return { content: `Progress logged on goal #${goalId}. Now at ${pct}%.${note}` }
       }
 
       case 'quoroom_create_subgoal': {
@@ -451,6 +455,15 @@ export async function executeQueenTool(
         // Tolerate common small-model arg name variations
         const proposalText = String(args.proposal ?? args.text ?? args.description ?? args.content ?? args.idea ?? '').trim()
         if (!proposalText) return { content: 'Error: proposal text is required. Provide a "proposal" string.', isError: true }
+        // De-dup: reject if a similar proposal is pending or was recently approved
+        const recentDecisions = queries.listDecisions(db, roomId)
+        const isDuplicate = recentDecisions.slice(0, 10).some(d =>
+          (d.status === 'voting' || d.status === 'approved') &&
+          d.proposal.toLowerCase() === proposalText.toLowerCase()
+        )
+        if (isDuplicate) {
+          return { content: `A similar proposal already exists: "${proposalText}". No need to propose again.`, isError: true }
+        }
         const decisionType = String(args.decisionType ?? args.type ?? args.impact ?? args.category ?? 'low_impact') as DecisionType
         const decision = propose(db, {
           roomId,
@@ -494,6 +507,11 @@ export async function executeQueenTool(
         const systemPrompt = String(args.systemPrompt ?? args.system_prompt ?? args.instructions ?? args.prompt ?? '').trim()
         if (!name) return { content: 'Error: name is required for quoroom_create_worker. Provide a "name" string.', isError: true }
         if (!systemPrompt) return { content: 'Error: systemPrompt is required for quoroom_create_worker. Provide a "systemPrompt" string describing this worker\'s role and instructions.', isError: true }
+        // De-dup: reject if worker with same name already exists in this room
+        const existingWorkers = queries.listRoomWorkers(db, roomId)
+        if (existingWorkers.some(w => w.name.toLowerCase() === name.toLowerCase())) {
+          return { content: `Worker "${name}" already exists in this room. Use quoroom_update_worker to modify it, or choose a different name.`, isError: true }
+        }
         const role = args.role && args.role !== args.name ? String(args.role) : undefined
         const description = args.description ? String(args.description) : undefined
         // Apply role preset defaults (explicit args override preset)
@@ -532,6 +550,12 @@ export async function executeQueenTool(
         const maxTurns = args.maxTurns ? Number(args.maxTurns) : undefined
         const triggerType: 'cron' | 'once' | 'manual' = cronExpression ? 'cron' : scheduledAt ? 'once' : 'manual'
 
+        // De-dup: reject if active task with same name exists in this room
+        const existingTasks = queries.listTasks(db, roomId, 'active')
+        if (existingTasks.some(t => t.name.toLowerCase() === name.toLowerCase())) {
+          return { content: `Task "${name}" already exists. Choose a different name or manage the existing task.`, isError: true }
+        }
+
         // Validate workerId belongs to this room — prevents cross-room assignment
         if (taskWorkerId) {
           const taskWorker = queries.getWorker(db, taskWorkerId)
@@ -560,6 +584,12 @@ export async function executeQueenTool(
         const name = String(args.name ?? '')
         const content = String(args.content ?? '')
         const type = String(args.type ?? 'fact') as 'fact' | 'preference' | 'person' | 'project' | 'event'
+        // De-dup: if entity with same name exists in this room, add observation instead of creating duplicate
+        const existing = queries.listEntities(db, roomId).find(e => e.name.toLowerCase() === name.toLowerCase())
+        if (existing) {
+          queries.addObservation(db, existing.id, content, 'queen')
+          return { content: `Updated memory "${name}" (added new observation to existing entry).` }
+        }
         const entity = queries.createEntity(db, name, type, undefined, roomId)
         queries.addObservation(db, entity.id, content, 'queen')
         return { content: `Remembered "${name}".` }

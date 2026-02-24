@@ -508,6 +508,17 @@ export async function runCycle(
     }
     contextParts.push(`## Execution Settings\n${settingsParts.join('\n')}`)
 
+    // Stuck detector: if last 2 completed cycles had zero productive tool calls, inject pivot directive
+    const STUCK_THRESHOLD_CYCLES = 2
+    const productiveCallCount = queries.countProductiveToolCalls(db, worker.id, STUCK_THRESHOLD_CYCLES)
+    const recentCompletedCycles = queries.listRoomCycles(db, roomId, 5)
+      .filter(c => c.workerId === worker.id && c.status === 'completed')
+    const isStuck = recentCompletedCycles.length >= STUCK_THRESHOLD_CYCLES && productiveCallCount === 0
+    if (isStuck) {
+      contextParts.push(`## ⚠ STUCK DETECTED\nYour last ${STUCK_THRESHOLD_CYCLES} cycles produced no external results (no web searches, no memories stored, no goal progress, no keeper messages). You MUST change strategy NOW:\n- Try a different web search query\n- Store what you know in memory even if incomplete\n- Update goal progress with what you've learned\n- Message the keeper if you're blocked\nDo NOT repeat the same approach. Pivot immediately.`)
+      logBuffer.addSynthetic('system', `Stuck detector: 0 productive tool calls in last ${STUCK_THRESHOLD_CYCLES} cycles — injecting pivot directive`)
+    }
+
     const selfRegulateHint = rateLimitEvents.length > 0
       ? '\n- **Self-regulate**: You are hitting rate limits. Use quoroom_configure_room to increase your cycle gap or reduce max turns to stay within API limits.'
       : ''
@@ -517,16 +528,46 @@ export async function runCycle(
       ? 'Always call tools to take action — do not just describe what you would do.'
       : 'IMPORTANT: You MUST call at least one tool in your response. Respond ONLY with a tool call — do not write explanatory text without a tool call.'
 
-    const commsTools = isCli
-      ? 'quoroom_inbox_send_keeper (message keeper), quoroom_inbox_list (inter-room), quoroom_inbox_send_room, quoroom_inbox_reply'
-      : 'quoroom_ask_keeper'
-    const webTools = isCli
-      ? '(use your built-in web search and fetch tools)'
-      : 'quoroom_web_search, quoroom_web_fetch, quoroom_browser'
-    const walletTools = isCli
-      ? 'quoroom_wallet_balance, quoroom_wallet_send, quoroom_wallet_history, quoroom_wallet_topup'
-      : 'quoroom_wallet_balance, quoroom_wallet_send, quoroom_wallet_history'
-    const toolList = `**Goals:** quoroom_set_goal, quoroom_update_progress, quoroom_create_subgoal, quoroom_complete_goal, quoroom_abandon_goal\n**Governance:** quoroom_propose, quoroom_vote\n**Workers:** quoroom_create_worker, quoroom_update_worker\n**Tasks:** quoroom_schedule\n**Memory:** quoroom_remember, quoroom_recall\n**Wallet:** ${walletTools}\n**Web:** ${webTools}\n**Comms:** ${commsTools}\n**Settings:** quoroom_configure_room${selfRegulateHint}`
+    // Build tool allow-list (null = all tools available)
+    const allowListRaw = status.room.allowedTools?.trim() || null
+    const allowSet = allowListRaw ? new Set(allowListRaw.split(',').map(s => s.trim())) : null
+    const has = (name: string) => !allowSet || allowSet.has(name)
+
+    // Build dynamic tool list for prompt (only mention available tools)
+    const toolLines: string[] = []
+    const goalTools = ['quoroom_set_goal', 'quoroom_update_progress', 'quoroom_create_subgoal', 'quoroom_complete_goal', 'quoroom_abandon_goal'].filter(has)
+    if (goalTools.length) toolLines.push(`**Goals:** ${goalTools.join(', ')}`)
+    const govTools = ['quoroom_propose', 'quoroom_vote'].filter(has)
+    if (govTools.length) toolLines.push(`**Governance:** ${govTools.join(', ')}`)
+    const workerTools = ['quoroom_create_worker', 'quoroom_update_worker'].filter(has)
+    if (workerTools.length) toolLines.push(`**Workers:** ${workerTools.join(', ')}`)
+    if (has('quoroom_schedule')) toolLines.push('**Tasks:** quoroom_schedule')
+    const memTools = ['quoroom_remember', 'quoroom_recall'].filter(has)
+    if (memTools.length) toolLines.push(`**Memory:** ${memTools.join(', ')}`)
+    const walletToolNames = isCli
+      ? ['quoroom_wallet_balance', 'quoroom_wallet_send', 'quoroom_wallet_history', 'quoroom_wallet_topup']
+      : ['quoroom_wallet_balance', 'quoroom_wallet_send', 'quoroom_wallet_history']
+    const filteredWallet = walletToolNames.filter(has)
+    if (filteredWallet.length) toolLines.push(`**Wallet:** ${filteredWallet.join(', ')}`)
+    const webToolNames = isCli
+      ? null  // CLI uses built-in web tools
+      : ['quoroom_web_search', 'quoroom_web_fetch', 'quoroom_browser']
+    if (isCli) {
+      if (has('quoroom_web_search') || has('quoroom_web_fetch')) toolLines.push('**Web:** (use your built-in web search and fetch tools)')
+    } else {
+      const filteredWeb = (webToolNames || []).filter(has)
+      if (filteredWeb.length) toolLines.push(`**Web:** ${filteredWeb.join(', ')}`)
+    }
+    const commsToolNames = isCli
+      ? ['quoroom_inbox_send_keeper', 'quoroom_inbox_list', 'quoroom_inbox_send_room', 'quoroom_inbox_reply']
+      : ['quoroom_ask_keeper']
+    const filteredComms = commsToolNames.filter(has)
+    if (filteredComms.length) {
+      if (isCli) toolLines.push(`**Comms:** ${filteredComms.map(t => t === 'quoroom_inbox_send_keeper' ? `${t} (message keeper)` : t === 'quoroom_inbox_list' ? `${t} (inter-room)` : t).join(', ')}`)
+      else toolLines.push(`**Comms:** ${filteredComms.join(', ')}`)
+    }
+    if (has('quoroom_configure_room')) toolLines.push(`**Settings:** quoroom_configure_room${selfRegulateHint}`)
+    const toolList = toolLines.join('\n')
 
     const sendKeeperTool = isCli ? 'quoroom_inbox_send_keeper' : 'quoroom_ask_keeper'
     contextParts.push(`## Instructions\nBased on the current state, decide what to do next and call the appropriate tools. Available tools:\n\n${toolList}\n\nDo NOT "stand by" or wait for anyone — every cycle must make progress. Act autonomously: make decisions and execute. Inform the keeper of progress or important updates using ${sendKeeperTool}, but never block on a response. If the keeper hasn't replied, proceed with your best judgment.\n\nRevenue is always a priority. Every room must sustain itself financially. Actively seek ways to earn: offer services to the keeper, propose paid work to other rooms, or find monetizable opportunities in your domain. Check your wallet balance and report financial status to the keeper.\n\n${toolCallInstruction}`)
@@ -546,9 +587,13 @@ export async function runCycle(
     const needsQueenTools = model === 'openai' || model.startsWith('openai:')
       || model === 'anthropic' || model.startsWith('anthropic:') || model.startsWith('claude-api:')
 
+    const filteredToolDefs = allowSet
+      ? QUEEN_TOOL_DEFINITIONS.filter(t => allowSet.has(t.function.name))
+      : QUEEN_TOOL_DEFINITIONS
+
     const apiToolOpts = needsQueenTools
       ? {
-          toolDefs: QUEEN_TOOL_DEFINITIONS,
+          toolDefs: filteredToolDefs,
           onToolCall: async (toolName: string, args: Record<string, unknown>): Promise<string> => {
             logBuffer.addSynthetic('tool_call', `→ ${toolName}(${JSON.stringify(args)})`)
             const result = await executeQueenTool(db, roomId, worker.id, toolName, args)
@@ -566,6 +611,8 @@ export async function runCycle(
       timeoutMs: 5 * 60 * 1000,
       maxTurns: maxTurns ?? 10,
       onConsoleLog: logBuffer.onConsoleLog,
+      // CLI models: block non-quoroom MCP tools (daymon, etc.)
+      disallowedTools: isCli ? 'mcp__daymon*' : undefined,
       // CLI models: pass resumeSessionId for native --resume
       resumeSessionId,
       // API models: pass conversation history + persistence callback

@@ -1057,6 +1057,7 @@ function mapRoomRow(row: Record<string, unknown>): Room {
     queenNickname: (row.queen_nickname as string | null) ?? null,
     chatSessionId: (row.chat_session_id as string | null) ?? null,
     referredByCode: (row.referred_by_code as string | null) ?? null,
+    allowedTools: (row.allowed_tools as string | null) ?? null,
     webhookToken: (row.webhook_token as string | null) ?? null,
     createdAt: row.created_at as string,
     updatedAt: row.updated_at as string
@@ -1107,7 +1108,7 @@ export function listRooms(db: Database.Database, status?: string): Room[] {
 }
 
 export function updateRoom(db: Database.Database, id: number, updates: Partial<{
-  name: string; queenWorkerId: number | null; goal: string | null; status: string; visibility: string; autonomyMode: string; maxConcurrentTasks: number; workerModel: string; queenCycleGapMs: number; queenMaxTurns: number; queenQuietFrom: string | null; queenQuietUntil: string | null; config: RoomConfig; referredByCode: string | null; queenNickname: string; webhookToken: string | null
+  name: string; queenWorkerId: number | null; goal: string | null; status: string; visibility: string; autonomyMode: string; maxConcurrentTasks: number; workerModel: string; queenCycleGapMs: number; queenMaxTurns: number; queenQuietFrom: string | null; queenQuietUntil: string | null; config: RoomConfig; referredByCode: string | null; queenNickname: string; allowedTools: string | null; webhookToken: string | null
 }>): void {
   const fieldMap: Record<string, string> = {
     name: 'name', queenWorkerId: 'queen_worker_id', goal: 'goal',
@@ -1116,7 +1117,7 @@ export function updateRoom(db: Database.Database, id: number, updates: Partial<{
     queenCycleGapMs: 'queen_cycle_gap_ms', queenMaxTurns: 'queen_max_turns',
     queenQuietFrom: 'queen_quiet_from', queenQuietUntil: 'queen_quiet_until',
     config: 'config', referredByCode: 'referred_by_code', queenNickname: 'queen_nickname',
-    webhookToken: 'webhook_token'
+    allowedTools: 'allowed_tools', webhookToken: 'webhook_token'
   }
   const fields: string[] = []
   const values: unknown[] = []
@@ -2096,6 +2097,25 @@ export function listRoomCycles(db: Database.Database, roomId: number, limit: num
     'SELECT * FROM worker_cycles WHERE room_id = ? ORDER BY started_at DESC LIMIT ?'
   ).all(roomId, safeLimit)
   return (rows as Record<string, unknown>[]).map(mapWorkerCycleRow)
+}
+
+/** Count productive tool calls in a worker's last N completed cycles.
+ *  "Productive" = tools that change external state (web search, memory, goals, comms). */
+export function countProductiveToolCalls(db: Database.Database, workerId: number, lastNCycles: number = 2): number {
+  const row = db.prepare(`
+    SELECT COUNT(*) as cnt FROM cycle_logs
+    WHERE cycle_id IN (
+      SELECT id FROM worker_cycles
+      WHERE worker_id = ? AND status = 'completed'
+      ORDER BY started_at DESC LIMIT ?
+    )
+    AND entry_type = 'tool_call'
+    AND (content LIKE '%web_search%' OR content LIKE '%web_fetch%' OR content LIKE '%remember%'
+      OR content LIKE '%ask_keeper%' OR content LIKE '%inbox_send%'
+      OR content LIKE '%update_progress%' OR content LIKE '%complete_goal%'
+      OR content LIKE '%set_goal%')
+  `).get(workerId, lastNCycles) as { cnt: number }
+  return row.cnt
 }
 
 export function cleanupStaleCycles(db: Database.Database): number {

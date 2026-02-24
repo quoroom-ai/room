@@ -238,6 +238,7 @@ export interface Room {
   queenNickname: string | null
   chatSessionId: string | null
   referredByCode: string | null
+  allowedTools: string | null
   webhookToken: string | null
   createdAt: string
   updatedAt: string

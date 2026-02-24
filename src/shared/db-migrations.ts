@@ -97,6 +97,15 @@ export function runMigrations(database: Database.Database, log: (msg: string) =>
     log('Migrated: added cycle_gap_ms and max_turns columns to workers')
   }
 
+  // Add allowed_tools to rooms (tool filtering per room)
+  const hasRoomAllowedTools = (database.prepare(
+    `SELECT name FROM pragma_table_info('rooms') WHERE name='allowed_tools'`
+  ).get() as { name: string } | undefined)?.name
+  if (!hasRoomAllowedTools) {
+    database.exec(`ALTER TABLE rooms ADD COLUMN allowed_tools TEXT`)
+    log('Migrated: added allowed_tools column to rooms')
+  }
+
   // Migrate ollama models → 'claude' (ollama removed in v0.1.12+)
   const ollamaWorkers = database
     .prepare(`SELECT id FROM workers WHERE model LIKE 'ollama:%'`)

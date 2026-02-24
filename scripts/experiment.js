@@ -1,16 +1,29 @@
 #!/usr/bin/env node
 /**
- * Queen Experiment Runner — verbose/transparent mode
+ * Queen Experiment Runner — live interactive mode
  *
- * Creates an isolated environment (separate DB + port) with 4 rooms using
- * different models, runs queen cycles, and streams ALL activity live.
+ * Run directly — everything is self-contained:
  *
- * Usage:
- *   node scripts/experiment.js [--cycles N] [--goal "..."] [--keep-db]
+ *   node scripts/experiment.js                    # 3 cycles, all models
+ *   node scripts/experiment.js --cycles 2 --models api   # 2 cycles, API only
+ *   node scripts/experiment.js --models anth      # 3 cycles, Anthropic only
+ *   node scripts/experiment.js --help
  *
- * Requirements:
- *   - ANTHROPIC_API_KEY and OPENAI_API_KEY in /Users/vasily/projects/cloud/.env
- *   - claude and codex CLI available for CLI models
+ * What it does:
+ *   1. Loads API keys from cloud/.env automatically
+ *   2. Builds the server (esbuild)
+ *   3. Starts an isolated server on port 3710 (temp DB, separate from dev)
+ *   4. Creates rooms, sets goals, starts queens
+ *   5. Streams ALL queen activity live to terminal (searches, fetches, memories, tool calls)
+ *   6. Prints comparison table + memory dump when done
+ *   7. Cleans up (Ctrl+C safe)
+ *
+ * Options:
+ *   --cycles N      Number of cycles per queen (default: 3)
+ *   --models FILTER  "api" | "cli" | comma-separated labels (e.g. "anth,oai")
+ *   --goal "..."    Custom goal for all rooms
+ *   --keep-db       Don't delete temp DB after experiment
+ *   --help          Show this help
  */
 
 const { spawn, execSync } = require('child_process')
@@ -25,7 +38,15 @@ const CYCLE_GAP_MS = 5000  // 5s between cycles for fast iteration
 const MAX_TURNS = 30
 const TIMEOUT_MS = 10 * 60 * 1000  // 10 min max experiment time
 
-const DEFAULT_GOAL = 'Build a plan to launch an AI consulting service. Research market rates online. Store findings in memory. Create sub-goals for pricing and outreach. Message the keeper with your strategy and budget needs. Propose collaborations to other rooms. Report progress every cycle.'
+const DEFAULT_GOAL = 'Build a plan to launch an AI consulting service. Research market rates online. Store findings in memory. Create sub-goals for pricing and outreach. Message the keeper with your strategy and budget needs. Report progress every cycle.'
+
+// Minimal tool set for experiments — removes tools that waste turns or cause models to get stuck
+const EXPERIMENT_TOOLS = [
+  'quoroom_set_goal', 'quoroom_update_progress', 'quoroom_complete_goal',
+  'quoroom_remember', 'quoroom_recall',
+  'quoroom_ask_keeper',
+  'quoroom_web_search', 'quoroom_web_fetch',
+].join(',')
 
 const ALL_MODELS = [
   { label: 'claude', model: 'claude', type: 'cli' },
@@ -50,6 +71,15 @@ function log(prefix, color, msg) {
 // ─── Parse args ──────────────────────────────────────────────────────────────
 
 const args = process.argv.slice(2)
+
+if (args.includes('--help') || args.includes('-h')) {
+  // Print the JSDoc header as help text
+  const src = readFileSync(__filename, 'utf-8')
+  const match = src.match(/\/\*\*([\s\S]*?)\*\//)
+  if (match) console.log(match[1].replace(/^ \* ?/gm, '').trim())
+  process.exit(0)
+}
+
 function getArg(name) {
   const i = args.indexOf(name)
   return i !== -1 ? args[i + 1] : null
@@ -253,7 +283,8 @@ async function setupRooms(token, apiKeys) {
     await api('PATCH', `/api/rooms/${room.id}`, {
       workerModel: m.model,
       queenCycleGapMs: CYCLE_GAP_MS,
-      queenMaxTurns: MAX_TURNS
+      queenMaxTurns: MAX_TURNS,
+      allowedTools: EXPERIMENT_TOOLS
     }, token)
 
     // Set API credentials if needed
@@ -296,6 +327,7 @@ async function runCycles(token, rooms) {
   const lastLogSeq = {}  // per cycle_id: last seq we printed
   const printedCycles = new Set()  // cycle IDs we printed the header for
   const completedCycles = new Set()  // cycle IDs we printed the completion for
+  const stoppedRooms = new Set()  // rooms that reached target cycle count
 
   while (Date.now() - start < TIMEOUT_MS) {
     await sleep(2000)
@@ -313,6 +345,13 @@ async function runCycles(token, rooms) {
 
       const done = cycles.filter(c => c.status === 'completed' || c.status === 'failed').length
       if (done < numCycles) allDone = false
+
+      // Stop queen once it reaches target cycle count (prevents fast models from over-cycling)
+      if (done >= numCycles && !stoppedRooms.has(r.roomId)) {
+        stoppedRooms.add(r.roomId)
+        api('POST', `/api/rooms/${r.roomId}/queen/stop`, {}, token).catch(() => {})
+        log(r.label, r.color, `${C.bold}── Target ${numCycles} cycle(s) reached — queen stopped ──${C.reset}`)
+      }
 
       // Stream logs for each active/completed cycle
       for (const cycle of cycles) {
@@ -477,22 +516,42 @@ function collectResults(rooms) {
 
     const errors = cycles.filter(c => c.status === 'failed').length
 
+    // Outcome quality metrics
+    const productiveRx = /web_search|web_fetch|remember|ask_keeper|inbox_send|update_progress|complete_goal|set_goal/
+    let productiveCalls = 0
+    let stuckCycles = 0
+    const uniqueSearches = new Set()
+    for (const cid of cycleIds) {
+      const calls = db.prepare(
+        "SELECT content FROM cycle_logs WHERE cycle_id = ? AND entry_type = 'tool_call'"
+      ).all(cid)
+      let cycleProductive = 0
+      for (const call of calls) {
+        if (productiveRx.test(call.content)) cycleProductive++
+        const searchMatch = call.content?.match(/web_search.*?"([^"]+)"/)
+        if (searchMatch) uniqueSearches.add(searchMatch[1].toLowerCase().trim())
+      }
+      if (cycleProductive === 0 && calls.length > 0) stuckCycles++
+      productiveCalls += cycleProductive
+    }
+    const productivePct = toolCalls > 0 ? Math.round((productiveCalls / toolCalls) * 100) : 0
+    const memoryChars = db.prepare(
+      'SELECT COALESCE(SUM(LENGTH(o.content)), 0) as total FROM observations o JOIN entities e ON o.entity_id = e.id WHERE e.room_id = ?'
+    ).get(r.roomId)
+
     results.push({
       label: r.label,
       totalDuration: (totalDuration / 1000).toFixed(1) + 's',
       avgDuration: (avgDuration / 1000).toFixed(1) + 's',
       tokens: `${fmtK(totalInputTokens)}/${fmtK(totalOutputTokens)}`,
       toolCalls,
-      uniqueTools: uniqueTools.size,
+      productivePct: productivePct + '%',
+      uniqueSearches: uniqueSearches.size,
       keeperMsgs: keeperMsgs.cnt,
-      interRoomMsgs: interRoomMsgs.cnt,
       goals: `${goalsCreated}/${goalsCompleted}`,
-      workersCreated: workersCreated.cnt,
-      tasksScheduled: tasksScheduled.cnt,
       memories: memories.cnt,
-      decisions: decisions.cnt,
-      walletBalance,
-      revenueActions,
+      memoryDepth: fmtK(memoryChars.total),
+      stuckCycles,
       errors,
       goalProgress: Math.round(maxProgress * 100) + '%'
     })
@@ -518,19 +577,16 @@ function printResults(results) {
 
   const metrics = [
     ['Total duration', r => r.totalDuration],
-    ['Avg cycle duration', r => r.avgDuration],
+    ['Avg cycle', r => r.avgDuration],
     ['Tokens (in/out)', r => r.tokens],
     ['Tool calls', r => String(r.toolCalls)],
-    ['Unique tools used', r => String(r.uniqueTools)],
+    ['Productive %', r => r.productivePct],
+    ['Unique searches', r => String(r.uniqueSearches)],
     ['Keeper messages', r => String(r.keeperMsgs)],
-    ['Inter-room messages', r => String(r.interRoomMsgs)],
-    ['Goals (created/done)', r => r.goals],
-    ['Workers created', r => String(r.workersCreated)],
-    ['Tasks scheduled', r => String(r.tasksScheduled)],
+    ['Goals (made/done)', r => r.goals],
     ['Memories stored', r => String(r.memories)],
-    ['Decisions proposed', r => String(r.decisions)],
-    ['Wallet balance', r => r.walletBalance],
-    ['Revenue actions', r => String(r.revenueActions)],
+    ['Memory depth', r => r.memoryDepth],
+    ['Stuck cycles', r => String(r.stuckCycles)],
     ['Errors', r => String(r.errors)],
     ['Goal progress', r => r.goalProgress],
   ]
@@ -552,6 +608,26 @@ function printResults(results) {
   }
 
   console.log('')
+}
+
+function printMemoryDump(rooms) {
+  const Database = require('better-sqlite3')
+  const db = new Database(dbPath, { readonly: true })
+  console.log('='.repeat(74))
+  console.log('  MEMORY DUMP — What each queen stored')
+  console.log('='.repeat(74))
+  for (const r of rooms) {
+    const entities = db.prepare(
+      "SELECT e.name, o.content FROM entities e JOIN observations o ON o.entity_id = e.id WHERE e.room_id = ? AND e.name != 'queen_session_summary' ORDER BY e.id"
+    ).all(r.roomId)
+    console.log(`\n  ${C.bold}${r.label}${C.reset} (${entities.length} memories):`)
+    for (const e of entities) {
+      const preview = (e.content || '').replace(/\n/g, ' ').substring(0, 120)
+      console.log(`    ${C.cyan}${e.name}${C.reset}: ${C.dim}${preview}${C.reset}`)
+    }
+  }
+  console.log('')
+  db.close()
 }
 
 function pad(s, w) {
@@ -609,6 +685,7 @@ async function main() {
   // 7. Collect and print results
   const results = collectResults(rooms)
   printResults(results)
+  printMemoryDump(rooms)
 
   // 8. Cleanup
   stopServer()
@@ -619,6 +696,20 @@ async function main() {
     log('CLEANUP', C.dim, 'Temp DB cleaned up.')
   }
 }
+
+// Clean shutdown on Ctrl+C
+process.on('SIGINT', () => {
+  console.log(`\n${C.yellow}Interrupted — cleaning up...${C.reset}`)
+  stopServer()
+  if (!keepDb && dataDir) {
+    try { rmSync(dataDir, { recursive: true }) } catch {}
+  }
+  process.exit(0)
+})
+process.on('SIGTERM', () => {
+  stopServer()
+  process.exit(0)
+})
 
 main().catch(err => {
   console.error(`\n${C.red}Experiment failed: ${err.message}${C.reset}`)

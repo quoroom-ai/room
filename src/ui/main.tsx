@@ -41,8 +41,9 @@ if ('serviceWorker' in navigator) {
   const host = location.hostname
   const isLocalhost = host === 'localhost' || host === '127.0.0.1' || host === '::1' || host === '[::1]'
 
-  if (isLocalhost && import.meta.env.DEV) {
-    // Dev only: unregister SW to avoid stale caches during development.
+  if (isLocalhost) {
+    // Local runtime: always clear SW + caches to avoid stale shell/API mismatches.
+    // This keeps localhost startup deterministic across upgrades.
     navigator.serviceWorker.getRegistrations().then((regs) => {
       for (const reg of regs) {
         void reg.unregister()

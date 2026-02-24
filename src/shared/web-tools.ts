@@ -1,8 +1,8 @@
 /**
  * Internet access tools for queen agents — zero API keys required.
  *
- * webSearch     → DuckDuckGo HTML scraping (no API key, no rate limits for basic use)
- * webFetch      → Jina Reader r.jina.ai (free, 20 req/min, converts any URL to clean markdown)
+ * webSearch     → Playwright DDG (primary), HTTP DDG (fallback), Jina Search (last resort)
+ * webFetch      → Jina Reader (primary), Playwright browser (fallback for blocked sites)
  * browserAction → Playwright chromium (headless, accessibility tree snapshots, OpenClaw pattern)
  */
 
@@ -44,22 +44,44 @@ export async function closeBrowser(): Promise<void> {
 
 /**
  * Fetch any public URL and return its content as clean LLM-friendly markdown.
- * Uses Jina Reader (r.jina.ai) — free, no API key, ~20 req/min rate limit.
+ * Tries Jina Reader first (fast, clean markdown), falls back to Playwright
+ * for sites that block Jina (403/404/etc).
  */
 export async function webFetch(url: string): Promise<string> {
-  const jinaUrl = `https://r.jina.ai/${url}`
-  const response = await fetch(jinaUrl, {
-    headers: {
-      'Accept': 'text/plain',
-      'X-No-Cache': 'true'
-    },
-    signal: AbortSignal.timeout(30_000)
+  // Try Jina Reader first (fast, returns clean markdown)
+  try {
+    const jinaUrl = `https://r.jina.ai/${url}`
+    const response = await fetch(jinaUrl, {
+      headers: { 'Accept': 'text/plain', 'X-No-Cache': 'true' },
+      signal: AbortSignal.timeout(20_000)
+    })
+    if (response.ok) {
+      const text = await response.text()
+      // Jina returns short error-only responses for blocked sites (403/404)
+      if (text.length > 200 && !text.includes('Warning: Target URL returned error')) {
+        return text.slice(0, MAX_CONTENT_CHARS)
+      }
+    }
+  } catch { /* Jina failed, try Playwright */ }
+
+  // Fallback: real browser (handles 403/blocked sites)
+  return fetchWithBrowser(url)
+}
+
+async function fetchWithBrowser(url: string): Promise<string> {
+  const browser = await getBrowser()
+  const context = await browser.newContext({
+    userAgent: 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
   })
-  if (!response.ok) {
-    throw new Error(`Jina fetch failed: ${response.status} ${response.statusText}`)
+  const page = await context.newPage()
+  try {
+    await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 30_000 })
+    const text = await page.innerText('body').catch(() => '')
+    if (!text) throw new Error(`Could not read content from ${url}`)
+    return text.slice(0, MAX_CONTENT_CHARS)
+  } finally {
+    await context.close()
   }
-  const text = await response.text()
-  return text.slice(0, MAX_CONTENT_CHARS)
 }
 
 // ─── webSearch ───────────────────────────────────────────────────────────────
@@ -71,22 +93,117 @@ export interface WebSearchResult {
 }
 
 /**
- * Search the web via DuckDuckGo HTML endpoint — no API key, no setup required.
+ * Search the web — Playwright Yahoo (primary), HTTP DDG (fallback), Jina (last resort).
  * Returns top 5 results with title, URL, and snippet.
  */
 export async function webSearch(query: string): Promise<WebSearchResult[]> {
-  const searchUrl = `https://html.duckduckgo.com/html/?q=${encodeURIComponent(query)}`
-  const response = await fetch(searchUrl, {
-    headers: {
-      'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
-    },
-    signal: AbortSignal.timeout(15_000)
-  })
-  if (!response.ok) {
-    throw new Error(`DuckDuckGo search failed: ${response.status}`)
+  // Primary: real browser on Yahoo (most reliable — DDG/Google/Bing block headless)
+  const browserResults = await searchWithBrowser(query)
+  if (browserResults.length > 0) return browserResults
+
+  // Fallback: HTTP DDG (faster when DDG is up and not rate-limiting)
+  const ddgResults = await searchDdg(query)
+  if (ddgResults.length > 0) return ddgResults
+
+  // Last resort: Jina Search
+  try {
+    const response = await fetch(`https://s.jina.ai/${encodeURIComponent(query)}`, {
+      headers: { 'Accept': 'application/json', 'X-No-Cache': 'true' },
+      signal: AbortSignal.timeout(15_000)
+    })
+    if (response.ok) {
+      const data = await response.json() as { data?: Array<{ title?: string; url?: string; description?: string; content?: string }> }
+      if (data.data && Array.isArray(data.data)) {
+        return data.data.slice(0, 5).map(r => ({
+          title: r.title ?? '',
+          url: r.url ?? '',
+          snippet: (r.description ?? r.content ?? '').slice(0, 300)
+        })).filter(r => r.url)
+      }
+    }
+  } catch { /* all methods failed */ }
+
+  return []
+}
+
+/** Search Yahoo using a real Playwright browser — Yahoo doesn't block headless Chromium. */
+async function searchWithBrowser(query: string): Promise<WebSearchResult[]> {
+  let browser: import('playwright').Browser
+  try {
+    browser = await getBrowser()
+  } catch {
+    return []
   }
-  const html = await response.text()
-  return parseDdgResults(html).slice(0, 5)
+
+  const context = await browser.newContext({
+    userAgent: 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+    locale: 'en-US',
+  })
+  const page = await context.newPage()
+
+  try {
+    await page.goto(`https://search.yahoo.com/search?p=${encodeURIComponent(query)}`, {
+      waitUntil: 'domcontentloaded',
+      timeout: 15_000
+    })
+    // Brief wait for JS rendering
+    await page.waitForTimeout(1_000)
+
+    // Extract organic results from Yahoo
+    const results = await page.evaluate(() => {
+      const items: Array<{ title: string; url: string; snippet: string }> = []
+      const blocks = document.querySelectorAll('#web .algo, .dd.algo, .algo')
+      for (const block of blocks) {
+        const link = block.querySelector('a')
+        const h3 = block.querySelector('h3')
+        const snippetEl = block.querySelector('.compText p, .compText, p')
+        if (!link) continue
+        const url = link.getAttribute('href') || ''
+        if (!url.startsWith('http')) continue
+        items.push({
+          title: h3 ? (h3.textContent || '').trim() : (link.textContent || '').trim(),
+          url,
+          snippet: snippetEl ? (snippetEl.textContent || '').trim().slice(0, 300) : ''
+        })
+        if (items.length >= 5) break
+      }
+      return items
+    })
+
+    return results.filter(r => r.url)
+  } catch {
+    return []
+  } finally {
+    await context.close()
+  }
+}
+
+async function searchDdg(query: string): Promise<WebSearchResult[]> {
+  // DDG returns 202 when rate-limited; retry up to 3 times with back-off
+  for (let attempt = 0; attempt < 3; attempt++) {
+    if (attempt > 0) await new Promise(r => setTimeout(r, 1000 * attempt))
+    try {
+      const response = await fetch('https://html.duckduckgo.com/html/', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/x-www-form-urlencoded',
+          'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+          'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+          'Accept-Language': 'en-US,en;q=0.9',
+          'Referer': 'https://html.duckduckgo.com/',
+        },
+        body: `q=${encodeURIComponent(query)}&b=`,
+        signal: AbortSignal.timeout(15_000),
+        redirect: 'follow',
+      })
+      if (response.status === 202) continue // rate-limited, retry
+      if (!response.ok) continue
+      const html = await response.text()
+      const results = parseDdgResults(html).slice(0, 5)
+      if (results.length > 0) return results
+    } catch { /* network error, try next attempt */ }
+  }
+  return []
 }
 
 function parseDdgResults(html: string): WebSearchResult[] {

@@ -58,6 +58,7 @@ CREATE TABLE IF NOT EXISTS rooms (
     queen_nickname TEXT,
     chat_session_id TEXT,
     referred_by_code TEXT,
+    allowed_tools TEXT,
     created_at DATETIME DEFAULT (datetime('now','localtime')),
     updated_at DATETIME DEFAULT (datetime('now','localtime'))
 );
