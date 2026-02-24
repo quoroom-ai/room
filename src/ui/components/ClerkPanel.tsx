@@ -228,6 +228,41 @@ function AnimatedMarkdownMessage({
   )
 }
 
+function getModelConnectionStatus(
+  model: string | null,
+  providerStatus: { codex: ProviderStatusEntry; claude: ProviderStatusEntry } | null,
+  apiAuth: { openai: { ready: boolean }; anthropic: { ready: boolean } } | null,
+): { connected: boolean | null; label: string } {
+  if (!model) return { connected: null, label: '' }
+
+  if (model === 'claude') {
+    if (!providerStatus) return { connected: null, label: 'checking' }
+    return providerStatus.claude.connected === true
+      ? { connected: true, label: 'connected' }
+      : { connected: false, label: 'not connected' }
+  }
+  if (model === 'codex') {
+    if (!providerStatus) return { connected: null, label: 'checking' }
+    return providerStatus.codex.connected === true
+      ? { connected: true, label: 'connected' }
+      : { connected: false, label: 'not connected' }
+  }
+  if (model.startsWith('openai:')) {
+    if (!apiAuth) return { connected: null, label: 'checking' }
+    return apiAuth.openai.ready
+      ? { connected: true, label: 'connected' }
+      : { connected: false, label: 'not connected' }
+  }
+  if (model.startsWith('anthropic:')) {
+    if (!apiAuth) return { connected: null, label: 'checking' }
+    return apiAuth.anthropic.ready
+      ? { connected: true, label: 'connected' }
+      : { connected: false, label: 'not connected' }
+  }
+
+  return { connected: null, label: '' }
+}
+
 export function ClerkPanel({ setupLaunchKey = 0 }: ClerkPanelProps): React.JSX.Element {
   const [messages, setMessages] = useState<ClerkMessage[]>([])
   const [input, setInput] = useState('')
@@ -466,6 +501,26 @@ export function ClerkPanel({ setupLaunchKey = 0 }: ClerkPanelProps): React.JSX.E
               {clerkModel}
             </span>
           )}
+          {(() => {
+            const status = getModelConnectionStatus(clerkModel, providerStatus ?? null, clerkStatus?.apiAuth ?? null)
+            if (!status.label) return null
+            const dotColor = status.connected === true
+              ? 'bg-status-success'
+              : status.connected === false
+                ? 'bg-status-error'
+                : 'bg-text-muted animate-pulse'
+            const textColor = status.connected === true
+              ? 'text-status-success'
+              : status.connected === false
+                ? 'text-status-error'
+                : 'text-text-muted'
+            return (
+              <span className={`flex items-center gap-1 text-[14px] ${textColor}`}>
+                <span className={`inline-block w-1.5 h-1.5 rounded-full ${dotColor}`} />
+                {status.label}
+              </span>
+            )
+          })()}
           <button
             onClick={() => setShowSetup(true)}
             className="text-[14px] text-text-muted hover:text-text-secondary transition-colors"
