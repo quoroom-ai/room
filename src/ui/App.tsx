@@ -75,7 +75,7 @@ function formatUsd(value: number): string {
 }
 
 function formatRoomModel(model: string | null | undefined): string {
-  if (!model) return 'unknown'
+  if (!model) return ''
   if (model === 'claude') return 'Claude'
   if (model === 'codex') return 'Codex'
   const idx = model.indexOf(':')
@@ -898,7 +898,7 @@ function App(): React.JSX.Element {
               <span className={`w-2 h-2 rounded-full flex-shrink-0 ${dot}`} />
               <span className="text-sm font-semibold text-text-primary truncate">{selectedRoom.name}</span>
               <span className={`text-xs flex-shrink-0 ${statusColor}`}>{statusLabel}</span>
-              <span className="text-xs text-text-muted flex-shrink-0">model: {formatRoomModel(selectedRoomModel)}</span>
+              {selectedRoomModel && <span className="text-xs text-text-muted flex-shrink-0">model: {formatRoomModel(selectedRoomModel)}</span>}
               <span className="text-xs text-text-muted flex-shrink-0">
                 wallet: {selectedRoomBalance === null ? '--' : formatUsd(selectedRoomBalance)}
               </span>

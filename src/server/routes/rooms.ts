@@ -345,7 +345,7 @@ export function registerRoomRoutes(router: Router): void {
     if (!room) return { status: 404, error: 'Room not found' }
     if (!room.queenWorkerId) return { status: 404, error: 'No queen worker' }
     const worker = queries.getWorker(ctx.db, room.queenWorkerId)
-    const model = worker?.model ?? null
+    const model = worker?.model ?? room.workerModel ?? null
     const auth = await getModelAuthStatus(ctx.db, roomId, model)
     return {
       data: {
