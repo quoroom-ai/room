@@ -1,5 +1,5 @@
 import type Database from 'better-sqlite3'
-import type { Entity, Observation, Relation, MemoryStats, Task, CreateTaskInput, TaskRun, Worker, CreateWorkerInput, TriggerType, TaskStatus, Watch, ConsoleLogEntry, Room, RoomConfig, RoomActivityEntry, ActivityEventType, QuorumDecision, DecisionType, DecisionStatus, QuorumVote, VoteValue, Goal, GoalStatus, GoalUpdate, Skill, SelfModAuditEntry, SelfModSnapshot, Escalation, EscalationStatus, ChatMessage, Credential, Wallet, WalletTransaction, WalletTransactionType, Station, StationStatus, StationProvider, StationTier, RoomMessage, RevenueSummary, WorkerCycle, CycleLogEntry } from './types'
+import type { Entity, Observation, Relation, MemoryStats, Task, CreateTaskInput, TaskRun, Worker, CreateWorkerInput, TriggerType, TaskStatus, Watch, ConsoleLogEntry, Room, RoomConfig, RoomActivityEntry, ActivityEventType, QuorumDecision, DecisionType, DecisionStatus, QuorumVote, VoteValue, Goal, GoalStatus, GoalUpdate, Skill, SelfModAuditEntry, SelfModSnapshot, Escalation, EscalationStatus, ChatMessage, ClerkMessage, Credential, Wallet, WalletTransaction, WalletTransactionType, Station, StationStatus, StationProvider, StationTier, RoomMessage, RevenueSummary, WorkerCycle, CycleLogEntry } from './types'
 import { DEFAULT_ROOM_CONFIG } from './constants'
 import { encryptSecret, decryptSecret } from './secret-store'
 
@@ -1955,6 +1955,86 @@ export function clearChatSession(db: Database.Database, roomId: number): void {
   db.prepare('UPDATE rooms SET chat_session_id = NULL WHERE id = ?').run(roomId)
   clearChatMessages(db, roomId)
 }
+
+// ─── Clerk ──────────────────────────────────────────────────
+
+function mapClerkMessageRow(row: Record<string, unknown>): ClerkMessage {
+  return {
+    id: row.id as number,
+    role: row.role as 'user' | 'assistant' | 'commentary',
+    content: row.content as string,
+    source: (row.source as string) ?? null,
+    createdAt: row.created_at as string
+  }
+}
+
+export function insertClerkMessage(db: Database.Database, role: 'user' | 'assistant' | 'commentary', content: string, source?: string): ClerkMessage {
+  const result = db
+    .prepare('INSERT INTO clerk_messages (role, content, source) VALUES (?, ?, ?)')
+    .run(role, content, source ?? null)
+  const row = db.prepare('SELECT * FROM clerk_messages WHERE id = ?').get(result.lastInsertRowid as number) as Record<string, unknown>
+  return mapClerkMessageRow(row)
+}
+
+export function listClerkMessages(db: Database.Database, limit: number = 200): ClerkMessage[] {
+  const safeLimit = clampLimit(limit, 200, 1000)
+  const rows = db.prepare('SELECT * FROM clerk_messages ORDER BY created_at ASC LIMIT ?').all(safeLimit)
+  return (rows as Record<string, unknown>[]).map(mapClerkMessageRow)
+}
+
+export function clearClerkMessages(db: Database.Database): void {
+  db.prepare('DELETE FROM clerk_messages').run()
+}
+
+export function clearClerkSession(db: Database.Database): void {
+  const clerkWorkerId = getSetting(db, 'clerk_worker_id')
+  if (clerkWorkerId) {
+    db.prepare('DELETE FROM agent_sessions WHERE worker_id = ?').run(Number(clerkWorkerId))
+  }
+  setSetting(db, 'clerk_session_id', '')
+  clearClerkMessages(db)
+}
+
+export function ensureClerkWorker(db: Database.Database): Worker {
+  const existingId = getSetting(db, 'clerk_worker_id')
+  if (existingId) {
+    const worker = getWorker(db, Number(existingId))
+    if (worker) return worker
+  }
+  const worker = createWorker(db, {
+    name: 'Clerk',
+    role: 'clerk',
+    systemPrompt: CLERK_SYSTEM_PROMPT,
+    description: 'Global assistant for the keeper. Helps with system management and commentates on room activity.',
+  })
+  setSetting(db, 'clerk_worker_id', String(worker.id))
+  return worker
+}
+
+const CLERK_SYSTEM_PROMPT = `You are the Clerk — a global AI assistant for the Keeper (the human operator of this Quoroom system).
+
+## Your Two Roles
+
+### 1. Personal Assistant
+- Answer any questions about the system, rooms, workers, goals, finances
+- Execute actions: create rooms, change settings, manage workers, set goals
+- Give recommendations about experiments to try, objectives to pursue
+- Remember important things the keeper tells you — store in memory
+- Set up reminders using the task scheduler when asked
+- Provide the keeper's referral link when asked
+
+### 2. Sports Commentator
+- When not conversing with the keeper, you narrate what's happening across all rooms
+- Be engaging, informative, and concise — like a sports commentator
+- Highlight interesting events: goal progress, worker decisions, new proposals, cycle completions
+- Keep commentary brief (1-3 sentences per update)
+
+## Behavior Rules
+- When the keeper sends a message, stop commentary and focus entirely on their request
+- Execute actions directly — don't just describe what you would do
+- Be concise and action-oriented in responses
+- Reference specific rooms, workers, and goals by name
+- Keep all conversation history in mind — maintain continuity across the session`
 
 // ─── Revenue ────────────────────────────────────────────────
 

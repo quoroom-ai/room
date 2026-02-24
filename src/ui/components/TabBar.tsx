@@ -1,4 +1,4 @@
-export type Tab = 'swarm' | 'status' | 'chat' | 'memory' | 'workers' | 'tasks' | 'watches' | 'results' | 'goals' | 'votes' | 'messages' | 'skills' | 'credentials' | 'transactions' | 'stations' | 'room-settings' | 'settings' | 'help'
+export type Tab = 'swarm' | 'clerk' | 'status' | 'chat' | 'memory' | 'workers' | 'tasks' | 'watches' | 'results' | 'goals' | 'votes' | 'messages' | 'skills' | 'credentials' | 'transactions' | 'stations' | 'room-settings' | 'settings' | 'help'
 
 export const mainTabs: { id: Tab; label: string; advanced?: boolean }[] = [
   { id: 'status', label: 'Overview' },
@@ -116,6 +116,11 @@ export const tabIcons: Record<Tab, React.JSX.Element> = {
   swarm: ( // hexagon/hive
     <svg width={S} height={S} viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth={sw} strokeLinecap="round" strokeLinejoin="round">
       <path d="M8 1l5 3v6l-5 3-5-3V4z" /><path d="M8 5v6" /><path d="M3 4l5 3 5-3" />
+    </svg>
+  ),
+  clerk: ( // headset/assistant
+    <svg width={S} height={S} viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth={sw} strokeLinecap="round" strokeLinejoin="round">
+      <path d="M4 8V6a4 4 0 018 0v2" /><path d="M2 9a1 1 0 011-1h1v4H3a1 1 0 01-1-1V9z" /><path d="M12 8h1a1 1 0 011 1v2a1 1 0 01-1 1h-1V8z" /><path d="M12 12v1a2 2 0 01-2 2H8" />
     </svg>
   ),
 }

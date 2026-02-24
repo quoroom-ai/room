@@ -10,6 +10,7 @@ import type {
   Skill,
   Escalation,
   ChatMessage,
+  ClerkMessage,
   SelfModAuditEntry,
   Wallet, WalletTransaction, RevenueSummary, OnChainBalance, CryptoPricing,
   Credential,
@@ -490,6 +491,20 @@ export const api = {
       request<{ response: string; messages: ChatMessage[] }>('POST', `/api/rooms/${roomId}/chat`, { message }),
     reset: (roomId: number) =>
       request<{ ok: true }>('POST', `/api/rooms/${roomId}/chat/reset`),
+  },
+
+  // ─── Clerk ──────────────────────────────────────────────
+  clerk: {
+    messages: () =>
+      request<ClerkMessage[]>('GET', '/api/clerk/messages'),
+    send: (message: string) =>
+      request<{ response: string; messages: ClerkMessage[] }>('POST', '/api/clerk/chat', { message }),
+    reset: () =>
+      request<{ ok: true }>('POST', '/api/clerk/reset'),
+    status: () =>
+      request<{ configured: boolean; model: string | null; commentaryEnabled: boolean }>('GET', '/api/clerk/status'),
+    updateSettings: (settings: { model?: string; commentaryEnabled?: boolean }) =>
+      request<{ model: string | null; commentaryEnabled: boolean }>('PUT', '/api/clerk/settings', settings),
   },
 
   // ─── Self-Mod ────────────────────────────────────────────

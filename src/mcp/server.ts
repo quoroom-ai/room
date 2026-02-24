@@ -17,7 +17,9 @@ import { registerInboxTools } from './tools/inbox'
 import { registerCredentialTools } from './tools/credentials'
 import { registerResourceTools } from './tools/resources'
 import { registerInviteTools } from './tools/invite'
+import { registerBrowserTools } from './tools/browser'
 import { closeMcpDatabase } from './db'
+import { closeBrowser } from '../shared/web-tools'
 
 declare const __APP_VERSION__: string
 
@@ -44,9 +46,11 @@ async function main(): Promise<void> {
   registerCredentialTools(server)
   registerResourceTools(server)
   registerInviteTools(server)
+  registerBrowserTools(server)
 
-  // Clean up database on process exit
+  // Clean up database and browser on process exit
   const cleanup = (): void => {
+    closeBrowser().catch(() => {})
     closeMcpDatabase()
   }
   process.on('SIGTERM', cleanup)

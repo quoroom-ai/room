@@ -33,10 +33,83 @@ async function getBrowser(): Promise<import('playwright').Browser> {
 
 /** Call during server shutdown to clean up the browser process. */
 export async function closeBrowser(): Promise<void> {
+  closeAllSessions()
   if (_browser) {
     await _browser.close().catch(() => { /* ignore */ })
     _browser = null
     _browserInitPromise = null
+  }
+}
+
+// ─── Persistent browser sessions ──────────────────────────────────────────────
+// Sessions keep browser contexts alive across tool calls (cookies, localStorage
+// persist). Keyed by session ID. Idle timeout auto-cleanup.
+
+import { randomUUID } from 'crypto'
+
+interface BrowserSession {
+  context: import('playwright').BrowserContext
+  lastUsed: number
+  id: string
+}
+
+const _sessions = new Map<string, BrowserSession>()
+const SESSION_IDLE_TIMEOUT = 10 * 60 * 1000 // 10 min idle before cleanup
+let _cleanupInterval: ReturnType<typeof setInterval> | null = null
+
+function startSessionCleanup(): void {
+  if (_cleanupInterval) return
+  _cleanupInterval = setInterval(() => {
+    const now = Date.now()
+    for (const [id, session] of _sessions) {
+      if (now - session.lastUsed > SESSION_IDLE_TIMEOUT) {
+        session.context.close().catch(() => {})
+        _sessions.delete(id)
+      }
+    }
+    if (_sessions.size === 0 && _cleanupInterval) {
+      clearInterval(_cleanupInterval)
+      _cleanupInterval = null
+    }
+  }, 60_000)
+}
+
+async function getOrCreateSession(sessionId?: string): Promise<{ session: BrowserSession; isNew: boolean }> {
+  if (sessionId && _sessions.has(sessionId)) {
+    const session = _sessions.get(sessionId)!
+    session.lastUsed = Date.now()
+    return { session, isNew: false }
+  }
+
+  const browser = await getBrowser()
+  const context = await browser.newContext({
+    userAgent: 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+    viewport: { width: 1280, height: 720 },
+  })
+
+  const id = sessionId ?? randomUUID()
+  const session: BrowserSession = { context, lastUsed: Date.now(), id }
+  _sessions.set(id, session)
+  startSessionCleanup()
+  return { session, isNew: true }
+}
+
+export function closeAllSessions(): void {
+  for (const [, session] of _sessions) {
+    session.context.close().catch(() => {})
+  }
+  _sessions.clear()
+  if (_cleanupInterval) {
+    clearInterval(_cleanupInterval)
+    _cleanupInterval = null
+  }
+}
+
+export function closeSession(sessionId: string): void {
+  const session = _sessions.get(sessionId)
+  if (session) {
+    session.context.close().catch(() => {})
+    _sessions.delete(sessionId)
   }
 }
 
@@ -251,7 +324,13 @@ export type BrowserAction =
   | { type: 'select'; selector: string; value: string }
   | { type: 'wait'; ms: number }
   | { type: 'submit'; selector?: string }
-  | { type: 'snapshot' }  // take an explicit accessibility snapshot at this step
+  | { type: 'snapshot' }
+  | { type: 'scroll'; direction: 'up' | 'down'; amount?: number }
+  | { type: 'hover'; selector: string }
+  | { type: 'press'; value: string }         // keyboard key: Enter, Tab, Escape, ArrowDown, etc.
+  | { type: 'type'; value: string }          // character-by-character typing (triggers JS key events)
+  | { type: 'screenshot' }                    // save PNG to temp file, return path
+  | { type: 'waitForSelector'; selector: string; ms?: number }
 
 /**
  * Control a headless Chromium browser to interact with websites.
@@ -354,4 +433,165 @@ export async function browserAction(
   } finally {
     await context.close()
   }
+}
+
+// ─── browserActionPersistent ────────────────────────────────────────────────
+// Like browserAction but with persistent sessions (cookies survive across calls)
+// and extended action types (scroll, hover, press, type, screenshot, waitForSelector).
+
+export interface BrowserActionResult {
+  snapshot: string
+  sessionId: string
+  url: string
+}
+
+/**
+ * Control a headless browser with persistent sessions.
+ * Pass sessionId to resume a previous session (cookies/localStorage intact).
+ * Omit sessionId to start a new session.
+ * Returns snapshot text + sessionId for follow-up calls.
+ */
+export async function browserActionPersistent(
+  startUrl: string,
+  actions: BrowserAction[],
+  sessionId?: string,
+  timeoutMs = 60_000
+): Promise<BrowserActionResult> {
+  // Verify Playwright/Chromium is available before creating session
+  try {
+    await getBrowser()
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err)
+    if (msg.includes("Executable doesn't exist") || msg.includes('browserType.launch') || msg.includes('playwright')) {
+      return { snapshot: 'Chromium not installed. Run: npx playwright install chromium', sessionId: '', url: '' }
+    }
+    throw err
+  }
+
+  const { session, isNew } = await getOrCreateSession(sessionId)
+
+  // Reuse existing page or create new one
+  const pages = session.context.pages()
+  const page = pages.length > 0 ? pages[0] : await session.context.newPage()
+  page.setDefaultTimeout(30_000)
+
+  const intermediateSnapshots: string[] = []
+
+  const takeSnapshot = async (label?: string): Promise<string> => {
+    try {
+      const text = await page.locator('body').ariaSnapshot().catch(() => null)
+        ?? await page.innerText('body').catch(() => '')
+      const prefix = label ? `[${label} — ${page.url()}]` : `[${page.url()}]`
+      return `${prefix}\n${text.slice(0, MAX_SNAPSHOT_CHARS)}`
+    } catch {
+      const text = await page.innerText('body').catch(() => '(could not read page)')
+      return `[${page.url()}]\n${text.slice(0, MAX_SNAPSHOT_CHARS)}`
+    }
+  }
+
+  try {
+    // Navigate to startUrl only if needed (new session or different URL)
+    const currentUrl = page.url()
+    if (isNew || currentUrl === 'about:blank' || currentUrl !== startUrl) {
+      await page.goto(startUrl, { waitUntil: 'domcontentloaded', timeout: timeoutMs })
+    }
+
+    for (const action of actions) {
+      switch (action.type) {
+        case 'navigate':
+          await page.goto((action as { url: string }).url, { waitUntil: 'domcontentloaded' })
+          break
+
+        case 'click':
+          if ((action as { selector?: string }).selector) {
+            await page.click((action as { selector: string }).selector)
+          } else if ((action as { text?: string }).text) {
+            await page.getByText((action as { text: string }).text, { exact: false }).first().click()
+          }
+          await page.waitForTimeout(500)
+          break
+
+        case 'fill':
+          await page.fill((action as { selector: string }).selector, (action as { value: string }).value)
+          break
+
+        case 'select':
+          await page.selectOption((action as { selector: string }).selector, (action as { value: string }).value)
+          break
+
+        case 'wait':
+          await page.waitForTimeout(Math.min((action as { ms: number }).ms, 10_000))
+          break
+
+        case 'submit':
+          if ((action as { selector?: string }).selector) {
+            await page.click((action as { selector: string }).selector)
+          } else {
+            await page.keyboard.press('Enter')
+          }
+          await page.waitForTimeout(1_000)
+          break
+
+        case 'snapshot':
+          intermediateSnapshots.push(await takeSnapshot(`Step ${intermediateSnapshots.length + 1}`))
+          break
+
+        // ── Extended actions ──
+
+        case 'scroll': {
+          const amount = (action as { amount?: number }).amount ?? 500
+          const delta = (action as { direction: string }).direction === 'down' ? amount : -amount
+          await page.mouse.wheel(0, delta)
+          await page.waitForTimeout(300)
+          break
+        }
+
+        case 'hover':
+          await page.hover((action as { selector: string }).selector)
+          await page.waitForTimeout(300)
+          break
+
+        case 'press':
+          await page.keyboard.press((action as { value: string }).value)
+          await page.waitForTimeout(300)
+          break
+
+        case 'type':
+          await page.keyboard.type((action as { value: string }).value, { delay: 50 })
+          break
+
+        case 'screenshot': {
+          const tmpPath = `/tmp/quoroom-screenshot-${Date.now()}.png`
+          await page.screenshot({ path: tmpPath, type: 'png', fullPage: false })
+          intermediateSnapshots.push(`[Screenshot saved — ${page.url()}]\nFile: ${tmpPath}\nUse the Read tool to view this screenshot.`)
+          break
+        }
+
+        case 'waitForSelector':
+          await page.waitForSelector(
+            (action as { selector: string }).selector,
+            { timeout: (action as { ms?: number }).ms ?? 10_000 }
+          )
+          break
+      }
+    }
+
+    // Final page state
+    const finalSnapshot = await takeSnapshot('Final')
+    const parts = [`[Session: ${session.id}]`, finalSnapshot]
+    if (intermediateSnapshots.length > 0) {
+      parts.push(...intermediateSnapshots.map((s, i) => `[Intermediate step ${i + 1}]\n${s}`))
+    }
+
+    session.lastUsed = Date.now()
+    return {
+      snapshot: parts.join('\n\n---\n\n'),
+      sessionId: session.id,
+      url: page.url()
+    }
+  } catch (err) {
+    session.lastUsed = Date.now()
+    throw err
+  }
+  // NOTE: Do NOT close context — session persists for follow-up calls
 }

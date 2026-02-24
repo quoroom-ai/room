@@ -379,6 +379,16 @@ export interface ChatMessage {
   createdAt: string
 }
 
+// ─── Clerk Types ────────────────────────────────────────────
+
+export interface ClerkMessage {
+  id: number
+  role: 'user' | 'assistant' | 'commentary'
+  content: string
+  source: string | null
+  createdAt: string
+}
+
 // ─── Credential Types ───────────────────────────────────────
 
 export interface Credential {

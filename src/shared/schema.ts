@@ -460,6 +460,16 @@ CREATE TABLE IF NOT EXISTS agent_sessions (
     updated_at DATETIME DEFAULT (datetime('now','localtime'))
 );
 
+-- Clerk messages (global assistant chat, not room-scoped)
+CREATE TABLE IF NOT EXISTS clerk_messages (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    role TEXT NOT NULL CHECK(role IN ('user', 'assistant', 'commentary')),
+    content TEXT NOT NULL,
+    source TEXT,
+    created_at DATETIME DEFAULT (datetime('now','localtime'))
+);
+CREATE INDEX IF NOT EXISTS idx_clerk_messages_created ON clerk_messages(created_at);
+
 -- Schema version tracking
 CREATE TABLE IF NOT EXISTS schema_version (
     version INTEGER PRIMARY KEY,

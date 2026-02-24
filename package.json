@@ -23,7 +23,7 @@
     "build:parallel": "node scripts/build-parallel.js",
     "build:fast": "node scripts/build-parallel.js --skip-typecheck",
     "build:mcp": "node scripts/build-mcp.js",
-    "build:ui": "vite build --config src/ui/vite.config.ts",
+    "build:ui": "vite build --config src/ui/vite.config.ts && mkdir -p $HOME/.quoroom/app/ui && cp -r out/ui/. $HOME/.quoroom/app/ui/",
     "kill:ports": "node scripts/kill-ports.js",
     "kill:dev-ports": "npm run kill:ports -- 4700 3715 5173",
     "dev:links": "node scripts/dev-links.js",

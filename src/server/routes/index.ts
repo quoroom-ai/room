@@ -19,6 +19,7 @@ import { registerStationRoutes } from './stations'
 import { registerRoomMessageRoutes } from './room-messages'
 import { registerProviderRoutes } from './providers'
 import { registerContactRoutes } from './contacts'
+import { registerClerkRoutes } from './clerk'
 
 export function registerAllRoutes(router: Router): void {
   registerRoomRoutes(router)
@@ -41,4 +42,5 @@ export function registerAllRoutes(router: Router): void {
   registerRoomMessageRoutes(router)
   registerProviderRoutes(router)
   registerContactRoutes(router)
+  registerClerkRoutes(router)
 }

@@ -8,6 +8,7 @@ import { APP_NAME } from '../shared/constants'
 import { executeTask, isTaskRunning } from '../shared/task-runner'
 import { executeAgent } from '../shared/agent-executor'
 import { resolveApiKeyForModel } from '../shared/model-provider'
+import { startCommentaryEngine, stopCommentaryEngine } from './clerk-commentary'
 import { triggerAgent } from '../shared/agent-loop'
 import {
   ensureCloudRoomToken,
@@ -385,6 +386,9 @@ export function startServerRuntime(db: Database.Database): void {
   }, QUEEN_INBOX_POLL_MS)
 
   resumeActiveQueens(db)
+
+  // Start clerk commentary engine
+  startCommentaryEngine(db)
 }
 
 function makeCycleCallbacks() {
@@ -413,6 +417,7 @@ function resumeActiveQueens(db: Database.Database): void {
 }
 
 export function stopServerRuntime(): void {
+  stopCommentaryEngine()
   if (schedulerTimer) clearInterval(schedulerTimer)
   if (watcherTimer) clearInterval(watcherTimer)
   if (maintenanceTimer) clearInterval(maintenanceTimer)

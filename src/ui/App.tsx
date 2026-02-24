@@ -19,6 +19,7 @@ import { StationsPanel } from './components/StationsPanel'
 import { RoomSettingsPanel } from './components/RoomSettingsPanel'
 import { SwarmPanel } from './components/SwarmPanel'
 import { ChatPanel } from './components/ChatPanel'
+import { ClerkPanel } from './components/ClerkPanel'
 import { ConnectPage } from './components/ConnectPage'
 import { WalkthroughModal } from './components/WalkthroughModal'
 import { UpdateModal } from './components/UpdateModal'
@@ -42,7 +43,7 @@ const ADVANCED_TABS = new Set<Tab>(
   mainTabs.filter((tab) => tab.advanced).map((tab) => tab.id)
 )
 
-const ALL_TAB_IDS: Tab[] = ['swarm', 'status', 'chat', 'goals', 'votes', 'messages', 'workers', 'tasks', 'skills', 'credentials', 'transactions', 'stations', 'room-settings', 'memory', 'watches', 'results', 'settings', 'help']
+const ALL_TAB_IDS: Tab[] = ['clerk', 'swarm', 'status', 'chat', 'goals', 'votes', 'messages', 'workers', 'tasks', 'skills', 'credentials', 'transactions', 'stations', 'room-settings', 'memory', 'watches', 'results', 'settings', 'help']
 
 const DEFAULT_PORT = '3700'
 const KEEP_IN_DOCK_TIP_PENDING_KEY = 'quoroom_keep_in_dock_tip_pending'
@@ -116,8 +117,9 @@ async function probeLocalServer(port: string): Promise<boolean> {
 function App(): React.JSX.Element {
   const [tab, setTab] = useState<Tab>(() => {
     const saved = storageGet('quoroom_tab')
-    if (saved && ALL_TAB_IDS.includes(saved as Tab)) return saved as Tab
-    return 'swarm'
+    // 'swarm' is no longer the default landing page — always open Clerk instead
+    if (saved && saved !== 'swarm' && ALL_TAB_IDS.includes(saved as Tab)) return saved as Tab
+    return 'clerk'
   })
   const tabRef = useRef(tab)
   const [advancedMode, setAdvancedMode] = useState(false)
@@ -553,6 +555,8 @@ function App(): React.JSX.Element {
           setExpandedRoomId(roomId)
           handleTabChange('status')
         }} />
+      case 'clerk':
+        return <ClerkPanel />
       case 'status':
         return <StatusPanel onNavigate={(t) => handleTabChange(t as Tab)} advancedMode={advancedMode} roomId={selectedRoomId} />
       case 'chat':
@@ -739,11 +743,24 @@ function App(): React.JSX.Element {
           </button>
         </div>
 
-        {/* Create room */}
+        {/* Clerk */}
         <div className="pb-2 mb-2 border-b border-border-primary">
           <button
+            onClick={() => handleTabChange('clerk')}
+            className={`w-full px-3 py-2 text-sm text-left rounded-lg transition-colors flex items-center gap-2 ${
+              tab === 'clerk'
+                ? 'bg-interactive-bg text-interactive font-medium'
+                : 'text-text-muted hover:text-text-secondary hover:bg-surface-hover'
+            }`}
+          >
+            {tabIcons.clerk}
+            Clerk
+          </button>
+
+          {/* Create room */}
+          <button
             onClick={() => setShowCreateRoomModal(true)}
-            className="w-full px-3 py-1.5 text-sm text-left text-interactive hover:text-interactive-hover rounded-lg hover:bg-interactive-bg transition-colors"
+            className="w-full px-3 py-1.5 text-sm text-left text-interactive hover:text-interactive-hover rounded-lg hover:bg-interactive-bg transition-colors mt-1"
           >
             + New Room
           </button>
@@ -884,7 +901,7 @@ function App(): React.JSX.Element {
           </div>
         )}
 
-        {selectedRoom && tab !== 'swarm' && tab !== 'settings' && tab !== 'help' && (() => {
+        {selectedRoom && tab !== 'swarm' && tab !== 'clerk' && tab !== 'settings' && tab !== 'help' && (() => {
           const running = selectedRoom.status === 'active' && queenRunning[selectedRoom.id]
           const paused = selectedRoom.status === 'paused'
           const dot = running ? 'bg-status-success' : paused ? 'bg-status-warning' : 'bg-text-muted'
@@ -913,13 +930,13 @@ function App(): React.JSX.Element {
         })()}
 
         {/* Mobile header for non-room views */}
-        {(tab === 'swarm' || tab === 'settings' || tab === 'help' || !selectedRoom) && (
+        {(tab === 'swarm' || tab === 'clerk' || tab === 'settings' || tab === 'help' || !selectedRoom) && (
           <div className="md:hidden flex items-center gap-2 px-4 py-2 border-b border-border-secondary bg-surface-primary shrink-0">
             <button className="p-1 -ml-1 text-text-muted hover:text-text-primary" onClick={() => setSidebarOpen(true)} aria-label="Open menu">
               <svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"><path d="M3 5h14M3 10h14M3 15h14" /></svg>
             </button>
             <span className="text-sm font-semibold text-text-primary">
-              {tab === 'swarm' ? 'My Swarm' : tab === 'settings' ? 'Global Settings' : tab === 'help' ? 'Help' : 'Quoroom'}
+              {tab === 'swarm' ? 'My Swarm' : tab === 'clerk' ? 'Clerk' : tab === 'settings' ? 'Global Settings' : tab === 'help' ? 'Help' : 'Quoroom'}
             </span>
           </div>
         )}
