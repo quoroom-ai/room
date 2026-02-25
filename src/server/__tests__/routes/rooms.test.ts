@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest'
 import { createTestServer, request, requestNoAuth, type TestContext } from '../helpers/test-server'
+import * as queries from '../../../shared/db-queries'
 
 let ctx: TestContext
 
@@ -45,6 +46,24 @@ describe('Room routes', () => {
     it('rejects unauthenticated requests', async () => {
       const res = await requestNoAuth(ctx, 'POST', '/api/rooms')
       expect(res.status).toBe(401)
+    })
+
+    it('applies plan-aware cycle gap defaults', async () => {
+      queries.setSetting(ctx.db, 'claude_plan', 'max')
+      const res = await request(ctx, 'POST', '/api/rooms', { name: 'planroom' })
+      expect(res.status).toBe(201)
+      const data = res.body as any
+      expect(data.room.queenCycleGapMs).toBe(30_000)   // max plan → 30s
+      expect(data.room.queenMaxTurns).toBe(30)
+    })
+
+    it('uses none plan defaults when no plan set', async () => {
+      queries.setSetting(ctx.db, 'claude_plan', '')
+      const res = await request(ctx, 'POST', '/api/rooms', { name: 'noplanroom' })
+      expect(res.status).toBe(201)
+      const data = res.body as any
+      expect(data.room.queenCycleGapMs).toBe(600_000)  // none plan → 10 min
+      expect(data.room.queenMaxTurns).toBe(30)
     })
   })
 
