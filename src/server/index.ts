@@ -37,6 +37,7 @@ import { initBootHealthCheck, USER_APP_DIR } from './autoUpdate'
 import { startServerRuntime, stopServerRuntime } from './runtime'
 import { closeBrowser } from '../shared/web-tools'
 import { handleWebhookRequest } from './webhooks'
+import { eventBus } from './event-bus'
 import { inheritShellPath } from './shell-path'
 
 try {
@@ -723,9 +724,49 @@ function patchMcpConfig(configPath: string, entry: Record<string, unknown>): boo
 }
 
 /**
+ * Patch Codex TOML config to register quoroom MCP server.
+ * Codex stores MCP servers in ~/.codex/config.toml as TOML sections.
+ * Uses TOML literal strings (single quotes) for paths so backslashes on Windows work.
+ */
+function patchCodexConfig(configPath: string, nodePath: string, mcpServerPath: string, dbPath: string): boolean {
+  try {
+    if (!fs.existsSync(configPath)) return false
+
+    const raw = fs.readFileSync(configPath, 'utf-8')
+
+    // Remove existing [mcp_servers.quoroom] section and its sub-sections (line-based
+    // to avoid issues with TOML array syntax using '[' in values)
+    const lines = raw.split('\n')
+    const filtered: string[] = []
+    let inQuoroomSection = false
+    for (const line of lines) {
+      if (/^\[mcp_servers\.quoroom[\].]/.test(line)) {
+        inQuoroomSection = true
+        continue
+      }
+      if (inQuoroomSection && /^\[/.test(line)) {
+        inQuoroomSection = false
+      }
+      if (!inQuoroomSection) {
+        filtered.push(line)
+      }
+    }
+    let content = filtered.join('\n').trimEnd()
+
+    // Append new section
+    content += `\n\n[mcp_servers.quoroom]\ncommand = '${nodePath}'\nargs = ['${mcpServerPath}']\n\n[mcp_servers.quoroom.env]\nQUOROOM_DB_PATH = '${dbPath}'\nQUOROOM_SOURCE = "codex"\n`
+
+    fs.writeFileSync(configPath, content)
+    return true
+  } catch {
+    return false
+  }
+}
+
+/**
  * Register Quoroom MCP server in all known AI client configs automatically.
  * Runs silently on server startup so non-technical users get MCP tools without manual setup.
- * Supported: Claude Code, Claude Desktop, Cursor, Windsurf.
+ * Supported: Claude Code, Claude Desktop, Cursor, Windsurf, Codex.
  */
 function registerMcpGlobally(dbPath: string): void {
   try {
@@ -762,6 +803,9 @@ function registerMcpGlobally(dbPath: string): void {
       path.join(home, '.codeium', 'windsurf', 'mcp_config.json'),
       entry('windsurf')
     )
+
+    // Codex (~/.codex/config.toml) — TOML format, needs separate handler
+    patchCodexConfig(path.join(home, '.codex', 'config.toml'), nodePath, mcpServerPath, dbPath)
   } catch {
     // Never break server startup over MCP registration
   }
@@ -791,6 +835,15 @@ export function startServer(options: ServerOptions = {}): void {
   // Skip during tests (QUOROOM_SKIP_MCP_REGISTER=1) to avoid clobbering real config.
   if (!process.env.QUOROOM_SKIP_MCP_REGISTER) {
     registerMcpGlobally(dbPath)
+
+    // Re-register when a provider is installed or connected — their config files
+    // may not have existed at startup (e.g. user installs codex after quoroom).
+    eventBus.on('providers', (evt) => {
+      if ((evt.type === 'providers:install_status' || evt.type === 'providers:auth_status') &&
+          (evt.data as { status?: string })?.status === 'completed') {
+        registerMcpGlobally(dbPath)
+      }
+    })
   }
 
   // Start cloud sync if public mode is enabled

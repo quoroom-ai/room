@@ -118,6 +118,132 @@ describe('patchMcpConfig', () => {
   })
 })
 
+// ─── Helper: patchCodexConfig (extracted logic, tested directly) ──────────────
+
+function patchCodexConfig(configPath: string, nodePath: string, mcpServerPath: string, dbPath: string): boolean {
+  const { existsSync: fExists, readFileSync: fRead, writeFileSync: fWrite } = require('node:fs')
+  try {
+    if (!fExists(configPath)) return false
+    const raw: string = fRead(configPath, 'utf-8')
+    const lines = raw.split('\n')
+    const filtered: string[] = []
+    let inQuoroomSection = false
+    for (const line of lines) {
+      if (/^\[mcp_servers\.quoroom[\].]/.test(line)) {
+        inQuoroomSection = true
+        continue
+      }
+      if (inQuoroomSection && /^\[/.test(line)) {
+        inQuoroomSection = false
+      }
+      if (!inQuoroomSection) {
+        filtered.push(line)
+      }
+    }
+    let content = filtered.join('\n').trimEnd()
+    content += `\n\n[mcp_servers.quoroom]\ncommand = '${nodePath}'\nargs = ['${mcpServerPath}']\n\n[mcp_servers.quoroom.env]\nQUOROOM_DB_PATH = '${dbPath}'\nQUOROOM_SOURCE = "codex"\n`
+    fWrite(configPath, content)
+    return true
+  } catch {
+    return false
+  }
+}
+
+// ─── patchCodexConfig ────────────────────────────────────────────────────────
+
+describe('patchCodexConfig', () => {
+  const nodePath = '/usr/local/lib/quoroom/runtime/node'
+  const serverPath = '/usr/local/lib/quoroom/lib/server.js'
+  const dbPath = '/home/user/.quoroom/data.db'
+
+  it('returns false when file does not exist', () => {
+    const configPath = join(tmpDir, 'missing.toml')
+    const result = patchCodexConfig(configPath, nodePath, serverPath, dbPath)
+    expect(result).toBe(false)
+    expect(existsSync(configPath)).toBe(false)
+  })
+
+  it('appends quoroom MCP section to existing config', () => {
+    const configPath = join(tmpDir, 'config.toml')
+    writeFileSync(configPath, 'model = "gpt-5.3-codex"\npersonality = "pragmatic"\n')
+
+    const result = patchCodexConfig(configPath, nodePath, serverPath, dbPath)
+    expect(result).toBe(true)
+
+    const content = readFileSync(configPath, 'utf-8')
+    expect(content).toContain('[mcp_servers.quoroom]')
+    expect(content).toContain(`command = '${nodePath}'`)
+    expect(content).toContain(`args = ['${serverPath}']`)
+    expect(content).toContain(`QUOROOM_DB_PATH = '${dbPath}'`)
+    expect(content).toContain('QUOROOM_SOURCE = "codex"')
+    // Preserves existing config
+    expect(content).toContain('model = "gpt-5.3-codex"')
+    expect(content).toContain('personality = "pragmatic"')
+  })
+
+  it('replaces existing quoroom section with new values', () => {
+    const configPath = join(tmpDir, 'config.toml')
+    writeFileSync(configPath, [
+      'model = "gpt-5.3-codex"',
+      '',
+      '[mcp_servers.quoroom]',
+      "command = '/old/node'",
+      "args = ['/old/server.js']",
+      '',
+      '[mcp_servers.quoroom.env]',
+      "QUOROOM_DB_PATH = '/old/data.db'",
+      'QUOROOM_SOURCE = "codex"',
+      '',
+    ].join('\n'))
+
+    patchCodexConfig(configPath, '/new/node', '/new/server.js', '/new/data.db')
+
+    const content = readFileSync(configPath, 'utf-8')
+    expect(content).toContain("command = '/new/node'")
+    expect(content).toContain("args = ['/new/server.js']")
+    expect(content).toContain("QUOROOM_DB_PATH = '/new/data.db'")
+    // Old values removed
+    expect(content).not.toContain('/old/')
+    // Other config preserved
+    expect(content).toContain('model = "gpt-5.3-codex"')
+  })
+
+  it('preserves other MCP server entries', () => {
+    const configPath = join(tmpDir, 'config.toml')
+    writeFileSync(configPath, [
+      'model = "gpt-5.3-codex"',
+      '',
+      '[mcp_servers.other_tool]',
+      "command = 'other'",
+      "args = ['tool.js']",
+      '',
+    ].join('\n'))
+
+    patchCodexConfig(configPath, nodePath, serverPath, dbPath)
+
+    const content = readFileSync(configPath, 'utf-8')
+    expect(content).toContain('[mcp_servers.other_tool]')
+    expect(content).toContain('[mcp_servers.quoroom]')
+  })
+
+  it('handles Windows backslash paths via TOML literal strings', () => {
+    const configPath = join(tmpDir, 'config.toml')
+    writeFileSync(configPath, 'model = "gpt-5.3-codex"\n')
+
+    const winNode = 'C:\\Users\\test\\AppData\\Local\\quoroom\\runtime\\node.exe'
+    const winServer = 'C:\\Users\\test\\AppData\\Local\\quoroom\\lib\\server.js'
+    const winDb = 'C:\\Users\\test\\.quoroom\\data.db'
+
+    patchCodexConfig(configPath, winNode, winServer, winDb)
+
+    const content = readFileSync(configPath, 'utf-8')
+    // Single-quoted TOML literal strings preserve backslashes as-is
+    expect(content).toContain(`command = '${winNode}'`)
+    expect(content).toContain(`args = ['${winServer}']`)
+    expect(content).toContain(`QUOROOM_DB_PATH = '${winDb}'`)
+  })
+})
+
 // ─── startServer MCP registration side-effect ────────────────────────────────
 
 describe('startServer — MCP registration', () => {
