@@ -8,7 +8,7 @@
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![npm version](https://img.shields.io/npm/v/quoroom)](https://www.npmjs.com/package/quoroom)
-[![Tests](https://img.shields.io/badge/tests-1083%20passing-brightgreen)](#)
+[![Tests](https://img.shields.io/badge/tests-1088%20passing-brightgreen)](#)
 [![GitHub stars](https://img.shields.io/github/stars/quoroom-ai/room)](https://github.com/quoroom-ai/room/stargazers)
 [![macOS](https://img.shields.io/badge/macOS-.pkg-000000?logo=apple&logoColor=white)](https://github.com/quoroom-ai/room/releases/latest)
 [![Windows](https://img.shields.io/badge/Windows-.exe-0078D4?logo=windows&logoColor=white)](https://github.com/quoroom-ai/room/releases/latest)
@@ -59,7 +59,7 @@ The architecture draws from swarm intelligence research: decentralized decision-
 
 Quoroom is an open research project exploring autonomous agent collectives. Each collective (a **Room**) is a self-governing swarm of agents.
 
-- **Queen** — strategic brain, supports Claude/Codex subscriptions and OpenAI/Claude API
+- **Queen** — strategic brain, supports Claude/Codex subscriptions and OpenAI/Claude/Gemini API
 - **Workers** — specialized agents that use the queen model
 - **Quorum** — agents deliberate and vote on decisions
 - **Keeper** — the human who sets goals and funds the wallet
@@ -250,7 +250,7 @@ Open **http://localhost:3700** (or the port shown in your terminal). The dashboa
 The **Clerk** tab is your global assistant for the whole local system (not a single room).
 
 - Clerk is a full assistant, not only commentary: it can reason, remember, and execute actions for the keeper
-- Setup paths: Claude subscription (`claude`), Codex subscription (`codex`), OpenAI API (`openai:gpt-4o-mini`), Anthropic API (`anthropic:claude-3-5-sonnet-latest`)
+- Setup paths: Claude subscription (`claude`), Codex subscription (`codex`), OpenAI API (`openai:gpt-4o-mini`), Anthropic API (`anthropic:claude-3-5-sonnet-latest`), Gemini API (`gemini:gemini-2.5-flash`)
 - API keys entered in Clerk Setup are validated before saving
 - Clerk can answer and do: room lifecycle, room settings, task creation, reminders, inter-room messaging, and keeper communication
 - Clerk can act proactively through scheduled tasks/reminders and activity-driven commentary
@@ -260,9 +260,9 @@ The **Clerk** tab is your global assistant for the whole local system (not a sin
 
 API key resolution for Clerk API models:
 
-1. Any room credential (`openai_api_key` or `anthropic_api_key`)
-2. Clerk-saved API key (`clerk_openai_api_key` / `clerk_anthropic_api_key`)
-3. Environment variable (`OPENAI_API_KEY` / `ANTHROPIC_API_KEY`)
+1. Any room credential (`openai_api_key`, `anthropic_api_key`, or `gemini_api_key`)
+2. Clerk-saved API key (`clerk_openai_api_key` / `clerk_anthropic_api_key` / `clerk_gemini_api_key`)
+3. Environment variable (`OPENAI_API_KEY` / `ANTHROPIC_API_KEY` / `GEMINI_API_KEY`)
 
 See full guide: [docs/CLERK.md](docs/CLERK.md)
 
@@ -536,10 +536,11 @@ Use your existing Claude or ChatGPT subscription, or bring an API key.
 | `codex` | OpenAI Codex CLI | Spawns CLI process | `npm i -g @openai/codex` |
 | `openai:gpt-4o-mini` | OpenAI API | HTTP REST | `OPENAI_API_KEY` |
 | `anthropic:claude-3-5-sonnet-latest` | Anthropic API | HTTP REST | `ANTHROPIC_API_KEY` |
+| `gemini:gemini-2.5-flash` | Gemini API | HTTP REST | `GEMINI_API_KEY` |
 
 **CLI models** (`claude`, `codex`) — Full agentic loop with tool use via the CLI. Session continuity via `--resume`. On Windows, `.cmd` wrappers are auto-resolved to underlying `.js` scripts to bypass the cmd.exe 8191-char argument limit.
 
-**API models** (`openai:*`, `anthropic:*`) — Direct HTTP calls. Support multi-turn tool-calling loops. API keys resolve from: room credentials → Clerk-saved keys → environment variables. `anthropic:*` also accepts the `claude-api:` prefix.
+**API models** (`openai:*`, `anthropic:*`, `gemini:*`) — Direct HTTP calls. Support multi-turn tool-calling loops. API keys resolve from: room credentials → Clerk-saved keys → environment variables. `anthropic:*` also accepts the `claude-api:` prefix. `gemini:*` uses Google's OpenAI-compatible endpoint.
 
 Workers inherit the queen's model by default, or can use a separate API model.
 

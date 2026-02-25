@@ -18,7 +18,7 @@ import {
   type ClerkProjectDocSpec,
 } from '../shared/clerk-profile-config'
 
-export type ClerkApiProvider = 'openai_api' | 'anthropic_api'
+export type ClerkApiProvider = 'openai_api' | 'anthropic_api' | 'gemini_api'
 
 export interface ClerkApiAuthState {
   hasRoomCredential: boolean
@@ -56,7 +56,7 @@ export interface ClerkExecutionOutcome {
 let lastProjectDocSyncAt = 0
 let lastProjectDocSnapshot = 'Project docs memory not synced yet.'
 
-function findAnyRoomCredential(db: Database.Database, credentialName: 'openai_api_key' | 'anthropic_api_key'): string | null {
+function findAnyRoomCredential(db: Database.Database, credentialName: 'openai_api_key' | 'anthropic_api_key' | 'gemini_api_key'): string | null {
   const rooms = queries.listRooms(db)
   for (const room of rooms) {
     const credential = queries.getCredentialByName(db, room.id, credentialName)
@@ -76,8 +76,8 @@ function maskKey(key: string | null): string | null {
 }
 
 function getClerkApiAuthState(db: Database.Database, provider: ClerkApiProvider): ClerkApiAuthState {
-  const credentialName = provider === 'openai_api' ? 'openai_api_key' : 'anthropic_api_key'
-  const envVar = provider === 'openai_api' ? 'OPENAI_API_KEY' : 'ANTHROPIC_API_KEY'
+  const credentialName = provider === 'openai_api' ? 'openai_api_key' : provider === 'gemini_api' ? 'gemini_api_key' : 'anthropic_api_key'
+  const envVar = provider === 'openai_api' ? 'OPENAI_API_KEY' : provider === 'gemini_api' ? 'GEMINI_API_KEY' : 'ANTHROPIC_API_KEY'
   const roomCredential = findAnyRoomCredential(db, credentialName)
   const savedKey = queries.getClerkApiKey(db, provider)
   const envKey = (process.env[envVar] || '').trim() || null
@@ -91,10 +91,11 @@ function getClerkApiAuthState(db: Database.Database, provider: ClerkApiProvider)
   }
 }
 
-export function getClerkApiAuth(db: Database.Database): { openai: ClerkApiAuthState; anthropic: ClerkApiAuthState } {
+export function getClerkApiAuth(db: Database.Database): { openai: ClerkApiAuthState; anthropic: ClerkApiAuthState; gemini: ClerkApiAuthState } {
   return {
     openai: getClerkApiAuthState(db, 'openai_api'),
-    anthropic: getClerkApiAuthState(db, 'anthropic_api')
+    anthropic: getClerkApiAuthState(db, 'anthropic_api'),
+    gemini: getClerkApiAuthState(db, 'gemini_api'),
   }
 }
 
@@ -127,6 +128,11 @@ export function resolveClerkApiKey(db: Database.Database, model: string | null |
     return findAnyRoomCredential(db, 'anthropic_api_key')
       || queries.getClerkApiKey(db, 'anthropic_api')
       || (process.env.ANTHROPIC_API_KEY || undefined)
+  }
+  if (provider === 'gemini_api') {
+    return findAnyRoomCredential(db, 'gemini_api_key')
+      || queries.getClerkApiKey(db, 'gemini_api')
+      || (process.env.GEMINI_API_KEY || undefined)
   }
   return undefined
 }
@@ -302,6 +308,11 @@ function buildClerkModelPlan(preferredModel: string): string[] {
     uniquePush(plan, CLERK_FALLBACK_SUBSCRIPTION_MODEL)
     uniquePush(plan, CLERK_FALLBACK_OPENAI_MODEL)
     uniquePush(plan, DEFAULT_CLERK_MODEL)
+  } else if (provider === 'gemini_api') {
+    uniquePush(plan, CLERK_FALLBACK_SUBSCRIPTION_MODEL)
+    uniquePush(plan, CLERK_FALLBACK_OPENAI_MODEL)
+    uniquePush(plan, DEFAULT_CLERK_MODEL)
+    uniquePush(plan, CLERK_FALLBACK_ANTHROPIC_MODEL)
   }
 
   return plan
@@ -317,7 +328,7 @@ function buildExecutionCandidates(db: Database.Database, preferredModel: string)
   for (const model of buildClerkModelPlan(preferredModel)) {
     const provider = getModelProvider(model)
     const apiKey = resolveClerkApiKey(db, model)
-    if ((provider === 'openai_api' || provider === 'anthropic_api') && !apiKey) continue
+    if ((provider === 'openai_api' || provider === 'anthropic_api' || provider === 'gemini_api') && !apiKey) continue
     candidates.push({ model, apiKey })
   }
   if (candidates.length === 0) {

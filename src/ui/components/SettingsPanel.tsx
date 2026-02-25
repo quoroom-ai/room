@@ -510,7 +510,8 @@ export function SettingsPanel({ advancedMode, onAdvancedModeChange, installPromp
                 ['claude', 'Claude'],
                 ['codex', 'Codex'],
                 ['openai:gpt-4o-mini', 'OpenAI API'],
-                ['anthropic:claude-3-5-sonnet-latest', 'Claude API']
+                ['anthropic:claude-3-5-sonnet-latest', 'Claude API'],
+                ['gemini:gemini-2.5-flash', 'Gemini API']
               ] as const).map(([id, label]) => (
                 <button
                   key={id}

@@ -8,7 +8,7 @@ import { execOnCloudStation } from './cloud-sync'
 import type { ToolDef } from './queen-tools'
 
 export interface AgentExecutionOptions {
-  model: string // 'claude' | 'codex' | 'openai:gpt-4o-mini' | 'anthropic:claude-3-5-sonnet-latest'
+  model: string // 'claude' | 'codex' | 'openai:gpt-4o-mini' | 'anthropic:claude-3-5-sonnet-latest' | 'gemini:gemini-2.5-flash'
   prompt: string
   systemPrompt?: string
   maxTurns?: number
@@ -86,7 +86,7 @@ export async function executeAgent(options: AgentExecutionOptions): Promise<Agen
   if (model === 'codex' || model.startsWith('codex:')) {
     return executeCodex(options)
   }
-  if (model === 'openai' || model.startsWith('openai:')) {
+  if (model === 'openai' || model.startsWith('openai:') || model === 'gemini' || model.startsWith('gemini:')) {
     if (options.toolDefs && options.toolDefs.length > 0 && options.onToolCall) {
       return executeOpenAiWithTools(options)
     }
@@ -277,6 +277,41 @@ async function executeCodex(options: AgentExecutionOptions): Promise<AgentExecut
   })
 }
 
+// ─── OpenAI-compatible config resolver (OpenAI + Gemini) ─────────────────
+
+interface OpenAiCompatibleConfig {
+  apiKey: string
+  url: string
+  defaultModel: string
+  label: string
+  prefix: string
+}
+
+function resolveOpenAiCompatible(model: string, apiKeyOverride?: string): OpenAiCompatibleConfig | null {
+  const trimmed = model.trim()
+  if (trimmed === 'gemini' || trimmed.startsWith('gemini:')) {
+    const apiKey = apiKeyOverride?.trim() || (process.env.GEMINI_API_KEY || '').trim()
+    if (!apiKey) return null
+    return {
+      apiKey,
+      url: 'https://generativelanguage.googleapis.com/v1beta/openai/chat/completions',
+      defaultModel: 'gemini-2.5-flash',
+      label: 'Gemini',
+      prefix: 'gemini',
+    }
+  }
+  // Default: OpenAI
+  const apiKey = apiKeyOverride?.trim() || (process.env.OPENAI_API_KEY || '').trim()
+  if (!apiKey) return null
+  return {
+    apiKey,
+    url: 'https://api.openai.com/v1/chat/completions',
+    defaultModel: 'gpt-4o-mini',
+    label: 'OpenAI',
+    prefix: 'openai',
+  }
+}
+
 // ─── OpenAI multi-turn tool-call loop ──────────────────────────────────────
 
 interface OpenAiMessage {
@@ -292,10 +327,11 @@ interface OpenAiMessage {
 }
 
 async function executeOpenAiWithTools(options: AgentExecutionOptions): Promise<AgentExecutionResult> {
-  const apiKey = options.apiKey?.trim() || (process.env.OPENAI_API_KEY || '').trim()
-  if (!apiKey) return immediateError('Missing OpenAI API key.')
+  const config = resolveOpenAiCompatible(options.model, options.apiKey)
+  if (!config) return immediateError(`Missing ${options.model.startsWith('gemini') ? 'Gemini' : 'OpenAI'} API key.`)
 
-  const modelName = parseModelSuffix(options.model, 'openai') || 'gpt-4o-mini'
+  const { apiKey, url: apiUrl, defaultModel, label: providerLabel, prefix } = config
+  const modelName = parseModelSuffix(options.model, prefix) || defaultModel
   const startTime = Date.now()
   const maxTurns = options.maxTurns ?? 10
 
@@ -323,7 +359,7 @@ async function executeOpenAiWithTools(options: AgentExecutionOptions): Promise<A
 
     let json: Record<string, unknown>
     try {
-      const response = await fetch('https://api.openai.com/v1/chat/completions', {
+      const response = await fetch(apiUrl, {
         method: 'POST',
         headers: { 'Authorization': `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
         body: JSON.stringify({ model: modelName, messages, tools: options.toolDefs }),
@@ -331,7 +367,7 @@ async function executeOpenAiWithTools(options: AgentExecutionOptions): Promise<A
       })
       json = await response.json() as Record<string, unknown>
       if (!response.ok) {
-        return { output: `OpenAI API ${response.status}: ${extractApiError(json)}`, exitCode: 1, durationMs: Date.now() - startTime, sessionId: null, timedOut: false, usage: { inputTokens: totalInputTokens, outputTokens: totalOutputTokens } }
+        return { output: `${providerLabel} API ${response.status}: ${extractApiError(json)}`, exitCode: 1, durationMs: Date.now() - startTime, sessionId: null, timedOut: false, usage: { inputTokens: totalInputTokens, outputTokens: totalOutputTokens } }
       }
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err)
@@ -512,12 +548,14 @@ async function executeAnthropicWithTools(options: AgentExecutionOptions): Promis
 }
 
 async function executeOpenAiApi(options: AgentExecutionOptions): Promise<AgentExecutionResult> {
-  const apiKey = options.apiKey?.trim() || (process.env.OPENAI_API_KEY || '').trim()
-  if (!apiKey) {
-    return immediateError('Missing OpenAI API key. Set room credential "openai_api_key" or OPENAI_API_KEY.')
+  const config = resolveOpenAiCompatible(options.model, options.apiKey)
+  if (!config) {
+    const isGemini = options.model.startsWith('gemini')
+    return immediateError(`Missing ${isGemini ? 'Gemini' : 'OpenAI'} API key. Set room credential "${isGemini ? 'gemini_api_key' : 'openai_api_key'}" or ${isGemini ? 'GEMINI_API_KEY' : 'OPENAI_API_KEY'}.`)
   }
 
-  const modelName = parseModelSuffix(options.model, 'openai') || 'gpt-4o-mini'
+  const { apiKey, url: apiUrl, defaultModel, label: providerLabel, prefix } = config
+  const modelName = parseModelSuffix(options.model, prefix) || defaultModel
   const messages: Array<{ role: 'system' | 'user'; content: string }> = []
   if (options.systemPrompt) messages.push({ role: 'system', content: options.systemPrompt })
   messages.push({ role: 'user', content: options.prompt })
@@ -527,7 +565,7 @@ async function executeOpenAiApi(options: AgentExecutionOptions): Promise<AgentEx
   const timeoutMs = options.timeoutMs ?? DEFAULT_HTTP_TIMEOUT_MS
   const timer = setTimeout(() => controller.abort(), timeoutMs)
   try {
-    const response = await fetch('https://api.openai.com/v1/chat/completions', {
+    const response = await fetch(apiUrl, {
       method: 'POST',
       headers: {
         'Authorization': `Bearer ${apiKey}`,
@@ -542,7 +580,7 @@ async function executeOpenAiApi(options: AgentExecutionOptions): Promise<AgentEx
     const json = await response.json() as Record<string, unknown>
     if (!response.ok) {
       return {
-        output: `OpenAI API ${response.status}: ${extractApiError(json)}`,
+        output: `${providerLabel} API ${response.status}: ${extractApiError(json)}`,
         exitCode: 1,
         durationMs: Date.now() - startTime,
         sessionId: null,
@@ -768,7 +806,7 @@ function immediateError(message: string): AgentExecutionResult {
 /**
  * Compress a long conversation history into a compact JSON summary.
  * Called at the start of a cycle when the session exceeds the trim threshold.
- * Applies to API models (openai:*, anthropic:*). CLI models manage their own context.
+ * Applies to API models (openai:*, gemini:*, anthropic:*). CLI models manage their own context.
  *
  * Returns the raw summary text (JSON string from the model), or null on failure.
  */
@@ -802,13 +840,13 @@ Respond ONLY with a JSON object (no markdown, no explanation):
 
   const timeoutMs = 60_000
   try {
-    if (model === 'openai' || model.startsWith('openai:')) {
-      const key = apiKey?.trim() || (process.env.OPENAI_API_KEY || '').trim()
-      if (!key) return null
-      const modelName = parseModelSuffix(model, 'openai') || 'gpt-4o-mini'
-      const response = await fetch('https://api.openai.com/v1/chat/completions', {
+    if (model === 'openai' || model.startsWith('openai:') || model === 'gemini' || model.startsWith('gemini:')) {
+      const config = resolveOpenAiCompatible(model, apiKey)
+      if (!config) return null
+      const modelName = parseModelSuffix(model, config.prefix) || config.defaultModel
+      const response = await fetch(config.url, {
         method: 'POST',
-        headers: { 'Authorization': `Bearer ${key}`, 'Content-Type': 'application/json' },
+        headers: { 'Authorization': `Bearer ${config.apiKey}`, 'Content-Type': 'application/json' },
         body: JSON.stringify({ model: modelName, messages: [{ role: 'user', content: compressionPrompt }] }),
         signal: AbortSignal.timeout(timeoutMs)
       })
@@ -836,7 +874,7 @@ Respond ONLY with a JSON object (no markdown, no explanation):
 }
 
 /**
- * Execute an API-key model (openai:* or anthropic:*) on a cloud station via curl.
+ * Execute an API-key model (openai:*, gemini:*, or anthropic:*) on a cloud station via curl.
  */
 export async function executeApiOnStation(
   cloudRoomId: string,
@@ -849,7 +887,7 @@ export async function executeApiOnStation(
     return immediateError('Missing API key for station execution.')
   }
 
-  const isOpenAi = options.model.startsWith('openai:')
+  const isOpenAiCompat = options.model.startsWith('openai:') || options.model.startsWith('gemini:')
   const messages: Array<{ role: string; content: string }> = []
   if (options.systemPrompt) messages.push({ role: 'system', content: options.systemPrompt })
   messages.push({ role: 'user', content: options.prompt })
@@ -858,9 +896,10 @@ export async function executeApiOnStation(
   let headers: Record<string, string>
   let body: string
 
-  if (isOpenAi) {
-    const modelName = parseModelSuffix(options.model, 'openai') || 'gpt-4o-mini'
-    url = 'https://api.openai.com/v1/chat/completions'
+  if (isOpenAiCompat) {
+    const config = resolveOpenAiCompatible(options.model, apiKey)
+    const modelName = config ? (parseModelSuffix(options.model, config.prefix) || config.defaultModel) : parseModelSuffix(options.model, 'openai') || 'gpt-4o-mini'
+    url = config?.url ?? 'https://api.openai.com/v1/chat/completions'
     headers = { 'Authorization': `Bearer ${apiKey}`, 'Content-Type': 'application/json' }
     body = JSON.stringify({ model: modelName, messages })
   } else {
@@ -904,7 +943,7 @@ export async function executeApiOnStation(
 
   try {
     const parsed = JSON.parse(result.stdout) as Record<string, unknown>
-    const output = isOpenAi ? extractOpenAiText(parsed) : extractAnthropicText(parsed)
+    const output = isOpenAiCompat ? extractOpenAiText(parsed) : extractAnthropicText(parsed)
     return { output, exitCode: 0, durationMs: Date.now() - startTime, sessionId: null, timedOut: false }
   } catch {
     return {

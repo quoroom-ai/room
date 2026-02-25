@@ -84,6 +84,26 @@ async function validateOpenAiKey(value: string): Promise<{ ok: true } | { ok: fa
   }
 }
 
+async function validateGeminiKey(value: string): Promise<{ ok: true } | { ok: false; error: string }> {
+  const controller = new AbortController()
+  const timer = setTimeout(() => controller.abort(), VALIDATION_TIMEOUT_MS)
+  try {
+    const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models?key=${encodeURIComponent(value)}`, {
+      method: 'GET',
+      signal: controller.signal
+    })
+    if (res.ok) return { ok: true }
+    const body = await res.json().catch(() => null)
+    const message = extractApiError(body) || `HTTP ${res.status}`
+    return { ok: false, error: `Gemini key validation failed: ${message}` }
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err)
+    return { ok: false, error: `Gemini key validation failed: ${message}` }
+  } finally {
+    clearTimeout(timer)
+  }
+}
+
 async function validateAnthropicKey(value: string): Promise<{ ok: true } | { ok: false; error: string }> {
   const controller = new AbortController()
   const timer = setTimeout(() => controller.abort(), VALIDATION_TIMEOUT_MS)
@@ -508,14 +528,16 @@ export function registerClerkRoutes(router: Router): void {
     const provider = typeof body.provider === 'string' ? body.provider.trim() : ''
     const key = typeof body.key === 'string' ? body.key.trim() : ''
 
-    if (provider !== 'openai_api' && provider !== 'anthropic_api') {
-      return { status: 400, error: 'provider must be openai_api or anthropic_api' }
+    if (provider !== 'openai_api' && provider !== 'anthropic_api' && provider !== 'gemini_api') {
+      return { status: 400, error: 'provider must be openai_api, anthropic_api, or gemini_api' }
     }
     if (!key) return { status: 400, error: 'key is required' }
 
     const result = provider === 'openai_api'
       ? await validateOpenAiKey(key)
-      : await validateAnthropicKey(key)
+      : provider === 'gemini_api'
+        ? await validateGeminiKey(key)
+        : await validateAnthropicKey(key)
     if (!result.ok) return { status: 400, error: result.error }
 
     queries.setClerkApiKey(ctx.db, provider, key)

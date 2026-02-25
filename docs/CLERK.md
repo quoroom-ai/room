@@ -25,6 +25,7 @@ Available model paths:
 - `codex` (Codex/ChatGPT subscription path)
 - `openai:gpt-4o-mini` (OpenAI API path)
 - `anthropic:claude-3-5-sonnet-latest` (Anthropic API path)
+- `gemini:gemini-2.5-flash` (Gemini API path)
 
 For API paths, Clerk Setup validates keys before storing them.
 
@@ -32,9 +33,9 @@ For API paths, Clerk Setup validates keys before storing them.
 
 When Clerk uses an API model, keys are resolved in this order:
 
-1. Room credential (`openai_api_key` / `anthropic_api_key`) from any room
-2. Clerk-saved key (`clerk_openai_api_key` / `clerk_anthropic_api_key`)
-3. Environment variable (`OPENAI_API_KEY` / `ANTHROPIC_API_KEY`)
+1. Room credential (`openai_api_key` / `anthropic_api_key` / `gemini_api_key`) from any room
+2. Clerk-saved key (`clerk_openai_api_key` / `clerk_anthropic_api_key` / `clerk_gemini_api_key`)
+3. Environment variable (`OPENAI_API_KEY` / `ANTHROPIC_API_KEY` / `GEMINI_API_KEY`)
 
 Implementation: `resolveClerkApiKey()` in `src/server/routes/clerk.ts`.
 
@@ -74,13 +75,13 @@ All routes are under the local API server:
 - `POST /api/clerk/chat` — send keeper message to Clerk
 - `POST /api/clerk/reset` — clear Clerk session + messages
 - `GET /api/clerk/status` — model, configured state, commentary toggle, API auth status
-- `POST /api/clerk/api-key` — validate + save Clerk API key (`openai_api` or `anthropic_api`)
+- `POST /api/clerk/api-key` — validate + save Clerk API key (`openai_api`, `anthropic_api`, or `gemini_api`)
 - `PUT /api/clerk/settings` — update `model` and/or `commentaryEnabled`
 
 Route implementation: `src/server/routes/clerk.ts`.
 
 ## Troubleshooting
 
-- Clerk says key missing: add key in Clerk Setup, set `OPENAI_API_KEY` / `ANTHROPIC_API_KEY`, or add room credential in Room Settings (Clerk can reuse it)
+- Clerk says key missing: add key in Clerk Setup, set `OPENAI_API_KEY` / `ANTHROPIC_API_KEY` / `GEMINI_API_KEY`, or add room credential in Room Settings (Clerk can reuse it)
 - Commentary not appearing: confirm rooms are active and generating cycle events, check `clerk_commentary_enabled` is not `false`, and wait at least 60 seconds after your last Clerk message
 - Clerk not responding: confirm a model is selected in Clerk Setup and check provider availability in Settings/server logs

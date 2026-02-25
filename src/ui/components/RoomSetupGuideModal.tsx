@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 
-type SetupPathId = 'claude_sub' | 'codex_sub' | 'openai_api' | 'anthropic_api'
+type SetupPathId = 'claude_sub' | 'codex_sub' | 'openai_api' | 'anthropic_api' | 'gemini_api'
 type ProviderName = 'codex' | 'claude'
 type ProviderSessionStatus = 'starting' | 'running' | 'completed' | 'failed' | 'canceled' | 'timeout'
 
@@ -112,6 +112,15 @@ const PATHS: SetupPath[] = [
     tradeoff: 'Pay-per-token. You manage keys and limits.',
     setup: 'Add your Anthropic API key \u2014 Quoroom validates it automatically.',
   },
+  {
+    id: 'gemini_api',
+    title: 'Gemini API',
+    model: 'gemini:gemini-2.5-flash',
+    summary: 'Google Gemini via OpenAI-compatible endpoint.',
+    bestFor: 'Access to Gemini models with pay-per-token billing.',
+    tradeoff: 'Pay-per-token. You manage API keys and limits.',
+    setup: 'Add your Gemini API key \u2014 Quoroom validates it automatically.',
+  },
 ]
 
 function pickRecommendedPath(
@@ -129,6 +138,7 @@ function pickRecommendedPath(
   if (queenAuth?.ready) {
     if (queenAuth.provider === 'openai_api') return 'openai_api'
     if (queenAuth.provider === 'anthropic_api') return 'anthropic_api'
+    if (queenAuth.provider === 'gemini_api') return 'gemini_api'
   }
   return 'claude_sub'
 }
@@ -158,11 +168,15 @@ function getPathStatus(
       if (queenAuth?.provider === 'anthropic_api' && queenAuth.ready) return { label: 'API key ready', ready: true }
       if (queenAuth?.provider === 'anthropic_api' && (queenAuth.hasCredential || queenAuth.hasEnvKey)) return { label: 'API key ready', ready: true }
       return { label: 'API key required', ready: false }
+    case 'gemini_api':
+      if (queenAuth?.provider === 'gemini_api' && queenAuth.ready) return { label: 'API key ready', ready: true }
+      if (queenAuth?.provider === 'gemini_api' && (queenAuth.hasCredential || queenAuth.hasEnvKey)) return { label: 'API key ready', ready: true }
+      return { label: 'API key required', ready: false }
   }
 }
 
-function isApiPath(pathId: SetupPathId | null): pathId is 'openai_api' | 'anthropic_api' {
-  return pathId === 'openai_api' || pathId === 'anthropic_api'
+function isApiPath(pathId: SetupPathId | null): pathId is 'openai_api' | 'anthropic_api' | 'gemini_api' {
+  return pathId === 'openai_api' || pathId === 'anthropic_api' || pathId === 'gemini_api'
 }
 
 function isSubPath(pathId: SetupPathId | null): pathId is 'claude_sub' | 'codex_sub' {
@@ -191,8 +205,10 @@ function sessionStatusColor(status: ProviderSessionStatus): string {
   return 'text-text-muted'
 }
 
-function apiCredentialName(pathId: 'openai_api' | 'anthropic_api'): string {
-  return pathId === 'openai_api' ? 'openai_api_key' : 'anthropic_api_key'
+function apiCredentialName(pathId: 'openai_api' | 'anthropic_api' | 'gemini_api'): string {
+  if (pathId === 'openai_api') return 'openai_api_key'
+  if (pathId === 'gemini_api') return 'gemini_api_key'
+  return 'anthropic_api_key'
 }
 
 function SessionLog({ lines }: { lines: ProviderSessionLine[] }): React.JSX.Element {
@@ -316,7 +332,7 @@ export function RoomSetupGuideModal({
         const key = apiKeyInput.trim()
         const status = getPathStatus(path.id, claude, codex, queenAuth)
         if (!status.ready && !key) {
-          setError(`Enter your ${path.id === 'openai_api' ? 'OpenAI' : 'Anthropic'} API key to continue.`)
+          setError(`Enter your ${path.id === 'openai_api' ? 'OpenAI' : path.id === 'gemini_api' ? 'Gemini' : 'Anthropic'} API key to continue.`)
           return
         }
         if (key) {
@@ -526,7 +542,7 @@ export function RoomSetupGuideModal({
 
                 {/* API key path */}
                 {isApiPath(selectedPathId) && (() => {
-                  const matchesProvider = queenAuth?.provider === (selectedPathId === 'openai_api' ? 'openai_api' : 'anthropic_api')
+                  const matchesProvider = queenAuth?.provider === selectedPathId
                   const currentMaskedKey = matchesProvider ? queenAuth?.maskedKey : null
                   const keySource = matchesProvider
                     ? queenAuth?.hasCredential ? 'saved' : queenAuth?.hasEnvKey ? `env` : null
@@ -534,7 +550,7 @@ export function RoomSetupGuideModal({
                   return (
                   <div className="mt-3 pt-3 border-t border-border-primary space-y-2">
                     <label className="block text-xs font-medium text-text-secondary">
-                      {selectedPathId === 'openai_api' ? 'OpenAI API key' : 'Anthropic API key'}
+                      {selectedPathId === 'openai_api' ? 'OpenAI API key' : selectedPathId === 'gemini_api' ? 'Gemini API key' : 'Anthropic API key'}
                     </label>
                     {currentMaskedKey && (
                       <div className="flex items-center gap-2 text-xs">

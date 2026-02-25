@@ -252,10 +252,10 @@ export async function runCycle(
   try {
     // 0. PRE-FLIGHT: ensure API key is available for API-backed models
     const provider = getModelProvider(model)
-    if (provider === 'openai_api' || provider === 'anthropic_api') {
+    if (provider === 'openai_api' || provider === 'anthropic_api' || provider === 'gemini_api') {
       const apiKeyCheck = resolveApiKeyForModel(db, roomId, model)
       if (!apiKeyCheck) {
-        const label = provider === 'openai_api' ? 'OpenAI' : 'Anthropic'
+        const label = provider === 'openai_api' ? 'OpenAI' : provider === 'gemini_api' ? 'Gemini' : 'Anthropic'
         const msg = `Missing ${label} API key. Set it in Room Settings or the Setup Guide.`
         logBuffer.addSynthetic('error', msg)
         logBuffer.flush()

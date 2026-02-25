@@ -14,6 +14,7 @@ describe('model-provider', () => {
     roomId = room.id
     delete process.env.OPENAI_API_KEY
     delete process.env.ANTHROPIC_API_KEY
+    delete process.env.GEMINI_API_KEY
   })
 
   it('detects provider type from model string', () => {
@@ -22,6 +23,9 @@ describe('model-provider', () => {
     expect(getModelProvider('openai:gpt-4o-mini')).toBe('openai_api')
     expect(getModelProvider('anthropic:claude-3-5-sonnet-latest')).toBe('anthropic_api')
     expect(getModelProvider('claude-api:claude-3-5-sonnet-latest')).toBe('anthropic_api')
+    expect(getModelProvider('gemini')).toBe('gemini_api')
+    expect(getModelProvider('gemini:gemini-2.5-flash')).toBe('gemini_api')
+    expect(getModelProvider('gemini:gemini-2.5-pro')).toBe('gemini_api')
   })
 
   it('returns api auth readiness from room credentials', async () => {
@@ -66,5 +70,24 @@ describe('model-provider', () => {
     expect(status.provider).toBe('claude_subscription')
     expect(status.mode).toBe('subscription')
     expect(typeof status.ready).toBe('boolean')
+  })
+
+  it('gemini_api returns api auth readiness from room credentials', async () => {
+    q.createCredential(db, roomId, 'gemini_api_key', 'api_key', 'AIza-test')
+    const status = await getModelAuthStatus(db, roomId, 'gemini:gemini-2.5-flash')
+    expect(status.provider).toBe('gemini_api')
+    expect(status.mode).toBe('api')
+    expect(status.hasCredential).toBe(true)
+    expect(status.ready).toBe(true)
+    expect(resolveApiKeyForModel(db, roomId, 'gemini:gemini-2.5-flash')).toBe('AIza-test')
+  })
+
+  it('gemini_api falls back to env key', async () => {
+    process.env.GEMINI_API_KEY = 'AIza-env'
+    const status = await getModelAuthStatus(db, roomId, 'gemini:gemini-2.5-pro')
+    expect(status.hasCredential).toBe(false)
+    expect(status.hasEnvKey).toBe(true)
+    expect(status.ready).toBe(true)
+    expect(resolveApiKeyForModel(db, roomId, 'gemini:gemini-2.5-pro')).toBe('AIza-env')
   })
 })

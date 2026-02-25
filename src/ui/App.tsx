@@ -88,7 +88,9 @@ function formatRoomModel(model: string | null | undefined): string {
     ? 'OpenAI'
     : provider === 'anthropic'
       ? 'Anthropic'
-      : provider
+      : provider === 'gemini'
+        ? 'Gemini'
+        : provider
   return `${providerLabel}/${modelName}`
 }
 

@@ -8,6 +8,7 @@ export type ModelProvider =
   | 'codex_subscription'
   | 'openai_api'
   | 'anthropic_api'
+  | 'gemini_api'
 
 export interface ModelAuthStatus {
   provider: ModelProvider
@@ -32,6 +33,7 @@ export function getModelProvider(model: string | null | undefined): ModelProvide
   if (normalized === 'anthropic' || normalized.startsWith('anthropic:') || normalized.startsWith('claude-api:')) {
     return 'anthropic_api'
   }
+  if (normalized === 'gemini' || normalized.startsWith('gemini:')) return 'gemini_api'
   return 'claude_subscription'
 }
 
@@ -42,6 +44,9 @@ export async function getModelAuthStatus(db: Database.Database, roomId: number, 
   }
   if (provider === 'anthropic_api') {
     return resolveApiAuthStatus(db, roomId, 'anthropic_api_key', 'ANTHROPIC_API_KEY', provider)
+  }
+  if (provider === 'gemini_api') {
+    return resolveApiAuthStatus(db, roomId, 'gemini_api_key', 'GEMINI_API_KEY', provider)
   }
 
   let ready = false
@@ -70,6 +75,9 @@ export function resolveApiKeyForModel(db: Database.Database, roomId: number, mod
   }
   if (provider === 'anthropic_api') {
     return resolveApiKey(db, roomId, 'anthropic_api_key', 'ANTHROPIC_API_KEY')
+  }
+  if (provider === 'gemini_api') {
+    return resolveApiKey(db, roomId, 'gemini_api_key', 'GEMINI_API_KEY')
   }
   return undefined
 }
@@ -132,6 +140,9 @@ function getClerkCredential(db: Database.Database, credentialName: string): stri
   }
   if (credentialName === 'anthropic_api_key') {
     return queries.getClerkApiKey(db, 'anthropic_api')
+  }
+  if (credentialName === 'gemini_api_key') {
+    return queries.getClerkApiKey(db, 'gemini_api')
   }
   return null
 }

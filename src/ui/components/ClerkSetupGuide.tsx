@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 
-type SetupPathId = 'claude_sub' | 'codex_sub' | 'openai_api' | 'anthropic_api'
+type SetupPathId = 'claude_sub' | 'codex_sub' | 'openai_api' | 'anthropic_api' | 'gemini_api'
 type ProviderName = 'codex' | 'claude'
 type ProviderSessionStatus = 'starting' | 'running' | 'completed' | 'failed' | 'canceled' | 'timeout'
 
@@ -68,7 +68,7 @@ interface ClerkSetupGuideProps {
   onCancelInstall: (sessionId: string) => Promise<void>
   onRefreshProviders: () => Promise<void>
   onApplyModel: (model: string) => Promise<void>
-  onSaveApiKey: (provider: 'openai_api' | 'anthropic_api', key: string) => Promise<void>
+  onSaveApiKey: (provider: 'openai_api' | 'anthropic_api' | 'gemini_api', key: string) => Promise<void>
   onClose: () => void
 }
 
@@ -109,12 +109,21 @@ const PATHS: SetupPath[] = [
     tradeoff: 'Pay-per-token. You manage keys and limits.',
     setup: 'Uses ANTHROPIC_API_KEY environment variable.',
   },
+  {
+    id: 'gemini_api',
+    title: 'Gemini API',
+    model: 'gemini:gemini-2.5-flash',
+    summary: 'Google Gemini via API. Full tool support.',
+    bestFor: 'Access to Gemini models with pay-per-token billing.',
+    tradeoff: 'Pay-per-token. You manage API keys and limits.',
+    setup: 'Uses GEMINI_API_KEY environment variable.',
+  },
 ]
 
 function pickRecommendedPath(
   claude: ProviderSignal | null,
   codex: ProviderSignal | null,
-  apiAuth: { openai: ApiAuthSignal; anthropic: ApiAuthSignal } | null,
+  apiAuth: { openai: ApiAuthSignal; anthropic: ApiAuthSignal; gemini?: ApiAuthSignal } | null,
 ): SetupPathId {
   if (claude?.connected === true) return 'claude_sub'
   if (codex?.connected === true) return 'codex_sub'
@@ -122,6 +131,7 @@ function pickRecommendedPath(
   if (codex?.installed) return 'codex_sub'
   if (apiAuth?.openai.ready) return 'openai_api'
   if (apiAuth?.anthropic.ready) return 'anthropic_api'
+  if (apiAuth?.gemini?.ready) return 'gemini_api'
   return 'claude_sub'
 }
 
@@ -129,7 +139,7 @@ function getPathStatus(
   pathId: SetupPathId,
   claude: ProviderSignal | null,
   codex: ProviderSignal | null,
-  apiAuth: { openai: ApiAuthSignal; anthropic: ApiAuthSignal } | null,
+  apiAuth: { openai: ApiAuthSignal; anthropic: ApiAuthSignal; gemini?: ApiAuthSignal } | null,
 ): { label: string; ready: boolean } {
   switch (pathId) {
     case 'claude_sub':
@@ -150,11 +160,15 @@ function getPathStatus(
       return apiAuth?.anthropic.ready
         ? { label: `API key ready (${describeApiAuthSource(apiAuth.anthropic)})`, ready: true }
         : { label: 'API key required', ready: false }
+    case 'gemini_api':
+      return apiAuth?.gemini?.ready
+        ? { label: `API key ready (${describeApiAuthSource(apiAuth.gemini)})`, ready: true }
+        : { label: 'API key required', ready: false }
   }
 }
 
-function isApiPath(pathId: SetupPathId | null): pathId is 'openai_api' | 'anthropic_api' {
-  return pathId === 'openai_api' || pathId === 'anthropic_api'
+function isApiPath(pathId: SetupPathId | null): pathId is 'openai_api' | 'anthropic_api' | 'gemini_api' {
+  return pathId === 'openai_api' || pathId === 'anthropic_api' || pathId === 'gemini_api'
 }
 
 function isSubPath(pathId: SetupPathId | null): pathId is 'claude_sub' | 'codex_sub' {
@@ -305,11 +319,12 @@ export function ClerkSetupGuide({
     setError(null)
     try {
       if (isApiPath(path.id)) {
-        const provider = path.id === 'openai_api' ? 'openai_api' : 'anthropic_api'
+        const provider = path.id as 'openai_api' | 'anthropic_api' | 'gemini_api'
         const status = getPathStatus(path.id, claude, codex, apiAuth)
         const key = apiKeyInput.trim()
         if (!status.ready && !key) {
-          setError(`Enter your ${provider === 'openai_api' ? 'OpenAI' : 'Anthropic'} API key to continue.`)
+          const providerLabel = provider === 'openai_api' ? 'OpenAI' : provider === 'gemini_api' ? 'Gemini' : 'Anthropic'
+          setError(`Enter your ${providerLabel} API key to continue.`)
           return
         }
         if (key) {

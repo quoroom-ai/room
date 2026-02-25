@@ -756,6 +756,8 @@ export function RoomSettingsPanel({ roomId }: RoomSettingsPanelProps): React.JSX
       setQueenAuth(prev => ({ ...prev, [room.id]: { provider: 'openai_api', mode: 'api', credentialName: 'openai_api_key', envVar: 'OPENAI_API_KEY', hasCredential: false, hasEnvKey: false, ready: false, maskedKey: null } }))
     } else if (model.startsWith('anthropic:')) {
       setQueenAuth(prev => ({ ...prev, [room.id]: { provider: 'anthropic_api', mode: 'api', credentialName: 'anthropic_api_key', envVar: 'ANTHROPIC_API_KEY', hasCredential: false, hasEnvKey: false, ready: false, maskedKey: null } }))
+    } else if (model.startsWith('gemini:')) {
+      setQueenAuth(prev => ({ ...prev, [room.id]: { provider: 'gemini_api', mode: 'api', credentialName: 'gemini_api_key', envVar: 'GEMINI_API_KEY', hasCredential: false, hasEnvKey: false, ready: false, maskedKey: null } }))
     } else {
       setQueenAuth(prev => ({ ...prev, [room.id]: { provider: 'claude_subscription', mode: 'subscription', credentialName: null, envVar: null, hasCredential: false, hasEnvKey: false, ready: true, maskedKey: null } }))
     }
@@ -808,7 +810,7 @@ export function RoomSettingsPanel({ roomId }: RoomSettingsPanelProps): React.JSX
     if (!apiKeyPrompt) return
     const { roomId: targetRoomId, auth, mode } = apiKeyPrompt
     if (apiKeyBusyRoomId === targetRoomId) return
-    const providerName = auth.credentialName === 'openai_api_key' ? 'OpenAI' : 'Anthropic'
+    const providerName = auth.credentialName === 'openai_api_key' ? 'OpenAI' : auth.credentialName === 'gemini_api_key' ? 'Gemini' : 'Anthropic'
     const shouldSave = mode === 'save'
     if (shouldSave) pendingModelUpdate.current = true
     setApiKeyBusyRoomId(targetRoomId)
@@ -1015,6 +1017,8 @@ export function RoomSettingsPanel({ roomId }: RoomSettingsPanelProps): React.JSX
     { value: 'anthropic:claude-haiku-4-5-20251001', label: 'Haiku (API)' },
     { value: 'anthropic:claude-sonnet-4-6', label: 'Sonnet (API)' },
     { value: 'anthropic:claude-opus-4-6', label: 'Opus (API)' },
+    { value: 'gemini:gemini-2.5-flash', label: 'Gemini 2.5 Flash (API)' },
+    { value: 'gemini:gemini-2.5-pro', label: 'Gemini 2.5 Pro (API)' },
   ]
   if (!hasQueenModelLoaded) {
     queenModelOptions.unshift({ value: '__loading__', label: 'Loading...' })
@@ -1888,7 +1892,7 @@ export function RoomSettingsPanel({ roomId }: RoomSettingsPanelProps): React.JSX
 
       {apiKeyPrompt && (
         <PromptDialog
-          title={`Enter ${apiKeyPrompt.auth.credentialName === 'openai_api_key' ? 'OpenAI' : 'Anthropic'} API key ${apiKeyPrompt.mode === 'save' ? 'to save' : 'to test'}:`}
+          title={`Enter ${apiKeyPrompt.auth.credentialName === 'openai_api_key' ? 'OpenAI' : apiKeyPrompt.auth.credentialName === 'gemini_api_key' ? 'Gemini' : 'Anthropic'} API key ${apiKeyPrompt.mode === 'save' ? 'to save' : 'to test'}:`}
           placeholder="sk-..."
           type="password"
           confirmLabel={apiKeyBusyRoomId === apiKeyPrompt.roomId ? 'Validating...' : apiKeyPrompt.mode === 'save' ? 'Validate & Save' : 'Validate'}

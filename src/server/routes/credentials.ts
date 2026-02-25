@@ -7,7 +7,7 @@ function maskCredential<T extends { valueEncrypted: string }>(credential: T): T 
 }
 
 const VALIDATION_TIMEOUT_MS = 8000
-const SUPPORTED_CREDENTIALS = new Set(['openai_api_key', 'anthropic_api_key'])
+const SUPPORTED_CREDENTIALS = new Set(['openai_api_key', 'anthropic_api_key', 'gemini_api_key'])
 
 function extractApiError(payload: unknown): string | null {
   if (!payload || typeof payload !== 'object') return null
@@ -40,6 +40,26 @@ async function validateOpenAiKey(value: string): Promise<{ ok: true } | { ok: fa
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err)
     return { ok: false, error: `OpenAI key validation failed: ${message}` }
+  } finally {
+    clearTimeout(timer)
+  }
+}
+
+async function validateGeminiKey(value: string): Promise<{ ok: true } | { ok: false; error: string }> {
+  const controller = new AbortController()
+  const timer = setTimeout(() => controller.abort(), VALIDATION_TIMEOUT_MS)
+  try {
+    const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models?key=${encodeURIComponent(value)}`, {
+      method: 'GET',
+      signal: controller.signal
+    })
+    if (res.ok) return { ok: true }
+    const body = await res.json().catch(() => null)
+    const message = extractApiError(body) || `HTTP ${res.status}`
+    return { ok: false, error: `Gemini key validation failed: ${message}` }
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err)
+    return { ok: false, error: `Gemini key validation failed: ${message}` }
   } finally {
     clearTimeout(timer)
   }
@@ -98,7 +118,9 @@ export function registerCredentialRoutes(router: Router): void {
 
     const result = name === 'openai_api_key'
       ? await validateOpenAiKey(value)
-      : await validateAnthropicKey(value)
+      : name === 'gemini_api_key'
+        ? await validateGeminiKey(value)
+        : await validateAnthropicKey(value)
     if (!result.ok) return { status: 400, error: result.error }
     return { data: { ok: true } }
   })

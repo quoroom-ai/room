@@ -312,6 +312,12 @@ function getModelConnectionStatus(
       ? { connected: true, label: 'connected' }
       : { connected: false, label: 'not connected' }
   }
+  if (model.startsWith('gemini:')) {
+    if (!apiAuth) return { connected: null, label: 'checking' }
+    return apiAuth.gemini?.ready
+      ? { connected: true, label: 'connected' }
+      : { connected: false, label: 'not connected' }
+  }
 
   return { connected: null, label: '' }
 }

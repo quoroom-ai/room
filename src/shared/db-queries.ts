@@ -2162,10 +2162,12 @@ export function getClerkUsageToday(db: Database.Database, source?: ClerkUsageSou
   }
 }
 
-export type ClerkApiProvider = 'openai_api' | 'anthropic_api'
+export type ClerkApiProvider = 'openai_api' | 'anthropic_api' | 'gemini_api'
 
 function clerkApiKeySetting(provider: ClerkApiProvider): string {
-  return provider === 'openai_api' ? 'clerk_openai_api_key' : 'clerk_anthropic_api_key'
+  if (provider === 'openai_api') return 'clerk_openai_api_key'
+  if (provider === 'gemini_api') return 'clerk_gemini_api_key'
+  return 'clerk_anthropic_api_key'
 }
 
 export function setClerkApiKey(db: Database.Database, provider: ClerkApiProvider, value: string): void {
