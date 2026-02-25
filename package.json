@@ -20,6 +20,7 @@
   ],
   "scripts": {
     "build": "npm run typecheck && npm run build:mcp && npm run build:ui",
+    "build:windows:local": "powershell -ExecutionPolicy Bypass -File scripts/build-windows-local.ps1",
     "build:parallel": "node scripts/build-parallel.js",
     "build:fast": "node scripts/build-parallel.js --skip-typecheck",
     "build:mcp": "node scripts/build-mcp.js",

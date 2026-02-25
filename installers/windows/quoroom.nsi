@@ -30,7 +30,6 @@ VIAddVersionKey "LegalCopyright" "MIT License"
 !insertmacro MUI_PAGE_INSTFILES
 !define MUI_PAGE_CUSTOMFUNCTION_LEAVE FinishPageLeave
 !insertmacro MUI_PAGE_FINISH
-!undef MUI_PAGE_CUSTOMFUNCTION_LEAVE
 
 !insertmacro MUI_UNPAGE_CONFIRM
 !insertmacro MUI_UNPAGE_INSTFILES
@@ -38,7 +37,12 @@ VIAddVersionKey "LegalCopyright" "MIT License"
 !insertmacro MUI_LANGUAGE "English"
 
 Section "Install"
+  SetRegView 64
   SetOutPath "$INSTDIR"
+
+  ; Stop running Quoroom processes from previous installs to avoid locked files.
+  Call StopRunningQuoroom
+  Sleep 500
 
   ; Copy all files from staging
   File /r "${STAGING_DIR}\*.*"
@@ -52,6 +56,7 @@ Section "Install"
 
   ; Start Menu
   CreateDirectory "$SMPROGRAMS\Quoroom Server"
+  Call CreateTrayScript
   Call CreateLauncherScript
   CreateShortcut "$SMPROGRAMS\Quoroom Server\Open Quoroom Server.lnk" "$SYSDIR\wscript.exe" '"$INSTDIR\bin\quoroom-launch.vbs"' "$INSTDIR\ui\quoroom-server.ico" 0
   CreateShortcut "$SMPROGRAMS\Quoroom Server\Uninstall.lnk" "$INSTDIR\uninstall.exe"
@@ -84,6 +89,7 @@ Section "Install"
 SectionEnd
 
 Section "Uninstall"
+  SetRegView 64
   ; Remove bin\ from system PATH
   ReadRegStr $0 HKLM "SYSTEM\CurrentControlSet\Control\Session Manager\Environment" "Path"
   ; Remove ;$INSTDIR\bin or $INSTDIR\bin; from PATH
@@ -124,6 +130,30 @@ Function LaunchQuoroom
   Exec '"$SYSDIR\wscript.exe" "$INSTDIR\bin\quoroom-launch.vbs"'
 FunctionEnd
 
+Function .onInit
+  SetRegView 64
+  StrCmp $PROGRAMFILES64 "" +2 0
+    StrCpy $INSTDIR "$PROGRAMFILES64\Quoroom"
+
+  Push $INSTDIR
+  Push "\AppData\Local\Temp\"
+  Call StrContains
+  Pop $0
+  StrCmp $0 "" +2 0
+    StrCpy $INSTDIR "$PROGRAMFILES\Quoroom"
+
+  Push $INSTDIR
+  Push "\Temp\quoroom-"
+  Call StrContains
+  Pop $0
+  StrCmp $0 "" +2 0
+    StrCpy $INSTDIR "$PROGRAMFILES\Quoroom"
+FunctionEnd
+
+Function un.onInit
+  SetRegView 64
+FunctionEnd
+
 ; Launch automatically when the user leaves the Finish page.
 Function FinishPageLeave
   Call LaunchQuoroom
@@ -134,9 +164,10 @@ FunctionEnd
 Function CreateLauncherScript
   FileOpen $0 "$INSTDIR\bin\quoroom-launch.vbs" w
   FileWrite $0 "Set shell = CreateObject($\"WScript.Shell$\")$\r$\n"
+  FileWrite $0 "Set app = CreateObject($\"Shell.Application$\")$\r$\n"
   FileWrite $0 "Set fso = CreateObject($\"Scripting.FileSystemObject$\")$\r$\n"
   FileWrite $0 "scriptDir = fso.GetParentFolderName(WScript.ScriptFullName)$\r$\n"
-  FileWrite $0 "cmdPath = scriptDir & $\"\\quoroom.cmd$\"$\r$\n"
+  FileWrite $0 "psPath = scriptDir & $\"\\quoroom-tray.ps1$\"$\r$\n"
   FileWrite $0 "url = $\"http://localhost:3700$\"$\r$\n"
   FileWrite $0 "$\r$\n"
   FileWrite $0 "Function IsQuoroomHealthy(baseUrl)$\r$\n"
@@ -154,18 +185,91 @@ Function CreateLauncherScript
   FileWrite $0 "End Function$\r$\n"
   FileWrite $0 "$\r$\n"
   FileWrite $0 "If IsQuoroomHealthy(url) Then$\r$\n"
-  FileWrite $0 "  shell.Run url, 1, False$\r$\n"
+  FileWrite $0 "  app.ShellExecute url, $\"$\", $\"$\", $\"open$\", 1$\r$\n"
   FileWrite $0 "  WScript.Quit 0$\r$\n"
   FileWrite $0 "End If$\r$\n"
   FileWrite $0 "$\r$\n"
-  FileWrite $0 "command = Chr(34) & cmdPath & Chr(34) & $\" serve --port 3700$\"$\r$\n"
-  FileWrite $0 "shell.Run command, 0, False$\r$\n"
-  FileWrite $0 "For i = 1 To 10$\r$\n"
-  FileWrite $0 "  If IsQuoroomHealthy(url) Then Exit For$\r$\n"
+  FileWrite $0 "args = $\"-NoProfile -STA -ExecutionPolicy Bypass -WindowStyle Hidden -File $\" & Chr(34) & psPath & Chr(34)$\r$\n"
+  FileWrite $0 "app.ShellExecute $\"powershell.exe$\", args, $\"$\", $\"open$\", 0$\r$\n"
+  FileWrite $0 "For i = 1 To 45$\r$\n"
   FileWrite $0 "  WScript.Sleep 1000$\r$\n"
+  FileWrite $0 "  If IsQuoroomHealthy(url) Then$\r$\n"
+  FileWrite $0 "    app.ShellExecute url, $\"$\", $\"$\", $\"open$\", 1$\r$\n"
+  FileWrite $0 "    WScript.Quit 0$\r$\n"
+  FileWrite $0 "  End If$\r$\n"
   FileWrite $0 "Next$\r$\n"
-  FileWrite $0 "shell.Run url, 1, False$\r$\n"
+  FileWrite $0 "shell.Popup $\"Quoroom is still starting. Please open http://localhost:3700 in a few seconds.$\", 5, $\"Quoroom Server$\", 64$\r$\n"
   FileClose $0
+FunctionEnd
+
+Function CreateTrayScript
+  FileOpen $0 "$INSTDIR\bin\quoroom-tray.ps1" w
+  FileWrite $0 "Add-Type -AssemblyName System.Windows.Forms$\r$\n"
+  FileWrite $0 "Add-Type -AssemblyName System.Drawing$\r$\n"
+  FileWrite $0 "$$ErrorActionPreference = 'SilentlyContinue'$\r$\n"
+  FileWrite $0 "$$scriptDir = Split-Path -Parent $$MyInvocation.MyCommand.Path$\r$\n"
+  FileWrite $0 "$$cmdPath = Join-Path $$scriptDir 'quoroom.cmd'$\r$\n"
+  FileWrite $0 "$$iconPath = Join-Path $$scriptDir '..\ui\quoroom-server.ico'$\r$\n"
+  FileWrite $0 "$$url = 'http://localhost:3700'$\r$\n"
+  FileWrite $0 "$$mutexName = 'Local\QuoroomServerTrayV2'$\r$\n"
+  FileWrite $0 "$$createdNew = $$true$\r$\n"
+  FileWrite $0 "$$mutex = $$null$\r$\n"
+  FileWrite $0 "try {$\r$\n"
+  FileWrite $0 "  $$mutex = New-Object System.Threading.Mutex($$true, $$mutexName, [ref]$$createdNew)$\r$\n"
+  FileWrite $0 "} catch {$\r$\n"
+  FileWrite $0 "  $$createdNew = $$true$\r$\n"
+  FileWrite $0 "}$\r$\n"
+  FileWrite $0 "if (-not $$createdNew) {$\r$\n"
+  FileWrite $0 "  exit 0$\r$\n"
+  FileWrite $0 "}$\r$\n"
+  FileWrite $0 "function Test-QuoroomHealthy {$\r$\n"
+  FileWrite $0 "  try {$\r$\n"
+  FileWrite $0 "    $$res = Invoke-WebRequest -Uri ($$url + '/api/auth/handshake') -UseBasicParsing -TimeoutSec 1$\r$\n"
+  FileWrite $0 "    return $$res.StatusCode -eq 200$\r$\n"
+  FileWrite $0 "  } catch {$\r$\n"
+  FileWrite $0 "    return $$false$\r$\n"
+  FileWrite $0 "  }$\r$\n"
+  FileWrite $0 "}$\r$\n"
+  FileWrite $0 "if (-not (Test-QuoroomHealthy)) {$\r$\n"
+  FileWrite $0 "  Start-Process -FilePath $$cmdPath -ArgumentList @('serve', '--port', '3700') -WindowStyle Hidden$\r$\n"
+  FileWrite $0 "  for ($$i = 0; $$i -lt 15; $$i++) {$\r$\n"
+  FileWrite $0 "    Start-Sleep -Seconds 1$\r$\n"
+  FileWrite $0 "    if (Test-QuoroomHealthy) { break }$\r$\n"
+  FileWrite $0 "  }$\r$\n"
+  FileWrite $0 "}$\r$\n"
+  FileWrite $0 "$$notify = New-Object System.Windows.Forms.NotifyIcon$\r$\n"
+  FileWrite $0 "if (Test-Path $$iconPath) {$\r$\n"
+  FileWrite $0 "  $$notify.Icon = New-Object System.Drawing.Icon($$iconPath)$\r$\n"
+  FileWrite $0 "}$\r$\n"
+  FileWrite $0 "$$notify.Text = 'Quoroom Server'$\r$\n"
+  FileWrite $0 "$$notify.Visible = $$true$\r$\n"
+  FileWrite $0 "$$menu = New-Object System.Windows.Forms.ContextMenuStrip$\r$\n"
+  FileWrite $0 "$$openItem = $$menu.Items.Add('Open Quoroom')$\r$\n"
+  FileWrite $0 "$$hideItem = $$menu.Items.Add('Hide Tray Icon')$\r$\n"
+  FileWrite $0 "$$openItem.Add_Click({ Start-Process $$url })$\r$\n"
+  FileWrite $0 "$$hideItem.Add_Click({$\r$\n"
+  FileWrite $0 "  $$notify.Visible = $$false$\r$\n"
+  FileWrite $0 "  $$notify.Dispose()$\r$\n"
+  FileWrite $0 "  [System.Windows.Forms.Application]::Exit()$\r$\n"
+  FileWrite $0 "})$\r$\n"
+  FileWrite $0 "$$notify.ContextMenuStrip = $$menu$\r$\n"
+  FileWrite $0 "$$notify.Add_DoubleClick({ Start-Process $$url })$\r$\n"
+  FileWrite $0 "[System.Windows.Forms.Application]::Run()$\r$\n"
+  FileWrite $0 "$$notify.Visible = $$false$\r$\n"
+  FileWrite $0 "$$notify.Dispose()$\r$\n"
+  FileWrite $0 "if ($$mutex -ne $$null) {$\r$\n"
+  FileWrite $0 "  try { $$mutex.ReleaseMutex() | Out-Null } catch {}$\r$\n"
+  FileWrite $0 "  $$mutex.Dispose()$\r$\n"
+  FileWrite $0 "}$\r$\n"
+  FileClose $0
+FunctionEnd
+
+Function StopRunningQuoroom
+  InitPluginsDir
+  File "/oname=$PLUGINSDIR\quoroom-stop.ps1" "..\..\installers\windows\stop-quoroom.ps1"
+  nsExec::ExecToLog '"$SYSDIR\WindowsPowerShell\v1.0\powershell.exe" -NoProfile -ExecutionPolicy Bypass -File "$PLUGINSDIR\quoroom-stop.ps1" -InstallDir "$INSTDIR"'
+  Pop $0
+  Delete "$PLUGINSDIR\quoroom-stop.ps1"
 FunctionEnd
 
 ; StrContains - check if $1 is in $0 (push haystack, needle)
