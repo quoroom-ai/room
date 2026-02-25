@@ -154,8 +154,9 @@ function getEnvValue(envVar: string): string {
 }
 
 function checkCodexCliAvailable(): boolean {
+  const cmd = process.platform === 'win32' ? 'codex.cmd' : 'codex'
   try {
-    execSync('codex --version', { timeout: 5000, stdio: ['pipe', 'pipe', 'pipe'] })
+    execSync(`"${cmd}" --version`, { timeout: 5000, stdio: ['pipe', 'pipe', 'pipe'] })
     return true
   } catch {
     return false

@@ -121,11 +121,14 @@ async function executeCodex(options: AgentExecutionOptions): Promise<AgentExecut
 
     let proc: ReturnType<typeof spawn>
     try {
-      proc = spawn('codex', args, {
+      const codexCmd = process.platform === 'win32' ? 'codex.cmd' : 'codex'
+      proc = spawn(codexCmd, args, {
         cwd: homedir(),
         env: process.env,
         stdio: ['ignore', 'pipe', 'pipe'],
-        windowsHide: true
+        windowsHide: true,
+        // Windows needs shell:true to execute .cmd batch wrappers
+        shell: process.platform === 'win32',
       })
     } catch (err) {
       resolve({

@@ -1,6 +1,6 @@
 import { spawn, execSync } from 'child_process'
-import { existsSync } from 'fs'
-import { join } from 'path'
+import { existsSync, readFileSync } from 'fs'
+import { join, dirname } from 'path'
 import { homedir } from 'os'
 
 export interface ConsoleLogEvent {
@@ -41,6 +41,24 @@ export type ProgressCallback = (progress: ProgressUpdate) => void
 const DEFAULT_TIMEOUT_MS = 30 * 60 * 1000 // 30 minutes
 
 let cachedClaudePath: string | null = null
+
+/**
+ * For npm-installed .cmd wrappers on Windows, extract the underlying .js script
+ * path so we can spawn `node <script>` directly (avoids cmd.exe 8191-char limit).
+ */
+function resolveNodeScript(cmdPath: string): string | null {
+  if (process.platform !== 'win32' || !cmdPath.endsWith('.cmd')) return null
+  try {
+    const content = readFileSync(cmdPath, 'utf-8')
+    // npm .cmd wrappers end with: "%_prog%" "%dp0%\node_modules\...\cli.js" %*
+    const match = content.match(/%dp0%\\(.+?\.js)/)
+    if (match) {
+      const script = join(dirname(cmdPath), match[1])
+      if (existsSync(script)) return script
+    }
+  } catch { /* fall through */ }
+  return null
+}
 
 /**
  * Resolve the full path to the `claude` CLI binary.
@@ -194,14 +212,26 @@ export function executeClaudeCode(
 
     let proc: ReturnType<typeof spawn>
     try {
-      proc = spawn(claudePath, args, {
-        cwd: homedir(),
-        env,
-        stdio: ['ignore', 'pipe', 'pipe'],
-        windowsHide: true,
-        // Windows needs shell:true to execute .cmd batch wrappers from npm
-        shell: process.platform === 'win32',
-      })
+      // On Windows, .cmd wrappers need shell:true which has 8191-char cmd limit.
+      // Resolve to the underlying .js script and spawn node directly to bypass it.
+      const nodeScript = resolveNodeScript(claudePath)
+      if (nodeScript) {
+        proc = spawn(process.execPath, [nodeScript, ...args], {
+          cwd: homedir(),
+          env,
+          stdio: ['ignore', 'pipe', 'pipe'],
+          windowsHide: true,
+        })
+      } else {
+        proc = spawn(claudePath, args, {
+          cwd: homedir(),
+          env,
+          stdio: ['ignore', 'pipe', 'pipe'],
+          windowsHide: true,
+          // Windows needs shell:true to execute .cmd batch wrappers from npm
+          shell: process.platform === 'win32',
+        })
+      }
     } catch (err) {
       resolve({
         stdout: '',

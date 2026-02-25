@@ -9,7 +9,7 @@ import { checkExpiredDecisions } from './quorum'
 import { getRoomStatus } from './room'
 import { detectRateLimit, sleep } from './rate-limit'
 import { fetchPublicRooms, getRoomCloudId, listCloudStations, type PublicRoom, type CloudStation } from './cloud-sync'
-import { resolveApiKeyForModel } from './model-provider'
+import { resolveApiKeyForModel, getModelProvider } from './model-provider'
 import { createCycleLogBuffer, type CycleLogEntryCallback } from './console-log-buffer'
 import { QUEEN_TOOL_DEFINITIONS, executeQueenTool } from './queen-tools'
 import { WORKER_ROLE_PRESETS } from './constants'
@@ -246,6 +246,22 @@ export async function runCycle(
   options?.onCycleLifecycle?.('created', cycle.id, roomId)
 
   try {
+    // 0. PRE-FLIGHT: ensure API key is available for API-backed models
+    const provider = getModelProvider(model)
+    if (provider === 'openai_api' || provider === 'anthropic_api') {
+      const apiKeyCheck = resolveApiKeyForModel(db, roomId, model)
+      if (!apiKeyCheck) {
+        const label = provider === 'openai_api' ? 'OpenAI' : 'Anthropic'
+        const msg = `Missing ${label} API key. Set it in Room Settings or the Setup Guide.`
+        logBuffer.addSynthetic('error', msg)
+        logBuffer.flush()
+        queries.completeWorkerCycle(db, cycle.id, msg, undefined)
+        options?.onCycleLifecycle?.('failed', cycle.id, roomId)
+        queries.updateAgentState(db, worker.id, 'idle')
+        return msg
+      }
+    }
+
     // 1. OBSERVE
     queries.updateAgentState(db, worker.id, 'thinking')
     logBuffer.addSynthetic('system', `Cycle started — observing room state...`)

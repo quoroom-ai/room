@@ -141,7 +141,8 @@ describe('executeAgent', () => {
 
       expect(mockSpawn).toHaveBeenCalledOnce()
       const [bin, args] = mockSpawn.mock.calls[0]
-      expect(bin).toBe('codex')
+      const expectedBin = process.platform === 'win32' ? 'codex.cmd' : 'codex'
+      expect(bin).toBe(expectedBin)
       expect(args).toEqual(['exec', '--json', '--skip-git-repo-check', 'Hello'])
       expect(result.output).toBe('Hello from Codex')
       expect(result.exitCode).toBe(0)
@@ -162,7 +163,8 @@ describe('executeAgent', () => {
 
       expect(mockSpawn).toHaveBeenCalledOnce()
       const [bin, args] = mockSpawn.mock.calls[0]
-      expect(bin).toBe('codex')
+      const expectedBin = process.platform === 'win32' ? 'codex.cmd' : 'codex'
+      expect(bin).toBe(expectedBin)
       expect(args).toEqual([
         'exec',
         'resume',

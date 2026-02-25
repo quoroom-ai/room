@@ -105,6 +105,7 @@ describe('runCycle', () => {
 
   it('uses worker model for execution', async () => {
     queries.updateWorker(db, queenId, { model: 'openai:gpt-4o-mini' } as Parameters<typeof queries.updateWorker>[2])
+    queries.createCredential(db, roomId, 'openai_api_key', 'api_key', 'sk-test-key')
 
     const worker = queries.getWorker(db, queenId)!
     await runCycle(db, roomId, worker)
