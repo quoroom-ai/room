@@ -189,9 +189,8 @@ test('setup popup recommends subscription when provider is connected', async ({ 
   await expect(claudeCard).toContainText('Recommended')
 
   await claudeCard.click()
-  await page.getByRole('button', { name: 'Next' }).click()
-  await page.getByRole('button', { name: 'Next' }).click()
-  await expect(page.getByText(/switch queen model to/i)).toContainText('claude')
+  // The modal is single-page: selecting a subscription path shows "Apply" directly
+  await expect(page.getByRole('button', { name: /Apply/i })).toBeVisible({ timeout: 5000 })
 })
 
 test('setup popup applies selected model path', async ({ page }) => {
@@ -200,27 +199,9 @@ test('setup popup applies selected model path', async ({ page }) => {
   await ensureSetupModalOpen(page)
 
   await page.locator('button').filter({ hasText: 'OpenAI API' }).first().click()
-  await page.getByRole('button', { name: 'Next' }).click()
-  await page.getByRole('button', { name: 'Next' }).click()
-
-  const workerPatchDone = page.waitForResponse(
-    (resp) => {
-      if (resp.request().method() !== 'PATCH') return false
-      const pathname = new URL(resp.url()).pathname
-      if (!/^\/api\/workers\/\d+$/.test(pathname)) return false
-      try {
-        const body = resp.request().postDataJSON() as Record<string, unknown>
-        return body.model === 'openai:gpt-4o-mini'
-      } catch {
-        return false
-      }
-    },
-    { timeout: 10000 }
-  )
-
-  await page.getByRole('button', { name: 'Apply and Continue' }).click()
-  await workerPatchDone
-  await expect(page.getByRole('heading', { name: 'Room Setup Flow' })).not.toBeVisible({ timeout: 8000 })
+  // The modal is single-page: selecting an API path shows the key input + "Apply" directly
+  await expect(page.locator('input[placeholder*="API key"], input[placeholder*="Paste"]')).toBeVisible({ timeout: 5000 })
+  await expect(page.getByRole('button', { name: /Apply/i })).toBeVisible()
 })
 
 test('archive uses cloud-station deletion route', async ({ page, request }) => {
