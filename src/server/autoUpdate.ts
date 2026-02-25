@@ -257,6 +257,10 @@ export function getReadyUpdateVersion(): string | null {
 export async function checkAndApplyUpdate(bundleUrl: string, targetVersion: string): Promise<void> {
   if (downloadInProgress) return
 
+  // Don't downgrade or re-apply current version
+  const currentVersion = getCurrentVersion()
+  if (!semverGt(targetVersion, currentVersion)) return
+
   // Don't re-download if we already have this version staged
   const readyVersion = getReadyUpdateVersion()
   if (readyVersion && !semverGt(targetVersion, readyVersion)) return
