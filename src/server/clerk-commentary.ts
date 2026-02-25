@@ -42,8 +42,6 @@ interface LogEntry {
   timestamp: string
 }
 
-type CommentaryFormatMode = 'cinematic' | 'scoreboard' | 'timeline' | 'bullet'
-
 interface CommentaryGenerationResult {
   commentary: string | null
   usage: { inputTokens: number; outputTokens: number }
@@ -65,7 +63,6 @@ let lastAssistantReplyAt = 0
 let dbRef: Database.Database | null = null
 let generating = false
 let lastCommentary = '' // Track last output to avoid repetition
-let lastFormatMode: CommentaryFormatMode | null = null
 let commentaryCount = 0
 
 // Caches
@@ -324,46 +321,47 @@ function formatRawLogs(entries: LogEntry[]): string {
   ).filter(e => !isKeeperInputEcho(e.content))
   if (actionable.length === 0) return ''
 
-  // Group by worker (flatten rooms — room name shown inline on worker label)
-  const workers = new Map<string, { roomName: string; roomId: number; entries: LogEntry[] }>()
+  // Group by worker — use original room name (readable), simple worker label
+  const workers = new Map<string, { roomName: string; roomId: number; workerLabel: string; entries: LogEntry[] }>()
   for (const entry of actionable) {
-    const roomLabel = normalizeRoomLabel(entry.roomName)
-    const nick = dbRef ? getQueenNickname(dbRef, entry.roomId) : ''
-    const who = normalizeActorLabel(entry.workerName, roomLabel, nick)
-    const key = `${entry.roomId}:${who}`
-    if (!workers.has(key)) workers.set(key, { roomName: roomLabel, roomId: entry.roomId, entries: [] })
+    // Use simple labels: "queen" for queens, worker name for others
+    const workerLabel = entry.workerName && !entry.workerName.toLowerCase().includes('queen')
+      ? entry.workerName.toLowerCase().replace(/\s+/g, '-')
+      : 'queen'
+    const key = `${entry.roomId}:${workerLabel}`
+    if (!workers.has(key)) workers.set(key, { roomName: entry.roomName, roomId: entry.roomId, workerLabel, entries: [] })
     workers.get(key)!.entries.push(entry)
   }
 
   // Sort: most active first, queen last
   const sorted = [...workers.entries()].sort(([, a], [, b]) => {
-    const aIsQueen = (a.entries[0]?.workerName || 'queen') === 'queen'
-    const bIsQueen = (b.entries[0]?.workerName || 'queen') === 'queen'
-    if (aIsQueen && !bIsQueen) return 1
-    if (!aIsQueen && bIsQueen) return -1
+    if (a.workerLabel === 'queen' && b.workerLabel !== 'queen') return 1
+    if (a.workerLabel !== 'queen' && b.workerLabel === 'queen') return -1
     return b.entries.length - a.entries.length
   })
 
   const lines: string[] = []
-  for (const [, { roomName, roomId, entries: wEntries }] of sorted) {
-    const nick = dbRef ? getQueenNickname(dbRef, roomId) : ''
-    const who = normalizeActorLabel(wEntries[0]?.workerName || '', roomName, nick)
-    const label = `${who} in \`${roomName}\``
-    lines.push(`[${label}]`)
+  for (const [, { roomName, workerLabel, entries: wEntries }] of sorted) {
+    // Show step range for this worker
+    const steps = wEntries.map(e => e.seq).filter(s => s > 0)
+    const stepRange = steps.length > 0
+      ? ` (Steps ${Math.min(...steps)}-${Math.max(...steps)})`
+      : ''
+    lines.push(`[${workerLabel}${stepRange}, "${roomName}"]`)
     for (const entry of wEntries) {
+      const stepTag = entry.seq > 0 ? `Step ${entry.seq}: ` : ''
       switch (entry.entryType) {
         case 'tool_call':
-          lines.push(`  → ${humanizeToolCall(entry.content)}`)
+          lines.push(`  → ${stepTag}${humanizeToolCall(entry.content)}`)
           break
         case 'tool_result':
-          lines.push(`  ← ${sanitizeContent(entry.content.slice(0, 400))}`)
+          lines.push(`  ← ${stepTag}${sanitizeContent(entry.content.slice(0, 400))}`)
           break
         case 'result':
-          // Cycle final output — use as outcome context, truncated
-          lines.push(`  OUTCOME: ${sanitizeContent(entry.content.slice(0, 600))}`)
+          lines.push(`  OUTCOME: ${stepTag}${sanitizeContent(entry.content.slice(0, 600))}`)
           break
         case 'error':
-          lines.push(`  ERROR: ${sanitizeContent(entry.content.slice(0, 200))}`)
+          lines.push(`  ERROR: ${stepTag}${sanitizeContent(entry.content.slice(0, 200))}`)
           break
       }
     }
@@ -451,49 +449,12 @@ function emitRoomCommentaryEvents(entries: LogEntry[], commentary: string): void
   }
 }
 
-function countActorSections(rawLogs: string): number {
-  const matches = rawLogs.match(/^\[[^\n]+\]$/gm)
-  return matches?.length ?? 0
-}
-
-function pickFormatMode(rawLogs: string): CommentaryFormatMode {
-  const nonBulletModes: CommentaryFormatMode[] = ['cinematic', 'scoreboard', 'timeline']
-  const defaultMode = nonBulletModes[commentaryCount % nonBulletModes.length]
-  let selected = defaultMode
-  if (selected === lastFormatMode) {
-    const idx = nonBulletModes.indexOf(defaultMode)
-    selected = nonBulletModes[(idx + 1) % nonBulletModes.length]
-  }
-
-  const actorCount = countActorSections(rawLogs)
-  const allowBullet = actorCount >= 3 && commentaryCount > 0 && commentaryCount % 4 === 0 && lastFormatMode !== 'bullet'
-  return allowBullet ? 'bullet' : selected
-}
-
-function formatModeInstruction(mode: CommentaryFormatMode): string {
-  switch (mode) {
-    case 'cinematic':
-      return 'FORMAT MODE FOR THIS UPDATE: Cinematic narrative. No bullet list. Use 4-7 short lines with strong flow and clear turns.'
-    case 'scoreboard':
-      return 'FORMAT MODE FOR THIS UPDATE: Scoreboard snapshot. No bullet list. Use a short uppercase header, then compact metric-like lines, then verdict.'
-    case 'timeline':
-      return 'FORMAT MODE FOR THIS UPDATE: Play-by-play timeline. No bullet list. Use sequence-style lines that progress step-by-step.'
-    case 'bullet':
-      return 'FORMAT MODE FOR THIS UPDATE: Bullet board allowed. Keep to max 4 bullets, each meaningful. Add opener and closer lines.'
-  }
-}
-
 async function generateCommentary(rawLogs: string): Promise<CommentaryGenerationResult | null> {
   if (!dbRef) return null
-  const formatMode = pickFormatMode(rawLogs)
   const contextNote = lastCommentary
-    ? `\n\n--- Your previous update (DO NOT reuse the same opener, phrases, or sentence structure) ---\n${lastCommentary.slice(0, 400)}`
+    ? `\n\n--- Your previous update (DON'T repeat same opener or phrases) ---\n${lastCommentary.slice(0, 400)}`
     : ''
-  const antiRepeatNote = lastFormatMode
-    ? `\nPrevious format mode used: ${lastFormatMode}. Do NOT use it again now.`
-    : ''
-  const modeInstruction = formatModeInstruction(formatMode)
-  const prompt = `Here are the latest agent activity logs:\n\n${rawLogs}${contextNote}${antiRepeatNote}\n\n${modeInstruction}\n\nWrite your live commentary as the Clerk. Keep every sentence on its own line. Vary rhythm and sentence length. Avoid template repetition. Bullet points are allowed only when explicitly requested by the mode instruction.`
+  const prompt = `Here are the latest agent activity logs:\n\n${rawLogs}${contextNote}\n\nWrite your live commentary. Start with a bold **STATUS UPDATE** or **INCREDIBLE PROGRESS** header. Give each active worker their own narrative paragraph with bold name, step range, room name in quotes. Use flowing connected sentences, not one-per-line. Bold key actions, \`code\` for emails/URLs/domains. End with keeper analysis or score summary.`
   const preferredModel = queries.getSetting(dbRef, 'clerk_model') || DEFAULT_CLERK_MODEL
   const result = await executeClerkWithFallback({
     db: dbRef,
@@ -527,7 +488,6 @@ async function generateCommentary(rawLogs: string): Promise<CommentaryGeneration
       attempts: result.attempts.length + 1,
     }
   }
-  lastFormatMode = formatMode
   commentaryCount += 1
   return {
     commentary: normalizeCommentaryOutput(boldCaps(result.output.trim())),
@@ -835,7 +795,6 @@ export function stopCommentaryEngine(): void {
   generating = false
   lastAssistantReplyAt = 0
   lastCommentary = ''
-  lastFormatMode = null
   commentaryCount = 0
   roomNameCache.clear()
   queenNicknameCache.clear()
