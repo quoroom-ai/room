@@ -818,7 +818,8 @@ export function startServer(options: ServerOptions = {}): void {
       console.error(`Auth token: ${token.slice(0, 8)}...`)
 
       // Auto-open dashboard only in production builds.
-      if (process.env.NODE_ENV === 'production' && deploymentMode !== 'cloud') {
+      // QUOROOM_NO_AUTO_OPEN is set by the macOS tray app which manages browser opening itself.
+      if (process.env.NODE_ENV === 'production' && deploymentMode !== 'cloud' && !process.env.QUOROOM_NO_AUTO_OPEN) {
         const cmd = process.platform === 'darwin' ? 'open'
           : process.platform === 'win32' ? 'start'
           : 'xdg-open'

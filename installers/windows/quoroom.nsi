@@ -164,6 +164,7 @@ Function CreateLauncherScript
   FileWrite $0 "  If IsQuoroomHealthy(url) Then Exit For$\r$\n"
   FileWrite $0 "  WScript.Sleep 1000$\r$\n"
   FileWrite $0 "Next$\r$\n"
+  FileWrite $0 "WScript.Sleep 10000$\r$\n"
   FileWrite $0 "shell.Run url, 1, False$\r$\n"
   FileClose $0
 FunctionEnd

@@ -71,6 +71,18 @@ jobs:
       - name: Build
         run: npm run build
 
+      - name: Compile macOS tray app (universal)
+        run: |
+          swiftc -O -target arm64-apple-macos11.0 \
+            -o QuoroomTray-arm64 \
+            installers/macos/QuoroomTray.swift
+          swiftc -O -target x86_64-apple-macos11.0 \
+            -o QuoroomTray-x86_64 \
+            installers/macos/QuoroomTray.swift
+          lipo -create QuoroomTray-arm64 QuoroomTray-x86_64 -output QuoroomTray
+          rm QuoroomTray-arm64 QuoroomTray-x86_64
+          file QuoroomTray
+
       - name: Build universal native deps
         working-directory: out/mcp
         run: |
@@ -181,6 +193,9 @@ jobs:
           cp -r out/mcp/* staging/quoroom/lib/
           cp -r out/ui/* staging/quoroom/ui/
 
+          # Copy tray binary for postinstall to use
+          cp QuoroomTray staging/quoroom/ui/QuoroomTray
+
           tar czf "quoroom-v${VERSION}-darwin-universal.tar.gz" -C staging quoroom
 
       - name: Create lightweight update bundle
@@ -266,6 +281,13 @@ jobs:
             --entitlements installers/macos/node-entitlements.plist \
             --sign "Developer ID Application: Myroslava Bune (BYZMJXLL2N)" \
             staging/quoroom/runtime/node
+
+      - name: Codesign tray app
+        if: steps.certs.outputs.has_app_cert == 'true'
+        run: |
+          codesign --force --options runtime --timestamp \
+            --sign "Developer ID Application: Myroslava Bune (BYZMJXLL2N)" \
+            staging/quoroom/ui/QuoroomTray
 
       - name: Verify codesigned runtime
         run: |
