@@ -17,6 +17,7 @@ export interface ModelAuthStatus {
   hasCredential: boolean
   hasEnvKey: boolean
   ready: boolean
+  maskedKey: string | null
 }
 
 export function normalizeModel(model: string | null | undefined): string {
@@ -57,7 +58,8 @@ export async function getModelAuthStatus(db: Database.Database, roomId: number, 
     envVar: null,
     hasCredential: false,
     hasEnvKey: false,
-    ready
+    ready,
+    maskedKey: null
   }
 }
 
@@ -84,6 +86,7 @@ function resolveApiAuthStatus(
   const clerkCred = getClerkCredential(db, credentialName)
   const envKey = getEnvValue(envVar)
   const hasCredential = Boolean(roomCred || sharedRoomCred || clerkCred)
+  const activeKey = roomCred || sharedRoomCred || clerkCred || envKey || null
   return {
     provider,
     mode: 'api',
@@ -91,8 +94,16 @@ function resolveApiAuthStatus(
     envVar,
     hasCredential,
     hasEnvKey: Boolean(envKey),
-    ready: Boolean(hasCredential || envKey)
+    ready: Boolean(hasCredential || envKey),
+    maskedKey: maskKey(activeKey)
   }
+}
+
+function maskKey(key: string | null): string | null {
+  if (!key) return null
+  const trimmed = key.trim()
+  if (trimmed.length <= 8) return `${trimmed.slice(0, 3)}...`
+  return `${trimmed.slice(0, 7)}...${trimmed.slice(-4)}`
 }
 
 function resolveApiKey(db: Database.Database, roomId: number, credentialName: string, envVar: string): string | undefined {

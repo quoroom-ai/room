@@ -59,7 +59,9 @@ function resolveClaudePath(): string | null {
         join(home, 'AppData', 'Local', 'Programs', 'claude-code', 'claude.exe'),
         join(home, 'AppData', 'Local', 'Claude', 'claude.exe'),
         join(home, 'AppData', 'Local', 'Microsoft', 'WinGet', 'Links', 'claude.exe'),
-        'C:\\Program Files\\Claude\\claude.exe'
+        'C:\\Program Files\\Claude\\claude.exe',
+        // npm global install creates .cmd wrappers, not .exe
+        join(home, 'AppData', 'Roaming', 'npm', 'claude.cmd'),
       ]
     : [
         join(home, '.local', 'bin', 'claude'),
@@ -196,7 +198,9 @@ export function executeClaudeCode(
         cwd: homedir(),
         env,
         stdio: ['ignore', 'pipe', 'pipe'],
-        windowsHide: true
+        windowsHide: true,
+        // Windows needs shell:true to execute .cmd batch wrappers from npm
+        shell: process.platform === 'win32',
       })
     } catch (err) {
       resolve({

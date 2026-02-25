@@ -31,6 +31,7 @@ interface QueenStatus {
     hasCredential: boolean
     hasEnvKey: boolean
     ready: boolean
+    maskedKey: string | null
   }
 }
 
@@ -752,11 +753,11 @@ export function RoomSettingsPanel({ roomId }: RoomSettingsPanelProps): React.JSX
     setQueenModel(prev => ({ ...prev, [room.id]: dbModel }))
     // Set auth optimistically so API key row appears immediately
     if (model.startsWith('openai:')) {
-      setQueenAuth(prev => ({ ...prev, [room.id]: { provider: 'openai_api', mode: 'api', credentialName: 'openai_api_key', envVar: 'OPENAI_API_KEY', hasCredential: false, hasEnvKey: false, ready: false } }))
+      setQueenAuth(prev => ({ ...prev, [room.id]: { provider: 'openai_api', mode: 'api', credentialName: 'openai_api_key', envVar: 'OPENAI_API_KEY', hasCredential: false, hasEnvKey: false, ready: false, maskedKey: null } }))
     } else if (model.startsWith('anthropic:')) {
-      setQueenAuth(prev => ({ ...prev, [room.id]: { provider: 'anthropic_api', mode: 'api', credentialName: 'anthropic_api_key', envVar: 'ANTHROPIC_API_KEY', hasCredential: false, hasEnvKey: false, ready: false } }))
+      setQueenAuth(prev => ({ ...prev, [room.id]: { provider: 'anthropic_api', mode: 'api', credentialName: 'anthropic_api_key', envVar: 'ANTHROPIC_API_KEY', hasCredential: false, hasEnvKey: false, ready: false, maskedKey: null } }))
     } else {
-      setQueenAuth(prev => ({ ...prev, [room.id]: { provider: 'claude_subscription', mode: 'subscription', credentialName: null, envVar: null, hasCredential: false, hasEnvKey: false, ready: true } }))
+      setQueenAuth(prev => ({ ...prev, [room.id]: { provider: 'claude_subscription', mode: 'subscription', credentialName: null, envVar: null, hasCredential: false, hasEnvKey: false, ready: true, maskedKey: null } }))
     }
     pendingModelUpdate.current = true
     setQueenModelBusyRoomId(room.id)
@@ -1857,12 +1858,27 @@ export function RoomSettingsPanel({ roomId }: RoomSettingsPanelProps): React.JSX
       {showSetupGuide && (
         <RoomSetupGuideModal
           roomName={room.name}
+          roomId={room.id}
           currentModel={queenModelValue}
           claude={providerStatus?.claude ? { installed: providerStatus.claude.installed, connected: providerStatus.claude.connected } : null}
           codex={providerStatus?.codex ? { installed: providerStatus.codex.installed, connected: providerStatus.codex.connected } : null}
           queenAuth={activeQueenAuth}
-          onApplyModel={async (model) => {
-            await handleSetQueenModel(room, model)
+          providerAuthSessions={providerAuthSessions}
+          providerInstallSessions={providerInstallSessions}
+          onInstall={async (provider) => { await handleProviderInstall(room, provider) }}
+          onConnect={async (provider) => { await handleProviderConnect(room, provider) }}
+          onDisconnect={async (provider) => { await handleProviderDisconnect(room, provider) }}
+          onCancelAuth={async (sessionId) => { await handleProviderAuthCancel(room, sessionId) }}
+          onCancelInstall={async (sessionId) => { await handleProviderInstallCancel(room, sessionId) }}
+          onRefreshProviders={refreshProviderStatus}
+          onApplyModel={async (model) => { await handleSetQueenModel(room, model) }}
+          onSaveApiKey={async (credentialName, key) => {
+            await api.credentials.validate(room.id, credentialName, key)
+            await api.credentials.create(room.id, credentialName, key, 'api_key')
+            const q = await api.rooms.queenStatus(room.id).catch(() => null)
+            if (q) {
+              setQueenAuth(prev => ({ ...prev, [room.id]: q.auth }))
+            }
           }}
           onClose={() => setShowSetupGuide(false)}
         />

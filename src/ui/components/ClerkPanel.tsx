@@ -505,7 +505,7 @@ export function ClerkPanel({ setupLaunchKey = 0 }: ClerkPanelProps): React.JSX.E
       setCommentaryEnabled(clerkStatus.commentaryEnabled ?? true)
       setCommentaryMode(clerkStatus.commentaryMode ?? 'auto')
       setCommentaryPace(clerkStatus.commentaryPace ?? 'light')
-      if (!clerkStatus.model && !clerkStatus.configured && initialLoaded) {
+      if (initialLoaded && (!clerkStatus.model && !clerkStatus.configured)) {
         setShowSetup(true)
       }
     }
@@ -526,6 +526,10 @@ export function ClerkPanel({ setupLaunchKey = 0 }: ClerkPanelProps): React.JSX.E
   useEffect(() => {
     loadingRef.current = loading
   }, [loading])
+
+  // Compute connection status once for use across the component
+  const connectionStatus = getModelConnectionStatus(clerkModel, providerStatus ?? null, clerkStatus?.apiAuth ?? null)
+  const isConnected = connectionStatus.connected === true
 
   const pingPresence = useCallback(async (): Promise<void> => {
     try {
@@ -783,23 +787,21 @@ export function ClerkPanel({ setupLaunchKey = 0 }: ClerkPanelProps): React.JSX.E
               {clerkModel}
             </span>
           )}
-          {(() => {
-            const status = getModelConnectionStatus(clerkModel, providerStatus ?? null, clerkStatus?.apiAuth ?? null)
-            if (!status.label) return null
-            const dotColor = status.connected === true
+          {connectionStatus.label && (() => {
+            const dotColor = connectionStatus.connected === true
               ? 'bg-status-success'
-              : status.connected === false
+              : connectionStatus.connected === false
                 ? 'bg-status-error'
                 : 'bg-text-muted animate-pulse'
-            const textColor = status.connected === true
+            const textColor = connectionStatus.connected === true
               ? 'text-status-success'
-              : status.connected === false
+              : connectionStatus.connected === false
                 ? 'text-status-error'
                 : 'text-text-muted'
             return (
               <span className={`flex items-center gap-1 text-[14px] ${textColor}`}>
                 <span className={`inline-block w-1.5 h-1.5 rounded-full ${dotColor}`} />
-                {status.label}
+                {connectionStatus.label}
               </span>
             )
           })()}
@@ -853,9 +855,21 @@ export function ClerkPanel({ setupLaunchKey = 0 }: ClerkPanelProps): React.JSX.E
         <div className="max-w-[880px] mx-auto px-5 py-5">
         {messages.length === 0 && !loading ? (
           <div className="text-text-muted text-[16px] py-8 text-center">
-            {clerkModel
+            {clerkModel && isConnected
               ? 'Your Clerk is ready. Ask anything or wait for commentary...'
-              : 'Connect a model to start using your Clerk.'}
+              : clerkModel && connectionStatus.connected === null
+                ? 'Checking connection...'
+                : (
+                  <>
+                    <div className="mb-3">{clerkModel ? `Your model (${clerkModel}) is not connected.` : 'Connect a model to start using your Clerk.'}</div>
+                    <button
+                      onClick={() => setShowSetup(true)}
+                      className="inline-flex items-center px-4 py-2 rounded-lg border border-interactive text-interactive hover:bg-interactive hover:text-text-invert text-[15px] font-medium transition-colors"
+                    >
+                      Setup
+                    </button>
+                  </>
+                )}
           </div>
         ) : (
           messages.map((msg) => {
@@ -931,13 +945,13 @@ export function ClerkPanel({ setupLaunchKey = 0 }: ClerkPanelProps): React.JSX.E
           value={input}
           onChange={(e) => setInput(e.target.value)}
           onKeyDown={(e) => { if (e.key === 'Enter') handleSend() }}
-          disabled={loading || !clerkModel}
-          placeholder={clerkModel ? 'Ask your clerk anything...' : 'Connect a model first...'}
+          disabled={loading || !clerkModel || !isConnected}
+          placeholder={!clerkModel ? 'Connect a model first...' : !isConnected ? 'Model not connected — open Setup...' : 'Ask your clerk anything...'}
           className="flex-1 px-4 py-3 text-[16px] border border-border-primary rounded-lg focus:outline-none focus:border-interactive bg-surface-secondary text-text-primary disabled:opacity-50"
         />
         <button
           onClick={handleSend}
-          disabled={loading || !input.trim() || !clerkModel}
+          disabled={loading || !input.trim() || !clerkModel || !isConnected}
           className="px-5 py-3 text-[16px] bg-interactive text-text-invert rounded-lg hover:bg-interactive-hover disabled:opacity-50 disabled:cursor-not-allowed shrink-0 transition-colors"
         >
           Send

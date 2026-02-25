@@ -251,6 +251,41 @@ export function ClerkSetupGuide({
   const authSession = selectedProvider ? (providerAuthSessions[selectedProvider] ?? null) : null
   const installSession = selectedProvider ? (providerInstallSessions[selectedProvider] ?? null) : null
 
+  // Auto-install CLI when a subscription path is selected and CLI is not installed
+  const autoTriggeredRef = useRef<string | null>(null)
+  useEffect(() => {
+    if (!selectedProvider || !providerSignal) return
+    if (providerBusy) return
+    const key = `install:${selectedProvider}`
+    if (autoTriggeredRef.current === key) return
+    if (!providerSignal.installed && !installSession?.active) {
+      autoTriggeredRef.current = key
+      void (async () => {
+        setProviderBusy(true)
+        try { await onInstall(selectedProvider) } catch { /* shown in session log */ }
+        finally { setProviderBusy(false) }
+      })()
+    }
+  }, [selectedProvider, providerSignal?.installed, installSession?.active])
+
+  // Auto-connect after install completes
+  useEffect(() => {
+    if (!selectedProvider || !providerSignal) return
+    if (providerBusy) return
+    const key = `connect:${selectedProvider}`
+    if (autoTriggeredRef.current === key) return
+    if (providerSignal.installed && providerSignal.connected !== true && !authSession?.active) {
+      if (installSession && installSession.status === 'completed') {
+        autoTriggeredRef.current = key
+        void (async () => {
+          setProviderBusy(true)
+          try { await onConnect(selectedProvider) } catch { /* shown in session log */ }
+          finally { setProviderBusy(false) }
+        })()
+      }
+    }
+  }, [selectedProvider, providerSignal?.installed, providerSignal?.connected, installSession?.status, authSession?.active])
+
   async function handleProviderAction(action: () => Promise<void>): Promise<void> {
     setProviderBusy(true)
     setError(null)
@@ -295,11 +330,11 @@ export function ClerkSetupGuide({
       className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 px-4"
       onClick={(e) => { if (e.target === e.currentTarget && !busy) onClose() }}
     >
-      <div className="w-full max-w-2xl max-h-[90vh] rounded-2xl bg-surface-primary shadow-2xl p-6 flex flex-col overflow-hidden">
-        <div className="flex items-center justify-between gap-3 mb-4 shrink-0">
+      <div className="w-full max-w-2xl max-h-[90vh] rounded-2xl bg-surface-primary shadow-2xl p-5 flex flex-col overflow-hidden">
+        <div className="flex items-center justify-between gap-3 mb-3 shrink-0">
           <div>
-            <h2 className="text-xl font-semibold text-text-primary">Connect Your Clerk</h2>
-            <p className="text-sm text-text-muted">Choose a model to power your personal assistant.</p>
+            <h2 className="text-lg font-semibold text-text-primary">Connect Your Clerk</h2>
+            <p className="text-xs text-text-muted">Choose a model to power your personal assistant.</p>
           </div>
           <button
             onClick={onClose}
@@ -312,19 +347,14 @@ export function ClerkSetupGuide({
         </div>
 
         <div className="flex-1 overflow-y-auto min-h-0">
-          <div className="space-y-3">
-            <div className="rounded-xl border border-border-primary bg-surface-secondary p-3 text-sm text-text-secondary">
-              <p className="font-medium text-text-primary mb-1">Who is the Clerk?</p>
-              <p>
-                Clerk is your global operator assistant. It can control rooms for you (create, update, pause, restart,
-                delete), message rooms on your behalf, and run reminders/tasks. It also gives live commentary when you
-                are idle.
-              </p>
+          <div className="space-y-2">
+            <div className="rounded-lg border border-border-primary bg-surface-secondary px-3 py-2 text-xs text-text-secondary">
+              <span className="font-medium text-text-primary">Clerk</span> is your global operator assistant — controls rooms, messages on your behalf, runs tasks, and gives live commentary.
             </div>
-            <p className="text-sm text-text-secondary">
+            <p className="text-xs text-text-secondary">
               Pick a model path. The Clerk will use this to chat, commentate, and manage your system.
             </p>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
               {PATHS.map((path) => {
                 const isRecommended = path.id === recommendedId
                 const isSelected = path.id === selectedPathId
@@ -338,21 +368,21 @@ export function ClerkSetupGuide({
                       setError(null)
                     }}
                     disabled={busy}
-                    className={`text-left p-3 rounded-xl border transition-colors ${
+                    className={`text-left px-3 py-2 rounded-lg border transition-colors ${
                       isSelected
                         ? 'border-interactive bg-interactive-bg'
                         : 'border-border-primary bg-surface-secondary hover:bg-surface-hover'
                     }`}
                   >
-                    <div className="flex items-center gap-2 mb-1">
-                      <span className="text-sm font-semibold text-text-primary">{path.title}</span>
+                    <div className="flex items-center gap-2 mb-0.5">
+                      <span className="text-xs font-semibold text-text-primary">{path.title}</span>
                       {isRecommended && (
                         <span className="text-[10px] px-1.5 py-0.5 rounded bg-status-success-bg text-status-success font-semibold">
                           Recommended
                         </span>
                       )}
                     </div>
-                    <p className="text-xs text-text-muted mb-1">{path.summary}</p>
+                    <p className="text-[11px] text-text-muted mb-0.5">{path.summary}</p>
                     <span className={`text-xs font-medium ${status.ready ? 'text-status-success' : 'text-text-muted'} ${status.label === 'wait. checking...' ? 'animate-pulse' : ''}`}>
                       {status.label}
                     </span>
@@ -366,8 +396,8 @@ export function ClerkSetupGuide({
             const path = PATHS.find(p => p.id === selectedPathId)!
             const status = getPathStatus(selectedPathId, claude, codex, apiAuth)
             return (
-              <div className="mt-4 p-3 rounded-lg bg-surface-secondary border border-border-primary">
-                <div className="text-sm text-text-secondary space-y-1">
+              <div className="mt-2 px-3 py-2 rounded-lg bg-surface-secondary border border-border-primary">
+                <div className="text-xs text-text-secondary space-y-0.5">
                   <p><span className="text-text-muted">Best for:</span> {path.bestFor}</p>
                   <p><span className="text-text-muted">Setup:</span> {path.setup}</p>
                   <p><span className="text-text-muted">Tradeoff:</span> {path.tradeoff}</p>
@@ -540,18 +570,18 @@ export function ClerkSetupGuide({
           <p className="text-sm text-status-error mt-3 shrink-0">{error}</p>
         )}
 
-        <div className="flex justify-end gap-3 mt-5 shrink-0">
+        <div className="flex justify-end gap-2 mt-3 shrink-0">
           <button
             onClick={onClose}
             disabled={busy}
-            className="px-4 py-2 text-sm text-text-muted hover:text-text-secondary border border-border-primary rounded-lg disabled:opacity-50"
+            className="px-3 py-1.5 text-xs text-text-muted hover:text-text-secondary border border-border-primary rounded-lg disabled:opacity-50"
           >
             Cancel
           </button>
           <button
             onClick={handleApply}
             disabled={busy || !selectedPathId}
-            className="px-4 py-2 text-sm bg-interactive text-text-invert rounded-lg hover:bg-interactive-hover disabled:opacity-50 disabled:cursor-not-allowed"
+            className="px-3 py-1.5 text-xs bg-interactive text-text-invert rounded-lg hover:bg-interactive-hover disabled:opacity-50 disabled:cursor-not-allowed"
           >
             {busy ? 'Connecting...' : 'Connect Clerk'}
           </button>

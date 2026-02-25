@@ -316,6 +316,8 @@ export function startProviderAuthSession(provider: ProviderName): {
   const child = spawn(cmd.command, cmd.args, {
     stdio: ['pipe', 'pipe', 'pipe'],
     env: { ...process.env, CI: '1', FORCE_COLOR: '0' },
+    // Windows needs shell:true to execute .cmd batch wrappers (claude.cmd, codex.cmd)
+    shell: process.platform === 'win32',
   })
 
   const startedAt = nowIso()

@@ -20,7 +20,10 @@ export function getProviderCliCommand(
 
 export function safeExec(cmd: string, args: string[]): CommandResult {
   try {
-    const stdout = execFileSync(cmd, args, { timeout: CLI_PROBE_TIMEOUT_MS, stdio: ['ignore', 'pipe', 'pipe'] }).toString().trim()
+    const opts: Record<string, unknown> = { timeout: CLI_PROBE_TIMEOUT_MS, stdio: ['ignore', 'pipe', 'pipe'] }
+    // Windows needs shell:true to execute .cmd batch wrappers (e.g. claude.cmd)
+    if (process.platform === 'win32') opts.shell = true
+    const stdout = execFileSync(cmd, args, opts).toString().trim()
     return { ok: true, stdout, stderr: '' }
   } catch (err) {
     const e = err as { stdout?: Buffer; stderr?: Buffer; message?: string }

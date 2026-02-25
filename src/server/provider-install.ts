@@ -78,8 +78,13 @@ export function getProviderInstallCommand(
 
 function addGlobalNpmBinToPath(platform: NodeJS.Platform = process.platform): void {
   const npmCommand = getNpmCommand(platform)
+  const shell = platform === 'win32'
   try {
-    const npmBin = execFileSync(npmCommand, ['bin', '-g'], { timeout: 5000, stdio: ['ignore', 'pipe', 'ignore'] }).toString().trim()
+    // `npm bin -g` was removed in npm 9+; use `npm prefix -g` instead
+    const npmPrefix = execFileSync(npmCommand, ['prefix', '-g'], { timeout: 5000, stdio: ['ignore', 'pipe', 'ignore'], shell }).toString().trim()
+    if (!npmPrefix) return
+    // On Unix the binaries live in <prefix>/bin; on Windows they're directly in <prefix>
+    const npmBin = platform === 'win32' ? npmPrefix : path.join(npmPrefix, 'bin')
     if (!npmBin) return
     const currentPath = process.env.PATH || ''
     const parts = currentPath.split(path.delimiter).filter(Boolean)
@@ -277,6 +282,8 @@ export function startProviderInstallSession(provider: ProviderName): {
   const child = spawn(cmd.command, cmd.args, {
     stdio: ['pipe', 'pipe', 'pipe'],
     env: { ...process.env, CI: '1', FORCE_COLOR: '0' },
+    // Windows needs shell:true to execute .cmd batch wrappers (npm.cmd)
+    shell: process.platform === 'win32',
   })
 
   const startedAt = nowIso()
