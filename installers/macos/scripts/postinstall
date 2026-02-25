@@ -16,96 +16,22 @@ if [ -z "${CONSOLE_USER}" ] || [ "${CONSOLE_USER}" = "root" ]; then
 fi
 CONSOLE_UID="$(id -u "${CONSOLE_USER}" 2>/dev/null || true)"
 
-create_launcher_app() {
+install_launcher_app() {
   APPS_DIR="$1"
-  # Remove legacy launcher name to avoid duplicate Dock entries after upgrade.
+  LAUNCHER_SRC="/usr/local/lib/quoroom/launcher/Quoroom Server.app"
+
+  # Remove legacy launcher names to avoid duplicate Dock entries after upgrade.
   rm -rf "/Applications/Quoroom.app" "/Applications/Quoroom Server.app"
   if [ -n "${CONSOLE_USER}" ] && [ "${CONSOLE_USER}" != "root" ]; then
     rm -rf "/Users/${CONSOLE_USER}/Applications/Quoroom.app" "/Users/${CONSOLE_USER}/Applications/Quoroom Server.app"
   fi
 
-  APP_PATH="${APPS_DIR}/Quoroom Server.app"
-  APP_CONTENTS="${APP_PATH}/Contents"
-  APP_MACOS="${APP_CONTENTS}/MacOS"
-  APP_RESOURCES="${APP_CONTENTS}/Resources"
-  APP_EXEC="${APP_MACOS}/QuoroomServerLauncher"
-  ICON_SRC_SERVER="/usr/local/lib/quoroom/ui/quoroom-server.icns"
-  ICON_SRC_DEFAULT="/usr/local/lib/quoroom/ui/quoroom.icns"
-  if [ ! -f "${ICON_SRC_SERVER}" ] && [ -f "${HOME}/usr/local/lib/quoroom/ui/quoroom-server.icns" ]; then
-    ICON_SRC_SERVER="${HOME}/usr/local/lib/quoroom/ui/quoroom-server.icns"
-    ICON_SRC_DEFAULT="${HOME}/usr/local/lib/quoroom/ui/quoroom.icns"
-  fi
-  ICON_DST="${APP_RESOURCES}/quoroom-server.icns"
-
-  mkdir -p "${APP_MACOS}" "${APP_RESOURCES}"
-
-  # Copy the pre-compiled tray binary into the .app bundle.
-  TRAY_SRC="/usr/local/lib/quoroom/ui/QuoroomTray"
-  if [ ! -f "${TRAY_SRC}" ] && [ -f "${HOME}/usr/local/lib/quoroom/ui/QuoroomTray" ]; then
-    TRAY_SRC="${HOME}/usr/local/lib/quoroom/ui/QuoroomTray"
-  fi
-  if [ -f "${TRAY_SRC}" ]; then
-    cp -f "${TRAY_SRC}" "${APP_EXEC}"
+  # Copy pre-built, signed .app bundle (ditto preserves code signatures).
+  if [ -d "${LAUNCHER_SRC}" ]; then
+    ditto "${LAUNCHER_SRC}" "${APPS_DIR}/Quoroom Server.app"
   else
-    # Fallback: minimal bash launcher (same health-check pattern).
-    cat > "${APP_EXEC}" << 'APP'
-#!/bin/bash
-PORT="${QUOROOM_PORT:-3700}"
-URL="http://localhost:${PORT}"
-BIN_PATH="/usr/local/lib/quoroom/bin/quoroom"
-if [ ! -x "${BIN_PATH}" ] && [ -x "${HOME}/usr/local/lib/quoroom/bin/quoroom" ]; then
-  BIN_PATH="${HOME}/usr/local/lib/quoroom/bin/quoroom"
-fi
-LOG_DIR="${HOME}/Library/Logs/Quoroom"
-LOG_FILE="${LOG_DIR}/server.log"
-mkdir -p "${LOG_DIR}"
-is_quoroom_healthy() {
-  CODE="$(curl -sS -m 1 -o /dev/null -w "%{http_code}" "${URL}/api/auth/handshake" 2>/dev/null || true)"
-  [ "${CODE}" = "200" ]
-}
-if is_quoroom_healthy; then open "${URL}"; exit 0; fi
-QUOROOM_NO_AUTO_OPEN=1 nohup "${BIN_PATH}" serve --port "${PORT}" >> "${LOG_FILE}" 2>&1 &
-for _ in 1 2 3 4 5 6 7 8 9 10; do
-  if is_quoroom_healthy; then break; fi
-  sleep 1
-done
-open "${URL}"
-APP
+    echo "Warning: pre-built launcher not found at ${LAUNCHER_SRC}" >&2
   fi
-  chmod 755 "${APP_EXEC}"
-
-  if [ -f "${ICON_SRC_SERVER}" ]; then
-    cp -f "${ICON_SRC_SERVER}" "${ICON_DST}"
-  elif [ -f "${ICON_SRC_DEFAULT}" ]; then
-    cp -f "${ICON_SRC_DEFAULT}" "${ICON_DST}"
-  fi
-
-  cat > "${APP_CONTENTS}/Info.plist" << 'PLIST'
-<?xml version="1.0" encoding="UTF-8"?>
-<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<plist version="1.0">
-  <dict>
-    <key>CFBundleDisplayName</key>
-    <string>Quoroom Server</string>
-    <key>CFBundleExecutable</key>
-    <string>QuoroomServerLauncher</string>
-    <key>CFBundleIdentifier</key>
-    <string>ai.quoroom.server-launcher</string>
-    <key>CFBundleName</key>
-    <string>Quoroom Server</string>
-    <key>CFBundleIconFile</key>
-    <string>quoroom-server.icns</string>
-    <key>CFBundlePackageType</key>
-    <string>APPL</string>
-    <key>CFBundleShortVersionString</key>
-    <string>1.0</string>
-    <key>LSMinimumSystemVersion</key>
-    <string>11.0</string>
-    <key>LSUIElement</key>
-    <true/>
-  </dict>
-</plist>
-PLIST
 }
 
 LAUNCHER_APPS_DIR="/Applications"
@@ -117,7 +43,7 @@ if [ ! -w "${LAUNCHER_APPS_DIR}" ]; then
   fi
 fi
 mkdir -p "${LAUNCHER_APPS_DIR}" 2>/dev/null || true
-create_launcher_app "${LAUNCHER_APPS_DIR}"
+install_launcher_app "${LAUNCHER_APPS_DIR}"
 if [ -n "${CONSOLE_USER}" ] && [ "${CONSOLE_USER}" != "root" ]; then
   chown -R "${CONSOLE_USER}" "${LAUNCHER_APPS_DIR}/Quoroom Server.app" 2>/dev/null || true
 fi

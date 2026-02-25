@@ -309,6 +309,57 @@ jobs:
             fi
           done < <(find staging/quoroom/lib -type f \( -name '*.node' -o -name '*.dylib' \) -print0)
 
+      - name: Build launcher .app bundle
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          APP="staging/quoroom/launcher/Quoroom Server.app"
+          mkdir -p "${APP}/Contents/MacOS" "${APP}/Contents/Resources"
+
+          cp staging/quoroom/ui/QuoroomTray "${APP}/Contents/MacOS/QuoroomServerLauncher"
+          chmod 755 "${APP}/Contents/MacOS/QuoroomServerLauncher"
+
+          if [ -f staging/quoroom/ui/quoroom-server.icns ]; then
+            cp staging/quoroom/ui/quoroom-server.icns "${APP}/Contents/Resources/quoroom-server.icns"
+          elif [ -f staging/quoroom/ui/quoroom.icns ]; then
+            cp staging/quoroom/ui/quoroom.icns "${APP}/Contents/Resources/quoroom-server.icns"
+          fi
+
+          cat > "${APP}/Contents/Info.plist" << PLIST
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0">
+            <dict>
+              <key>CFBundleDisplayName</key>
+              <string>Quoroom Server</string>
+              <key>CFBundleExecutable</key>
+              <string>QuoroomServerLauncher</string>
+              <key>CFBundleIdentifier</key>
+              <string>ai.quoroom.server-launcher</string>
+              <key>CFBundleName</key>
+              <string>Quoroom Server</string>
+              <key>CFBundleIconFile</key>
+              <string>quoroom-server.icns</string>
+              <key>CFBundlePackageType</key>
+              <string>APPL</string>
+              <key>CFBundleShortVersionString</key>
+              <string>${VERSION}</string>
+              <key>CFBundleVersion</key>
+              <string>${VERSION}</string>
+              <key>LSMinimumSystemVersion</key>
+              <string>11.0</string>
+              <key>LSUIElement</key>
+              <true/>
+            </dict>
+          </plist>
+          PLIST
+
+      - name: Codesign launcher .app bundle
+        if: steps.certs.outputs.has_app_cert == 'true'
+        run: |
+          codesign --force --options runtime --timestamp \
+            --sign "Developer ID Application: Myroslava Bune (BYZMJXLL2N)" \
+            "staging/quoroom/launcher/Quoroom Server.app"
+
       - name: Build macOS installer (.pkg)
         run: |
           VERSION="${GITHUB_REF_NAME#v}"
