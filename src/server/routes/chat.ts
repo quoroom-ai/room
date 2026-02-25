@@ -45,16 +45,29 @@ export function registerChatRoutes(router: Router): void {
     const model = queen.model ?? 'claude'
     const apiKey = resolveApiKeyForModel(ctx.db, roomId, model)
 
-    // Execute with queen's system prompt + session continuity
-    const namePrefix = room.queenNickname ? `Your name is ${room.queenNickname}.\n\n` : ''
+    // Build a chat-oriented system prompt: keep queen identity but instruct
+    // conversational behaviour instead of autonomous cycle mode.
+    const namePrefix = room.queenNickname ? `Your name is ${room.queenNickname}. ` : ''
+    const chatSystemPrompt = `${namePrefix}You are the queen of the "${room.name}" room. The keeper (your human) is chatting with you.
+
+RULES FOR CHAT:
+- Be concise — 2-4 sentences unless the keeper asks for detail.
+- Answer what was asked. Do NOT dump a full status report unless requested.
+- Do NOT run tools or take autonomous actions unless the keeper asks you to.
+- Be friendly and natural, not formal or robotic.
+- If the keeper greets you, greet back briefly and ask what they need.
+
+You know your room's context: goal is "${room.goal || 'not set yet'}".`
+
     const result = await executeAgent({
       model,
       prompt: message,
-      systemPrompt: namePrefix + queen.systemPrompt,
+      systemPrompt: chatSystemPrompt,
       resumeSessionId: room.chatSessionId ?? undefined,
       apiKey,
       maxTurns: 10,
       timeoutMs: 3 * 60 * 1000, // 3 minutes
+      permissionMode: 'bypassPermissions',
     })
 
     if (result.exitCode !== 0 || result.timedOut) {
