@@ -100,6 +100,7 @@ function resolveClaudePath(): string | null {
   // Fall back to shell resolution
   const env = { ...process.env }
   delete env.ELECTRON_RUN_AS_NODE
+  delete env.CLAUDECODE
 
   if (isWindows) {
     // Use 'where' on Windows (equivalent of 'which')
@@ -146,6 +147,7 @@ export function checkClaudeCliAvailable(): { available: boolean; version?: strin
     }
     const env = { ...process.env }
     delete env.ELECTRON_RUN_AS_NODE
+  delete env.CLAUDECODE
     const version = execSync(`"${claudePath}" --version`, { encoding: 'utf-8', env, timeout: 5000 }).trim()
     return { available: true, version }
   } catch (err) {
@@ -175,6 +177,7 @@ export function executeClaudeCode(
 
     const env = { ...process.env }
     delete env.ELECTRON_RUN_AS_NODE
+  delete env.CLAUDECODE
 
     // Always use stream-json to capture session_id from result events
     const args = ['-p', prompt, '--output-format', 'stream-json', '--verbose']
