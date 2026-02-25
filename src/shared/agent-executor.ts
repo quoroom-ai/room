@@ -19,6 +19,7 @@ export interface AgentExecutionOptions {
   onConsoleLog?: ConsoleLogCallback
   allowedTools?: string
   disallowedTools?: string
+  permissionMode?: 'default' | 'acceptEdits' | 'bypassPermissions' | 'plan'
   // API queen tool-calling support
   toolDefs?: ToolDef[]
   onToolCall?: (name: string, args: Record<string, unknown>) => Promise<string>
@@ -107,6 +108,7 @@ async function executeClaude(options: AgentExecutionOptions): Promise<AgentExecu
     maxTurns: options.maxTurns,
     allowedTools: options.allowedTools,
     disallowedTools: options.disallowedTools,
+    permissionMode: options.permissionMode,
     onProgress: options.onProgress,
     onConsoleLog: options.onConsoleLog,
     resumeSessionId: options.resumeSessionId,

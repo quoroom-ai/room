@@ -244,6 +244,104 @@ describe('patchCodexConfig', () => {
   })
 })
 
+// ─── Helper: patchClaudeCodePermissions (extracted logic, tested directly) ────
+
+function patchClaudeCodePermissions(home: string): boolean {
+  const { existsSync: fExists, readFileSync: fRead, writeFileSync: fWrite } = require('node:fs')
+  const { join: pJoin } = require('node:path')
+  try {
+    const settingsPath = pJoin(home, '.claude', 'settings.json')
+    if (!fExists(settingsPath)) return false
+
+    let settings: Record<string, unknown> = {}
+    try { settings = JSON.parse(fRead(settingsPath, 'utf-8')) } catch { /* overwrite */ }
+
+    const perms = (settings.permissions as Record<string, unknown>) ?? {}
+    const allow = Array.isArray(perms.allow) ? [...perms.allow] as string[] : []
+
+    const pattern = 'mcp__quoroom__*'
+    if (allow.includes(pattern)) return false
+
+    allow.push(pattern)
+    perms.allow = allow
+    settings.permissions = perms
+    fWrite(settingsPath, JSON.stringify(settings, null, 2) + '\n')
+    return true
+  } catch {
+    return false
+  }
+}
+
+// ─── patchClaudeCodePermissions ──────────────────────────────────────────────
+
+describe('patchClaudeCodePermissions', () => {
+  it('returns false when settings.json does not exist', () => {
+    const fakeHome = join(tmpDir, 'no-claude-dir')
+    mkdirSync(fakeHome, { recursive: true })
+    expect(patchClaudeCodePermissions(fakeHome)).toBe(false)
+  })
+
+  it('adds mcp__quoroom__* to existing permissions.allow', () => {
+    const fakeHome = join(tmpDir, 'home-perms')
+    const claudeDir = join(fakeHome, '.claude')
+    mkdirSync(claudeDir, { recursive: true })
+    writeFileSync(join(claudeDir, 'settings.json'), JSON.stringify({
+      permissions: { allow: ['Bash(*)', 'Read(*)'] }
+    }))
+
+    const result = patchClaudeCodePermissions(fakeHome)
+    expect(result).toBe(true)
+
+    const settings = JSON.parse(readFileSync(join(claudeDir, 'settings.json'), 'utf-8'))
+    expect(settings.permissions.allow).toContain('mcp__quoroom__*')
+    expect(settings.permissions.allow).toContain('Bash(*)')  // preserves existing
+    expect(settings.permissions.allow).toContain('Read(*)')
+  })
+
+  it('returns false (no-op) when already present', () => {
+    const fakeHome = join(tmpDir, 'home-already')
+    const claudeDir = join(fakeHome, '.claude')
+    mkdirSync(claudeDir, { recursive: true })
+    writeFileSync(join(claudeDir, 'settings.json'), JSON.stringify({
+      permissions: { allow: ['Bash(*)', 'mcp__quoroom__*'] }
+    }))
+
+    expect(patchClaudeCodePermissions(fakeHome)).toBe(false)
+
+    // File unchanged
+    const settings = JSON.parse(readFileSync(join(claudeDir, 'settings.json'), 'utf-8'))
+    expect(settings.permissions.allow).toHaveLength(2)
+  })
+
+  it('creates permissions.allow array if missing', () => {
+    const fakeHome = join(tmpDir, 'home-no-perms')
+    const claudeDir = join(fakeHome, '.claude')
+    mkdirSync(claudeDir, { recursive: true })
+    writeFileSync(join(claudeDir, 'settings.json'), '{}')
+
+    patchClaudeCodePermissions(fakeHome)
+
+    const settings = JSON.parse(readFileSync(join(claudeDir, 'settings.json'), 'utf-8'))
+    expect(settings.permissions.allow).toEqual(['mcp__quoroom__*'])
+  })
+
+  it('preserves other settings keys', () => {
+    const fakeHome = join(tmpDir, 'home-other-keys')
+    const claudeDir = join(fakeHome, '.claude')
+    mkdirSync(claudeDir, { recursive: true })
+    writeFileSync(join(claudeDir, 'settings.json'), JSON.stringify({
+      permissions: { allow: ['Bash(*)'], additionalDirectories: ['/tmp'] },
+      someOtherSetting: true
+    }))
+
+    patchClaudeCodePermissions(fakeHome)
+
+    const settings = JSON.parse(readFileSync(join(claudeDir, 'settings.json'), 'utf-8'))
+    expect(settings.permissions.additionalDirectories).toEqual(['/tmp'])
+    expect(settings.someOtherSetting).toBe(true)
+  })
+})
+
 // ─── startServer MCP registration side-effect ────────────────────────────────
 
 describe('startServer — MCP registration', () => {

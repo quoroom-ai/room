@@ -707,6 +707,8 @@ This is NOT optional — every cycle must produce at least one skill report.`)
       onConsoleLog: logBuffer.onConsoleLog,
       // CLI models: block non-quoroom MCP tools (daymon, etc.)
       disallowedTools: isCli ? 'mcp__daymon*' : undefined,
+      // CLI models: bypass permission prompts for headless operation
+      permissionMode: isCli ? 'bypassPermissions' : undefined,
       // CLI models: pass resumeSessionId for native --resume
       resumeSessionId,
       // API models: pass conversation history + persistence callback

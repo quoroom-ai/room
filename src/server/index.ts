@@ -764,6 +764,37 @@ function patchCodexConfig(configPath: string, nodePath: string, mcpServerPath: s
 }
 
 /**
+ * Ensure Claude Code settings auto-approve quoroom MCP tools so headless queen
+ * sessions don't get stuck prompting for permission.
+ * Patches ~/.claude/settings.json → permissions.allow with "mcp__quoroom__*".
+ */
+function patchClaudeCodePermissions(home: string): boolean {
+  try {
+    const settingsPath = path.join(home, '.claude', 'settings.json')
+    if (!fs.existsSync(settingsPath)) return false
+
+    let settings: Record<string, unknown> = {}
+    try {
+      settings = JSON.parse(fs.readFileSync(settingsPath, 'utf-8'))
+    } catch { /* invalid JSON — overwrite */ }
+
+    const perms = (settings.permissions as Record<string, unknown>) ?? {}
+    const allow = Array.isArray(perms.allow) ? [...perms.allow] as string[] : []
+
+    const pattern = 'mcp__quoroom__*'
+    if (allow.includes(pattern)) return false // already present
+
+    allow.push(pattern)
+    perms.allow = allow
+    settings.permissions = perms
+    fs.writeFileSync(settingsPath, JSON.stringify(settings, null, 2) + '\n')
+    return true
+  } catch {
+    return false
+  }
+}
+
+/**
  * Register Quoroom MCP server in all known AI client configs automatically.
  * Runs silently on server startup so non-technical users get MCP tools without manual setup.
  * Supported: Claude Code, Claude Desktop, Cursor, Windsurf, Codex.
@@ -784,8 +815,9 @@ function registerMcpGlobally(dbPath: string): void {
     const isWin = process.platform === 'win32'
     const isMac = process.platform === 'darwin'
 
-    // Claude Code (~/.claude.json)
+    // Claude Code (~/.claude.json) — register MCP server + auto-approve tools
     patchMcpConfig(path.join(home, '.claude.json'), entry('claude-code'))
+    patchClaudeCodePermissions(home)
 
     // Claude Desktop
     const claudeDesktopPath = isWin

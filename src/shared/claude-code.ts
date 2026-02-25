@@ -15,6 +15,7 @@ export interface ExecutionOptions {
   maxTurns?: number
   allowedTools?: string
   disallowedTools?: string
+  permissionMode?: 'default' | 'acceptEdits' | 'bypassPermissions' | 'plan'
   onProgress?: ProgressCallback
   onConsoleLog?: ConsoleLogCallback
   resumeSessionId?: string
@@ -198,6 +199,9 @@ export function executeClaudeCode(
     }
     if (options?.disallowedTools) {
       args.push('--disallowedTools', options.disallowedTools)
+    }
+    if (options?.permissionMode) {
+      args.push('--permission-mode', options.permissionMode)
     }
 
     const claudePath = resolveClaudePath()

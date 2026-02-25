@@ -456,6 +456,7 @@ export async function executeTask(
       maxTurns,
       allowedTools,
       disallowedTools,
+      permissionMode: 'bypassPermissions',
       onConsoleLog: consoleLog.onConsoleLog,
       onProgress: (progress) => {
         const now = Date.now()
@@ -497,6 +498,7 @@ export async function executeTask(
         maxTurns,
         allowedTools,
         disallowedTools,
+        permissionMode: 'bypassPermissions',
         onConsoleLog: retryConsoleLog.onConsoleLog,
         onProgress: (progress) => {
           const now = Date.now()
