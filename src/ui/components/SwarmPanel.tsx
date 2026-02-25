@@ -26,6 +26,13 @@ interface SwarmPanelProps {
   queenRunning: Record<number, boolean>
   forcedInviteOpenNonce?: number
   onNavigateToRoom: (roomId: number) => void
+  /** Optional overrides for demo/standalone rendering (skip API polling) */
+  demoData?: {
+    workers: Worker[]
+    stations: Record<number, Station[]>
+    revenue: Record<number, RevenueSummary>
+    balances: Record<number, OnChainBalance>
+  }
 }
 
 interface PlaceholderRoom {
@@ -533,7 +540,9 @@ async function copyText(text: string): Promise<boolean> {
 
 // ─── Component ─────────────────────────────────────────────
 
-export function SwarmPanel({ rooms, queenRunning, forcedInviteOpenNonce, onNavigateToRoom }: SwarmPanelProps): React.JSX.Element {
+export function SwarmPanel({ rooms, queenRunning, forcedInviteOpenNonce, onNavigateToRoom, demoData }: SwarmPanelProps): React.JSX.Element {
+  const isDemo = !!demoData
+
   const [containerRef, containerWidth] = useContainerWidth<HTMLDivElement>()
   const [hoveredRoomId, setHoveredRoomId] = useState<number | null>(null)
   const [tooltipPos, setTooltipPos] = useState<{ x: number; y: number }>({ x: 0, y: 0 })
@@ -547,7 +556,7 @@ export function SwarmPanel({ rooms, queenRunning, forcedInviteOpenNonce, onNavig
   const forcedInviteRef = useRef<number | undefined>(forcedInviteOpenNonce)
 
   const { data: keeperReferral } = usePolling<{ code: string; inviteUrl: string; shareUrl: string }>(
-    () => api.settings.getReferral(),
+    () => isDemo ? Promise.resolve({ code: 'DEMO', inviteUrl: '', shareUrl: '' }) : api.settings.getReferral(),
     120000
   )
   const keeperReferralCode = (keeperReferral?.code ?? '').trim()
@@ -562,10 +571,13 @@ export function SwarmPanel({ rooms, queenRunning, forcedInviteOpenNonce, onNavig
     setShareOpen(false)
   }, [forcedInviteOpenNonce])
 
-  const { data: allWorkers, refresh: refreshWorkers } = usePolling<Worker[]>(() => api.workers.list(), 30000)
+  const { data: allWorkers, refresh: refreshWorkers } = usePolling<Worker[]>(
+    () => isDemo ? Promise.resolve(demoData!.workers) : api.workers.list(), 30000
+  )
 
   const { data: stationMap, refresh: refreshStationMap } = usePolling<Record<number, Station[]>>(
     async () => {
+      if (isDemo) return demoData!.stations
       if (rooms.length === 0) return {}
       const entries = await Promise.all(
         rooms.map(async r => {
@@ -580,6 +592,7 @@ export function SwarmPanel({ rooms, queenRunning, forcedInviteOpenNonce, onNavig
 
   const { data: revenueMap, refresh: refreshRevenueMap } = usePolling<Record<number, RevenueSummary>>(
     async () => {
+      if (isDemo) return demoData!.revenue
       if (rooms.length === 0) return {}
       const entries = await Promise.all(
         rooms.map(async r => {
@@ -594,6 +607,7 @@ export function SwarmPanel({ rooms, queenRunning, forcedInviteOpenNonce, onNavig
 
   const { data: balanceMap, refresh: refreshBalanceMap } = usePolling<Record<number, OnChainBalance>>(
     async () => {
+      if (isDemo) return demoData!.balances
       if (rooms.length === 0) return {}
       const wallets = await Promise.all(
         rooms.map(r => api.wallet.get(r.id).catch(() => null))
@@ -613,6 +627,7 @@ export function SwarmPanel({ rooms, queenRunning, forcedInviteOpenNonce, onNavig
 
   const { data: referredMap, refresh: refreshReferredMap } = usePolling<Record<number, ReferredRoom[]>>(
     async () => {
+      if (isDemo) return {}
       if (rooms.length === 0) return {}
       const [allRooms, entries] = await Promise.all([
         api.rooms.list().catch(() => [] as Room[]),

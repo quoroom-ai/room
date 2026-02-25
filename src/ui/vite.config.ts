@@ -25,7 +25,13 @@ export default defineConfig({
   build: {
     outDir: resolve(__dirname, '../../out/ui'),
     emptyOutDir: true,
-    chunkSizeWarningLimit: 700
+    chunkSizeWarningLimit: 700,
+    rollupOptions: {
+      input: {
+        main: resolve(__dirname, 'index.html'),
+        demo: resolve(__dirname, 'demo.html'),
+      }
+    }
   },
   server: {
     port: 5173,
