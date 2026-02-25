@@ -116,7 +116,11 @@ async function probeLocalServer(port: string): Promise<boolean> {
 }
 
 function App(): React.JSX.Element {
-  const [tab, setTab] = useState<Tab>('clerk')
+  const [tab, setTab] = useState<Tab>(() => {
+    const saved = storageGet('quoroom_tab')
+    if (saved && ALL_TAB_IDS.includes(saved as Tab)) return saved as Tab
+    return 'clerk'
+  })
   const tabRef = useRef(tab)
   const [advancedMode, setAdvancedMode] = useState(false)
   const [autonomyMode, setAutonomyMode] = useState<'auto' | 'semi'>('auto')

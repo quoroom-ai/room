@@ -738,6 +738,18 @@ This is NOT optional — every cycle must produce at least one skill report.`)
         `Agent cycle failed (${worker.name}): ${errorDetail.slice(0, 200)}`,
         errorDetail, worker.id)
       queries.updateAgentState(db, worker.id, 'idle')
+
+      // If a CLI model failed due to context overflow / compaction, reset the session
+      // so the next cycle starts fresh instead of resuming a broken context forever.
+      if (isCli && resumeSessionId) {
+        const isContextError = /compact|compaction|context.*(window|limit|overflow|too large)|model_visible_bytes|token.*limit.*exceed/i.test(errorDetail)
+        if (isContextError) {
+          queries.deleteAgentSession(db, worker.id)
+          logBuffer.addSynthetic('system', 'Session reset due to context overflow — next cycle will start fresh')
+          logBuffer.flush()
+        }
+      }
+
       return result.output
     }
 

@@ -8,7 +8,7 @@
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![npm version](https://img.shields.io/npm/v/quoroom)](https://www.npmjs.com/package/quoroom)
-[![Tests](https://img.shields.io/badge/tests-971%20passing-brightgreen)](#)
+[![Tests](https://img.shields.io/badge/tests-1076%20passing-brightgreen)](#)
 [![GitHub stars](https://img.shields.io/github/stars/quoroom-ai/room)](https://github.com/quoroom-ai/room/stargazers)
 [![macOS](https://img.shields.io/badge/macOS-.pkg-000000?logo=apple&logoColor=white)](https://github.com/quoroom-ai/room/releases/latest)
 [![Windows](https://img.shields.io/badge/Windows-.exe-0078D4?logo=windows&logoColor=white)](https://github.com/quoroom-ai/room/releases/latest)
@@ -197,6 +197,29 @@ Installer launchers:
 | Linux x64 | `.deb` | `.tar.gz` |
 | Windows x64 (signed) | `.exe` setup | `.zip` |
 
+<details>
+<summary>Platform notes</summary>
+
+**macOS**
+- Universal binary (Apple Silicon + Intel) — single `.pkg` works on both architectures
+- Native menu bar tray app (Swift) — auto-starts server, provides "Open Dashboard" / "Restart" / "Quit"
+- `.pkg` is codesigned + Apple-notarized
+- Shell wrapper with auto-update check (polls GitHub every 4h) and crash rollback (3-strike reset)
+- PATH: inherits login shell PATH at startup (`zsh -lic`) so Homebrew/NVM-installed CLIs (`claude`, `codex`) are found
+
+**Windows**
+- Signed `.exe` installer (NSIS, SSL.com eSigner)
+- VBS launcher — starts server without a console window
+- Adds `quoroom` to system PATH via registry
+- PATH: adds npm global prefix dir at startup so globally-installed `claude.cmd` / `codex.cmd` are found
+- `.cmd` wrappers (npm-installed CLIs) are auto-resolved to underlying `.js` scripts to bypass cmd.exe 8191-char argument limit
+
+**Linux**
+- `.deb` package (x64), installs to `/usr/local/lib/quoroom`
+- Same shell wrapper and auto-update mechanism as macOS
+
+</details>
+
 ### Uninstall
 
 ```bash
@@ -216,7 +239,7 @@ quoroom serve
 
 If you installed with the macOS `.pkg` or Windows `.exe` installer, you can also use the launcher app/shortcut instead of command line.
 
-On first run, `quoroom serve` automatically registers the Quoroom MCP server in every AI coding tool you have installed (Claude Code, Claude Desktop, Cursor, Windsurf). Just **restart your AI client once** — after that, all `mcp__quoroom__*` tools are available automatically in every session.
+On first run, `quoroom serve` automatically registers the Quoroom MCP server in every AI coding tool you have installed (Claude Code, Claude Desktop, Codex, Cursor, Windsurf). Just **restart your AI client once** — after that, all `mcp__quoroom__*` tools are available automatically in every session.
 
 Open **http://localhost:3700** (or the port shown in your terminal). The dashboard and API run locally, and your room data stays on your machine by default.
 
@@ -425,6 +448,10 @@ npm run typecheck        # Type-check only (tsc --noEmit)
 npm test                 # Run all tests (vitest, fork pool)
 npm run test:watch       # Watch mode
 npm run test:e2e         # End-to-end tests (Playwright)
+
+# Windows
+npm run dev:isolated:win    # Windows equivalent of dev:isolated
+npm run build:windows:local # Local Windows build (PowerShell)
 ```
 
 ### Docker (cloud runtime)
@@ -492,16 +519,20 @@ room/
 
 ## Model Providers
 
-Use your existing Claude/ChatGPT subscription or API.
+Use your existing Claude or ChatGPT subscription, or bring an API key.
 
-| Role | Provider | Cost |
-|------|----------|------|
-| **Queen** | [Claude Code](https://docs.anthropic.com/en/docs/claude-code) | Subscription |
-| | Codex (ChatGPT) | Subscription |
-| | OpenAI API | Pay-per-use |
-| | Claude API | Pay-per-use |
-| **Workers** | Inherit queen model | Depends on queen |
-| | Claude (subscription or API) | Subscription / API |
+| Model string | Provider | Execution | Requires |
+|---|---|---|---|
+| `claude` (default) | Claude Code CLI | Spawns CLI process | [Claude Code](https://docs.anthropic.com/en/docs/claude-code) installed |
+| `codex` | OpenAI Codex CLI | Spawns CLI process | `npm i -g @openai/codex` |
+| `openai:gpt-4o-mini` | OpenAI API | HTTP REST | `OPENAI_API_KEY` |
+| `anthropic:claude-3-5-sonnet-latest` | Anthropic API | HTTP REST | `ANTHROPIC_API_KEY` |
+
+**CLI models** (`claude`, `codex`) — Full agentic loop with tool use via the CLI. Session continuity via `--resume`. On Windows, `.cmd` wrappers are auto-resolved to underlying `.js` scripts to bypass the cmd.exe 8191-char argument limit.
+
+**API models** (`openai:*`, `anthropic:*`) — Direct HTTP calls. Support multi-turn tool-calling loops. API keys resolve from: room credentials → Clerk-saved keys → environment variables. `anthropic:*` also accepts the `claude-api:` prefix.
+
+Workers inherit the queen's model by default, or can use a separate API model.
 
 ## License
 

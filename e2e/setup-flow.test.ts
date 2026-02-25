@@ -139,7 +139,7 @@ async function openRoomSettings(page: Page, roomId: number, roomName: string): P
 }
 
 async function ensureSetupModalOpen(page: Page): Promise<void> {
-  const heading = page.getByRole('heading', { name: 'Room Setup Flow' })
+  const heading = page.getByRole('heading', { name: 'Room Setup' })
   try {
     await expect(heading).toBeVisible({ timeout: 6000 })
     return
