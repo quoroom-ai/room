@@ -205,7 +205,8 @@ function buildClerkContext(db: Database.Database, projectDocsSnapshot?: string):
     for (const room of activeRooms) {
       const goals = queries.listGoals(db, room.id).filter(g => g.status === 'active' || g.status === 'in_progress')
       const workers = queries.listRoomWorkers(db, room.id)
-      parts.push(`- **${room.name}** (id:${room.id}, status:${room.status}, model:${room.workerModel})`)
+      const queenLabel = room.queenNickname ? `, queen: ${room.queenNickname}` : ''
+      parts.push(`- **${room.name}** (id:${room.id}, status:${room.status}, model:${room.workerModel}${queenLabel})`)
       if (room.goal) parts.push(`  Objective: ${room.goal}`)
       if (goals.length > 0) parts.push(`  Goals: ${goals.map(g => `${g.description} (${Math.round(g.progress * 100)}%)`).join(', ')}`)
       if (workers.length > 0) parts.push(`  Workers: ${workers.map(w => w.name).join(', ')}`)

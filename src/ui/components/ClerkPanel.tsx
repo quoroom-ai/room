@@ -104,7 +104,7 @@ function processInline(text: string): React.ReactNode[] {
 
     if (match[1]) {
       // **bold**
-      parts.push(<strong key={match.index} className="font-semibold text-text-primary">{match[2]}</strong>)
+      parts.push(<strong key={match.index} className="font-bold text-text-primary">{match[2]}</strong>)
     } else if (match[3]) {
       // *italic*
       parts.push(<em key={match.index}>{match[4]}</em>)

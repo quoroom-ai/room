@@ -70,6 +70,7 @@ let commentaryCount = 0
 
 // Caches
 const roomNameCache = new Map<number, string>()
+const queenNicknameCache = new Map<number, string>()
 const workerNameCache = new Map<number, string>()
 const cycleWorkerCache = new Map<number, number>() // cycleId -> workerId
 
@@ -78,7 +79,16 @@ function getRoomName(db: Database.Database, roomId: number): string {
   const room = queries.getRoom(db, roomId)
   const name = room?.name ?? `Room #${roomId}`
   roomNameCache.set(roomId, name)
+  if (room?.queenNickname) queenNicknameCache.set(roomId, room.queenNickname)
   return name
+}
+
+function getQueenNickname(db: Database.Database, roomId: number): string {
+  if (queenNicknameCache.has(roomId)) return queenNicknameCache.get(roomId)!
+  const room = queries.getRoom(db, roomId)
+  const nick = room?.queenNickname ?? ''
+  if (nick) queenNicknameCache.set(roomId, nick)
+  return nick
 }
 
 function getWorkerName(db: Database.Database, workerId: number): string {
@@ -96,9 +106,9 @@ function normalizeRoomLabel(name: string): string {
   return normalized || 'room'
 }
 
-function normalizeActorLabel(workerName: string, roomName: string): string {
+function normalizeActorLabel(workerName: string, roomName: string, queenNickname?: string): string {
   const raw = (workerName || '').trim()
-  if (!raw) return 'queen'
+  if (!raw) return queenNickname?.toLowerCase() || 'queen'
 
   const lower = raw.toLowerCase()
   const compact = lower.replace(/[^a-z0-9]/g, '')
@@ -112,11 +122,11 @@ function normalizeActorLabel(workerName: string, roomName: string): string {
     || compact === `${roomCompact}queen`
     || compact === roomCompact
   ) {
-    return 'queen'
+    return queenNickname?.toLowerCase() || 'queen'
   }
 
   const actor = compact.replace(/queen$/, '')
-  if (!actor || actor === roomCompact) return 'queen'
+  if (!actor || actor === roomCompact) return queenNickname?.toLowerCase() || 'queen'
   return actor
 }
 
@@ -291,9 +301,6 @@ function sanitizeContent(text: string): string {
 
 function normalizeCommentaryOutput(text: string): string {
   return text
-    // Never allow expanded queen labels like "Test Commentary Room Queen"
-    .replace(/\*\*[^*\n]*\bqueen\b[^*\n]*\*\*/gi, '**queen**')
-    .replace(/\b[A-Za-z][A-Za-z0-9 ]{0,50}\s+Queen\b/g, 'queen')
     // Force room labels after "in `...`" into one-word lowercase style
     .replace(/\bin\s+`([^`\n]+)`/gi, (_full, room) => `in \`${normalizeRoomLabel(String(room))}\``)
 }
@@ -318,12 +325,13 @@ function formatRawLogs(entries: LogEntry[]): string {
   if (actionable.length === 0) return ''
 
   // Group by worker (flatten rooms — room name shown inline on worker label)
-  const workers = new Map<string, { roomName: string; entries: LogEntry[] }>()
+  const workers = new Map<string, { roomName: string; roomId: number; entries: LogEntry[] }>()
   for (const entry of actionable) {
     const roomLabel = normalizeRoomLabel(entry.roomName)
-    const who = normalizeActorLabel(entry.workerName, roomLabel)
+    const nick = dbRef ? getQueenNickname(dbRef, entry.roomId) : ''
+    const who = normalizeActorLabel(entry.workerName, roomLabel, nick)
     const key = `${entry.roomId}:${who}`
-    if (!workers.has(key)) workers.set(key, { roomName: roomLabel, entries: [] })
+    if (!workers.has(key)) workers.set(key, { roomName: roomLabel, roomId: entry.roomId, entries: [] })
     workers.get(key)!.entries.push(entry)
   }
 
@@ -337,9 +345,10 @@ function formatRawLogs(entries: LogEntry[]): string {
   })
 
   const lines: string[] = []
-  for (const [, { roomName, entries: wEntries }] of sorted) {
-    const who = normalizeActorLabel(wEntries[0]?.workerName || '', roomName)
-    const label = who === 'queen' ? `queen in \`${roomName}\`` : `${who} in \`${roomName}\``
+  for (const [, { roomName, roomId, entries: wEntries }] of sorted) {
+    const nick = dbRef ? getQueenNickname(dbRef, roomId) : ''
+    const who = normalizeActorLabel(wEntries[0]?.workerName || '', roomName, nick)
+    const label = `${who} in \`${roomName}\``
     lines.push(`[${label}]`)
     for (const entry of wEntries) {
       switch (entry.entryType) {
@@ -387,7 +396,9 @@ function formatDirectCommentary(entries: LogEntry[]): string | null {
 
   for (const [worker, wEntries] of sorted) {
     const roomName = normalizeRoomLabel(wEntries[0]?.roomName || '')
-    const actor = normalizeActorLabel(worker, roomName)
+    const roomId = wEntries[0]?.roomId ?? 0
+    const nick = dbRef && roomId ? getQueenNickname(dbRef, roomId) : ''
+    const actor = normalizeActorLabel(worker, roomName, nick)
     const parts: string[] = []
     for (const entry of wEntries) {
       switch (entry.entryType) {
@@ -827,6 +838,7 @@ export function stopCommentaryEngine(): void {
   lastFormatMode = null
   commentaryCount = 0
   roomNameCache.clear()
+  queenNicknameCache.clear()
   workerNameCache.clear()
   cycleWorkerCache.clear()
 }
