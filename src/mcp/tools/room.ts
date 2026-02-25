@@ -3,6 +3,8 @@ import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
 import { getMcpDatabase } from '../db'
 import * as queries from '../../shared/db-queries'
 import { createRoom, pauseRoom, restartRoom, deleteRoom, getRoomStatus } from '../../shared/room'
+import { QUEEN_DEFAULTS_BY_PLAN, CHATGPT_DEFAULTS_BY_PLAN } from '../../shared/constants'
+import type { ClaudePlan, ChatGptPlan } from '../../shared/constants'
 
 export function registerRoomTools(server: McpServer): void {
   server.registerTool(
@@ -26,11 +28,22 @@ export function registerRoomTools(server: McpServer): void {
       if (threshold) config.threshold = threshold
       if (timeoutMinutes) config.timeoutMinutes = timeoutMinutes
       const result = createRoom(db, { name: normalizedName, goal, queenSystemPrompt, config: config as Parameters<typeof createRoom>[1]['config'] })
+      // Apply plan-aware defaults for queen activity limits
       const globalQueenModel = queries.getSetting(db, 'queen_model')
+      let planDefaults: { queenCycleGapMs: number; queenMaxTurns: number }
+      if (globalQueenModel === 'codex') {
+        const raw = queries.getSetting(db, 'chatgpt_plan') ?? ''
+        const plan = (raw in CHATGPT_DEFAULTS_BY_PLAN ? raw : 'none') as ChatGptPlan
+        planDefaults = CHATGPT_DEFAULTS_BY_PLAN[plan]
+      } else {
+        const raw = queries.getSetting(db, 'claude_plan') ?? ''
+        const plan = (raw in QUEEN_DEFAULTS_BY_PLAN ? raw : 'none') as ClaudePlan
+        planDefaults = QUEEN_DEFAULTS_BY_PLAN[plan]
+      }
+      queries.updateRoom(db, result.room.id, { ...planDefaults, workerModel: 'queen' })
       if (globalQueenModel) {
         queries.updateWorker(db, result.queen.id, { model: globalQueenModel })
       }
-      queries.updateRoom(db, result.room.id, { workerModel: 'queen' })
       return {
         content: [{
           type: 'text' as const,
