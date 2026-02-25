@@ -518,4 +518,235 @@ describe('executeClaudeCode', () => {
     expect(args).not.toContain('--allowedTools')
     expect(args).not.toContain('--disallowedTools')
   })
+
+  if (process.platform === 'win32') {
+    it('spawns with shell:true on Windows when no .cmd node script resolved', async () => {
+      const proc = createMockProcess()
+      mockSpawn.mockReturnValue(proc)
+      // existsSync returns true for the claude path but readFileSync won't match .cmd pattern
+      mockExistsSync.mockReturnValue(true)
+      const executeClaudeCode = await importWithMock()
+
+      const promise = executeClaudeCode('Test')
+      proc.emit('close', 0)
+      await promise
+
+      const opts = mockSpawn.mock.calls[0][2]
+      expect(opts.shell).toBe(true)
+      expect(opts.windowsHide).toBe(true)
+    })
+  }
+
+  if (process.platform !== 'win32') {
+    it('spawns without shell:true on Unix', async () => {
+      const proc = createMockProcess()
+      mockSpawn.mockReturnValue(proc)
+      const executeClaudeCode = await importWithMock()
+
+      const promise = executeClaudeCode('Test')
+      proc.emit('close', 0)
+      await promise
+
+      const opts = mockSpawn.mock.calls[0][2]
+      expect(opts.shell).toBeFalsy()
+    })
+  }
+})
+
+// ─── resolveNodeScript (Windows .cmd unwrapping) ─────────────
+
+describe('resolveNodeScript', () => {
+  let mockSpawn: ReturnType<typeof vi.fn>
+  let mockReadFileSync: ReturnType<typeof vi.fn>
+  let mockExistsSync: ReturnType<typeof vi.fn>
+
+  beforeEach(() => {
+    vi.resetModules()
+    mockSpawn = vi.fn()
+    mockReadFileSync = vi.fn()
+    mockExistsSync = vi.fn()
+  })
+
+  function createProc() {
+    const proc = new EventEmitter() as EventEmitter & {
+      stdout: EventEmitter; stderr: EventEmitter; kill: ReturnType<typeof vi.fn>
+    }
+    proc.stdout = new EventEmitter()
+    proc.stderr = new EventEmitter()
+    proc.kill = vi.fn()
+    return proc
+  }
+
+  async function importModule() {
+    vi.doMock('child_process', () => ({
+      execSync: vi.fn(),
+      spawn: mockSpawn
+    }))
+    vi.doMock('fs', () => ({
+      existsSync: mockExistsSync,
+      readFileSync: mockReadFileSync,
+    }))
+    vi.doMock('os', () => ({
+      homedir: () => 'C:\\Users\\test'
+    }))
+    const mod = await import('../claude-code')
+    return mod
+  }
+
+  if (process.platform === 'win32') {
+    it('extracts .js script path from npm .cmd wrapper and spawns node directly', async () => {
+      const cmdPath = 'C:\\Users\\test\\AppData\\Roaming\\npm\\claude.cmd'
+      const jsPath = 'C:\\Users\\test\\AppData\\Roaming\\npm\\node_modules\\@anthropic-ai\\claude-code\\cli.js'
+
+      mockExistsSync.mockImplementation((p: string) => {
+        if (p === cmdPath) return true
+        if (p === jsPath) return true
+        return false
+      })
+
+      mockReadFileSync.mockReturnValue(
+        '@IF EXIST "%~dp0\\node.exe" (\r\n' +
+        '  "%~dp0\\node.exe" "%dp0%\\node_modules\\@anthropic-ai\\claude-code\\cli.js" %*\r\n' +
+        ') ELSE (\r\n' +
+        '  node "%dp0%\\node_modules\\@anthropic-ai\\claude-code\\cli.js" %*\r\n' +
+        ')\r\n'
+      )
+
+      const proc = createProc()
+      mockSpawn.mockReturnValue(proc)
+
+      const mod = await importModule()
+      const promise = mod.executeClaudeCode('Test')
+      proc.emit('close', 0)
+      await promise
+
+      const spawnArgs = mockSpawn.mock.calls[0]
+      expect(spawnArgs[0]).toBe(process.execPath)
+      expect(spawnArgs[1][0]).toContain('cli.js')
+    })
+
+    it('falls back to shell:true when .cmd content has no dp0 pattern', async () => {
+      const cmdPath = 'C:\\Users\\test\\AppData\\Roaming\\npm\\claude.cmd'
+
+      mockExistsSync.mockImplementation((p: string) => p === cmdPath)
+      mockReadFileSync.mockReturnValue('some random batch file content\r\n')
+
+      const proc = createProc()
+      mockSpawn.mockReturnValue(proc)
+
+      const mod = await importModule()
+      const promise = mod.executeClaudeCode('Test')
+      proc.emit('close', 0)
+      await promise
+
+      const spawnArgs = mockSpawn.mock.calls[0]
+      expect(spawnArgs[0]).toBe(cmdPath)
+      expect(spawnArgs[2].shell).toBe(true)
+    })
+  }
+
+  if (process.platform !== 'win32') {
+    it('resolveNodeScript returns null on non-Windows (spawns claude directly)', async () => {
+      mockExistsSync.mockReturnValue(true)
+      mockReadFileSync.mockReturnValue('')
+
+      const proc = createProc()
+      mockSpawn.mockReturnValue(proc)
+
+      const mod = await importModule()
+      const promise = mod.executeClaudeCode('Test')
+      proc.emit('close', 0)
+      await promise
+
+      const spawnArgs = mockSpawn.mock.calls[0]
+      expect(spawnArgs[0]).not.toBe(process.execPath)
+      expect(spawnArgs[2].shell).toBeFalsy()
+    })
+  }
+})
+
+// ─── resolveClaudePath — Windows candidate paths ────────────
+
+describe('resolveClaudePath — Windows candidates', () => {
+  let mockExecSync: ReturnType<typeof vi.fn>
+  let mockExistsSync: ReturnType<typeof vi.fn>
+
+  beforeEach(() => {
+    vi.resetModules()
+    mockExecSync = vi.fn()
+    mockExistsSync = vi.fn().mockReturnValue(false)
+  })
+
+  async function importWithMock(home: string) {
+    vi.doMock('child_process', () => ({
+      execSync: mockExecSync,
+      spawn: vi.fn()
+    }))
+    vi.doMock('fs', () => ({
+      existsSync: mockExistsSync,
+      readFileSync: vi.fn().mockReturnValue(''),
+    }))
+    vi.doMock('os', () => ({
+      homedir: () => home
+    }))
+    return (await import('../claude-code')).checkClaudeCliAvailable
+  }
+
+  if (process.platform === 'win32') {
+    it('checks Windows candidate paths in order', async () => {
+      mockExistsSync.mockReturnValue(false)
+      const check = await importWithMock('C:\\Users\\test')
+      check()
+      // existsSync should have been called with Windows-specific paths
+      const paths = mockExistsSync.mock.calls.map((c: unknown[]) => c[0] as string)
+      expect(paths.some((p: string) => p.includes('.claude\\bin\\claude.exe'))).toBe(true)
+      expect(paths.some((p: string) => p.includes('AppData\\Local\\Programs'))).toBe(true)
+      expect(paths.some((p: string) => p.includes('npm\\claude.cmd'))).toBe(true)
+    })
+
+    it('falls back to where command on Windows', async () => {
+      mockExistsSync.mockReturnValue(false) // no candidates found on disk
+      mockExecSync.mockImplementation((cmd: string) => {
+        if (cmd === 'where claude') return 'C:\\global\\claude.exe\n'
+        throw new Error('unknown')
+      })
+      const check = await importWithMock('C:\\Users\\test')
+      check()
+      expect(mockExecSync).toHaveBeenCalledWith(
+        'where claude',
+        expect.objectContaining({ encoding: 'utf-8', timeout: 5000 })
+      )
+    })
+
+    it('does not call Unix shell resolution on Windows', async () => {
+      mockExistsSync.mockReturnValue(false)
+      mockExecSync.mockImplementation(() => { throw new Error('not found') })
+      const check = await importWithMock('C:\\Users\\test')
+      check()
+      const calls = mockExecSync.mock.calls.map((c: unknown[]) => c[0] as string)
+      expect(calls.some((cmd: string) => cmd.includes('/bin/zsh') || cmd.includes('/bin/bash'))).toBe(false)
+    })
+  }
+
+  if (process.platform !== 'win32') {
+    it('checks Unix candidate paths', async () => {
+      mockExistsSync.mockReturnValue(false)
+      const check = await importWithMock('/mock-home')
+      check()
+      const paths = mockExistsSync.mock.calls.map((c: unknown[]) => c[0] as string)
+      expect(paths.some((p: string) => p.includes('.local/bin/claude'))).toBe(true)
+      expect(paths.some((p: string) => p === '/usr/local/bin/claude')).toBe(true)
+    })
+
+    it('does not check Windows paths or call where on Unix', async () => {
+      mockExistsSync.mockReturnValue(false)
+      mockExecSync.mockImplementation(() => { throw new Error('not found') })
+      const check = await importWithMock('/mock-home')
+      check()
+      const paths = mockExistsSync.mock.calls.map((c: unknown[]) => c[0] as string)
+      expect(paths.some((p: string) => p.includes('AppData'))).toBe(false)
+      const cmds = mockExecSync.mock.calls.map((c: unknown[]) => c[0] as string)
+      expect(cmds.some((cmd: string) => cmd.includes('where'))).toBe(false)
+    })
+  }
 })

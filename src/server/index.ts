@@ -882,3 +882,6 @@ export function startServer(options: ServerOptions = {}): void {
     process.exit(0)
   })
 }
+
+/** @internal exported for testing */
+export { windowsQuote as _windowsQuote, shellQuote as _shellQuote, isLoopbackAddress as _isLoopbackAddress }

@@ -46,6 +46,8 @@ export async function closeBrowser(): Promise<void> {
 // persist). Keyed by session ID. Idle timeout auto-cleanup.
 
 import { randomUUID } from 'crypto'
+import { tmpdir } from 'node:os'
+import path from 'node:path'
 
 interface BrowserSession {
   context: import('playwright').BrowserContext
@@ -561,7 +563,7 @@ export async function browserActionPersistent(
           break
 
         case 'screenshot': {
-          const tmpPath = `/tmp/quoroom-screenshot-${Date.now()}.png`
+          const tmpPath = path.join(tmpdir(), `quoroom-screenshot-${Date.now()}.png`)
           await page.screenshot({ path: tmpPath, type: 'png', fullPage: false })
           intermediateSnapshots.push(`[Screenshot saved — ${page.url()}]\nFile: ${tmpPath}\nUse the Read tool to view this screenshot.`)
           break

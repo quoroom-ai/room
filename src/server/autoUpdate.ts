@@ -153,10 +153,22 @@ async function downloadAndExtract(bundleUrl: string): Promise<void> {
 
 /**
  * Extract a .tar.gz to a destination directory using the system tar command.
+ * Windows 10 build 17063+ ships bsdtar; older systems will get a clear error.
+ * @internal exported for testing
  */
-async function extractTarGz(tarballPath: string, destDir: string): Promise<void> {
+export async function extractTarGz(tarballPath: string, destDir: string): Promise<void> {
   const { execSync } = await import('node:child_process')
-  execSync(`tar xzf ${JSON.stringify(tarballPath)} -C ${JSON.stringify(destDir)}`, { stdio: 'ignore' })
+  try {
+    execSync(`tar xzf ${JSON.stringify(tarballPath)} -C ${JSON.stringify(destDir)}`, { stdio: 'ignore' })
+  } catch (err) {
+    throw new Error(
+      `Failed to extract update bundle. ` +
+      (process.platform === 'win32'
+        ? 'Ensure Windows 10 build 17063+ (tar.exe required).'
+        : 'System tar command failed.') +
+      ` ${err instanceof Error ? err.message : String(err)}`
+    )
+  }
 }
 
 /**

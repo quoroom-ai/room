@@ -48,4 +48,23 @@ describe('model-provider', () => {
 
     expect(resolveApiKeyForModel(db, roomId, 'openai:gpt-4o-mini')).toBe('sk-room')
   })
+
+  it('codex_subscription returns subscription mode with ready based on CLI availability', async () => {
+    const status = await getModelAuthStatus(db, roomId, 'codex')
+    expect(status.provider).toBe('codex_subscription')
+    expect(status.mode).toBe('subscription')
+    expect(status.credentialName).toBeNull()
+    expect(status.envVar).toBeNull()
+    // ready depends on whether codex CLI is installed — the checkCodexCliAvailable
+    // function uses codex.cmd on Windows and codex on Unix, which may or may not
+    // be installed in the test environment. Just verify it returns a boolean.
+    expect(typeof status.ready).toBe('boolean')
+  })
+
+  it('claude_subscription returns subscription mode', async () => {
+    const status = await getModelAuthStatus(db, roomId, 'claude')
+    expect(status.provider).toBe('claude_subscription')
+    expect(status.mode).toBe('subscription')
+    expect(typeof status.ready).toBe('boolean')
+  })
 })
