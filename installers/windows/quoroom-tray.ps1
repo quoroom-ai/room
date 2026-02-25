@@ -215,8 +215,8 @@ $timer.Add_Tick({
 
     if ($script:pendingOpen) {
       if ($script:openAfter -eq [DateTime]::MaxValue) {
-        # Delay 1.5s after port opens to let HTTP server finish init
-        $script:openAfter = $now.AddMilliseconds(1500)
+        # Delay 10s after port opens to let HTTP server finish init
+        $script:openAfter = $now.AddMilliseconds(10000)
       } elseif ($now -ge $script:openAfter) {
         Write-Log "Opening browser: $url"
         $script:pendingOpen = $false
