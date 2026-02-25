@@ -4,9 +4,10 @@ import type { ChatMessage } from '@shared/types'
 
 interface QueenChatProps {
   roomId: number | null
+  queenNickname: string | null
 }
 
-export function QueenChat({ roomId }: QueenChatProps): React.JSX.Element {
+export function QueenChat({ roomId, queenNickname }: QueenChatProps): React.JSX.Element {
   const [messages, setMessages] = useState<ChatMessage[]>([])
   const [input, setInput] = useState('')
   const [loading, setLoading] = useState(false)
@@ -80,6 +81,11 @@ export function QueenChat({ roomId }: QueenChatProps): React.JSX.Element {
 
   return (
     <div className="bg-surface-secondary rounded-lg overflow-hidden flex-1 flex flex-col min-h-0 shadow-sm">
+      {queenNickname && (
+        <div className="px-3 pt-3 pb-1">
+          <span className="text-[17px] font-semibold text-text-primary">{queenNickname}</span>
+        </div>
+      )}
       <div
         ref={scrollRef}
         onScroll={handleScroll}

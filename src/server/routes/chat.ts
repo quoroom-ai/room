@@ -46,10 +46,11 @@ export function registerChatRoutes(router: Router): void {
     const apiKey = resolveApiKeyForModel(ctx.db, roomId, model)
 
     // Execute with queen's system prompt + session continuity
+    const namePrefix = room.queenNickname ? `Your name is ${room.queenNickname}.\n\n` : ''
     const result = await executeAgent({
       model,
       prompt: message,
-      systemPrompt: queen.systemPrompt,
+      systemPrompt: namePrefix + queen.systemPrompt,
       resumeSessionId: room.chatSessionId ?? undefined,
       apiKey,
       maxTurns: 10,

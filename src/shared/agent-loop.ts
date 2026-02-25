@@ -310,7 +310,9 @@ export async function runCycle(
     const skillContent = loadSkillsForAgent(db, roomId, status.room.goal ?? '')
 
     const rolePreset = worker.role ? WORKER_ROLE_PRESETS[worker.role] : undefined
+    const namePrefix = worker.name ? `Your name is ${worker.name}.\n\n` : ''
     const systemPrompt = [
+      namePrefix,
       rolePreset?.systemPromptPrefix ? `${rolePreset.systemPromptPrefix}\n\n` : '',
       worker.systemPrompt,
       skillContent ? `\n\n# Active Skills\n\n${skillContent}` : ''

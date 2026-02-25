@@ -568,7 +568,7 @@ function App(): React.JSX.Element {
       case 'status':
         return <StatusPanel onNavigate={(t) => handleTabChange(t as Tab)} advancedMode={advancedMode} roomId={selectedRoomId} />
       case 'chat':
-        return <ChatPanel roomId={selectedRoomId} />
+        return <ChatPanel roomId={selectedRoomId} queenNickname={selectedRoom?.queenNickname ?? null} />
       case 'goals':
         return <GoalsPanel roomId={selectedRoomId} autonomyMode={autonomyMode} />
       case 'votes':
