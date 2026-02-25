@@ -149,6 +149,46 @@ describe('executeAgent', () => {
       expect(result.sessionId).toBe('thread-123')
     })
 
+    it('captures mcp_tool_call events via onConsoleLog', async () => {
+      setupMockCodexProcess([
+        JSON.stringify({ type: 'thread.started', thread_id: 'thread-456' }),
+        JSON.stringify({ type: 'item.completed', item: { type: 'agent_message', text: 'Checking memories...' } }),
+        JSON.stringify({
+          type: 'item.completed',
+          item: {
+            type: 'mcp_tool_call',
+            server: 'quoroom',
+            tool: 'quoroom_memory_list',
+            arguments: {},
+            result: { content: [{ type: 'text', text: '{"totalEntities":5}' }] },
+            status: 'completed'
+          }
+        }),
+        JSON.stringify({ type: 'item.completed', item: { type: 'agent_message', text: 'Found 5 memories.' } }),
+      ])
+
+      const logEntries: Array<{ entryType: string; content: string }> = []
+      const result = await executeAgent({
+        model: 'codex',
+        prompt: 'List memories',
+        onConsoleLog: (entry) => logEntries.push(entry),
+      })
+
+      expect(result.output).toBe('Checking memories...\n\nFound 5 memories.')
+      expect(result.sessionId).toBe('thread-456')
+
+      const toolCalls = logEntries.filter(e => e.entryType === 'tool_call')
+      expect(toolCalls).toHaveLength(1)
+      expect(toolCalls[0].content).toContain('quoroom_memory_list')
+
+      const toolResults = logEntries.filter(e => e.entryType === 'tool_result')
+      expect(toolResults).toHaveLength(1)
+      expect(toolResults[0].content).toContain('totalEntities')
+
+      const textEntries = logEntries.filter(e => e.entryType === 'assistant_text')
+      expect(textEntries).toHaveLength(2)
+    })
+
     it('uses codex resume command and preserves resume session when no new thread event arrives', async () => {
       setupMockCodexProcess([
         JSON.stringify({ type: 'item.completed', item: { type: 'agent_message', text: 'Resumed response' } })

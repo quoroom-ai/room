@@ -153,6 +153,8 @@ async function executeCodex(options: AgentExecutionOptions): Promise<AgentExecut
       return
     }
 
+    const onConsoleLog = options.onConsoleLog
+
     proc.stdout.on('data', (data: Buffer) => {
       const chunk = data.toString()
       stdout += chunk
@@ -160,9 +162,18 @@ async function executeCodex(options: AgentExecutionOptions): Promise<AgentExecut
       const lines = buffer.split('\n')
       buffer = lines.pop() ?? ''
       for (const line of lines) {
-        parseCodexEventLine(line, (nextSessionId, textChunk) => {
-          if (nextSessionId) sessionId = nextSessionId
-          if (textChunk) outputParts.push(textChunk)
+        parseCodexEventLine(line, (evt) => {
+          if (evt.sessionId) sessionId = evt.sessionId
+          if (evt.text) {
+            outputParts.push(evt.text)
+            onConsoleLog?.({ entryType: 'assistant_text', content: evt.text.slice(0, 2000) })
+          }
+          if (evt.toolCall) {
+            onConsoleLog?.({ entryType: 'tool_call', content: `→ ${evt.toolCall.tool}(${JSON.stringify(evt.toolCall.arguments).slice(0, 500)})` })
+          }
+          if (evt.toolResult) {
+            onConsoleLog?.({ entryType: 'tool_result', content: evt.toolResult })
+          }
         })
       }
     })
@@ -184,9 +195,15 @@ async function executeCodex(options: AgentExecutionOptions): Promise<AgentExecut
       settled = true
       clearTimeout(timer)
       if (buffer.trim()) {
-        parseCodexEventLine(buffer.trim(), (nextSessionId, textChunk) => {
-          if (nextSessionId) sessionId = nextSessionId
-          if (textChunk) outputParts.push(textChunk)
+        parseCodexEventLine(buffer.trim(), (evt) => {
+          if (evt.sessionId) sessionId = evt.sessionId
+          if (evt.text) {
+            outputParts.push(evt.text)
+            onConsoleLog?.({ entryType: 'assistant_text', content: evt.text.slice(0, 2000) })
+          }
+          if (evt.toolCall) {
+            onConsoleLog?.({ entryType: 'tool_call', content: `→ ${evt.toolCall.tool}(${JSON.stringify(evt.toolCall.arguments).slice(0, 500)})` })
+          }
         })
       }
       const output = outputParts.join('\n\n').trim() || stderr.trim() || stdout.trim() || ''
@@ -592,9 +609,16 @@ function parseAnthropicModel(model: string): string {
   return normalized
 }
 
+interface CodexEvent {
+  sessionId?: string
+  text?: string
+  toolCall?: { tool: string; arguments: Record<string, unknown> }
+  toolResult?: string
+}
+
 function parseCodexEventLine(
   line: string,
-  onEvent: (sessionId: string | null, textChunk: string | null) => void
+  onEvent: (event: CodexEvent) => void
 ): void {
   const trimmed = line.trim()
   if (!trimmed) return
@@ -606,7 +630,7 @@ function parseCodexEventLine(
   }
   const type = parsed.type
   if (type === 'thread.started' && typeof parsed.thread_id === 'string') {
-    onEvent(parsed.thread_id, null)
+    onEvent({ sessionId: parsed.thread_id })
     return
   }
   if (type === 'item.completed') {
@@ -614,7 +638,22 @@ function parseCodexEventLine(
     if (!item) return
     const itemType = item.type
     if (itemType === 'agent_message' && typeof item.text === 'string') {
-      onEvent(null, item.text)
+      onEvent({ text: item.text })
+    } else if (itemType === 'mcp_tool_call') {
+      const tool = typeof item.tool === 'string' ? item.tool : 'unknown'
+      const args = (item.arguments as Record<string, unknown>) ?? {}
+      onEvent({ toolCall: { tool, arguments: args } })
+      // Also capture the result text if present
+      const result = item.result as Record<string, unknown> | undefined
+      if (result) {
+        const content = result.content
+        if (Array.isArray(content)) {
+          const text = content
+            .map((c: Record<string, unknown>) => typeof c.text === 'string' ? c.text : '')
+            .filter(Boolean).join('\n')
+          if (text) onEvent({ toolResult: text.slice(0, 500) })
+        }
+      }
     }
   }
 }
