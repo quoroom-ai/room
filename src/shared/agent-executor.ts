@@ -1,4 +1,6 @@
-import { spawn } from 'child_process'
+import { spawn, execSync } from 'child_process'
+import { existsSync, readFileSync } from 'fs'
+import { dirname, join } from 'path'
 import { homedir } from 'os'
 import { executeClaudeCode } from './claude-code'
 import type { ExecutionOptions, ExecutionResult, ConsoleLogCallback, ProgressCallback } from './claude-code'
@@ -43,6 +45,37 @@ export interface AgentExecutionResult {
 }
 
 const DEFAULT_HTTP_TIMEOUT_MS = 60_000
+
+/**
+ * Resolve `codex.cmd` to the underlying `.js` script on Windows, so we can
+ * spawn `node <script>` directly and bypass cmd.exe argument mangling.
+ * Same pattern as resolveNodeScript in claude-code.ts.
+ */
+let _codexScriptResolved = false
+let _codexNodeScript: string | null = null
+
+function resolveCodexNodeScript(): string | null {
+  if (_codexScriptResolved) return _codexNodeScript
+  _codexScriptResolved = true
+  if (process.platform !== 'win32') return null
+  try {
+    const cmdPath = execSync('where codex.cmd', {
+      encoding: 'utf-8',
+      timeout: 5000,
+      stdio: ['ignore', 'pipe', 'ignore']
+    }).trim().split('\n')[0].trim()
+    if (!cmdPath) return null
+    const content = readFileSync(cmdPath, 'utf-8')
+    const match = content.match(/%dp0%\\(.+?\.js)/)
+    if (!match) return null
+    const script = join(dirname(cmdPath), match[1])
+    if (existsSync(script)) {
+      _codexNodeScript = script
+      return script
+    }
+  } catch { /* codex not installed or not in PATH */ }
+  return null
+}
 
 export async function executeAgent(options: AgentExecutionOptions): Promise<AgentExecutionResult> {
   const model = options.model.trim()
@@ -121,15 +154,26 @@ async function executeCodex(options: AgentExecutionOptions): Promise<AgentExecut
 
     let proc: ReturnType<typeof spawn>
     try {
-      const codexCmd = process.platform === 'win32' ? 'codex.cmd' : 'codex'
-      proc = spawn(codexCmd, args, {
-        cwd: homedir(),
-        env: process.env,
-        stdio: ['ignore', 'pipe', 'pipe'],
-        windowsHide: true,
-        // Windows needs shell:true to execute .cmd batch wrappers
-        shell: process.platform === 'win32',
-      })
+      // On Windows, .cmd wrappers need shell:true which mangles special chars.
+      // Resolve to the underlying .js script and spawn node directly to bypass it.
+      const nodeScript = resolveCodexNodeScript()
+      if (nodeScript) {
+        proc = spawn(process.execPath, [nodeScript, ...args], {
+          cwd: homedir(),
+          env: process.env,
+          stdio: ['ignore', 'pipe', 'pipe'],
+          windowsHide: true,
+        })
+      } else {
+        const codexCmd = process.platform === 'win32' ? 'codex.cmd' : 'codex'
+        proc = spawn(codexCmd, args, {
+          cwd: homedir(),
+          env: process.env,
+          stdio: ['ignore', 'pipe', 'pipe'],
+          windowsHide: true,
+          shell: process.platform === 'win32',
+        })
+      }
     } catch (err) {
       resolve({
         output: `Error: Failed to spawn codex CLI: ${err instanceof Error ? err.message : String(err)}`,

@@ -265,21 +265,13 @@ describe('startServer — MCP registration', () => {
     delete process.env.QUOROOM_SKIP_MCP_REGISTER
 
     try {
-      // Import startServer fresh (module is cached, so we access the compiled side-effect via exec)
-      // Instead, we directly call the exported startServer and immediately shut it down
-      const { createApiServer } = await import('../index')
-      const { initTestDb } = await import('../../shared/__tests__/helpers/test-db')
-
-      const db = initTestDb()
-      // createApiServer triggers registerMcpGlobally via startServer path — but only startServer calls it.
-      // So we call startServer indirectly via the compiled path. Since we can't re-import due to module
-      // caching, we test the effect via patchMcpConfig directly with the same inputs startServer would use.
+      // Test the patchMcpConfig effect with the same inputs startServer would use.
+      // We don't import ../index (server entry) because it has heavy side effects.
       patchMcpConfig(claudeJsonPath, {
         command: process.execPath,
         args: [join(__dirname, '../../mcp/server.js')],
         env: { QUOROOM_DB_PATH: fakeDbPath, QUOROOM_SOURCE: 'claude-code' }
       })
-      db.close()
 
       const config = JSON.parse(readFileSync(claudeJsonPath, 'utf-8'))
       expect(config.mcpServers.quoroom).toBeDefined()
