@@ -344,6 +344,21 @@ export function isRateLimitFailure(message: string): boolean {
     || (lower.includes('limit') && lower.includes('reset'))
 }
 
+function isTransientFailure(message: string, timedOut: boolean): boolean {
+  if (timedOut) return true
+  if (isRateLimitFailure(message)) return true
+  const lower = message.toLowerCase()
+  return lower.includes('timed out')
+    || lower.includes('timeout')
+    || lower.includes('temporarily unavailable')
+    || lower.includes('service unavailable')
+    || lower.includes('connection reset')
+    || lower.includes('socket hang up')
+    || lower.includes('econnreset')
+    || lower.includes('etimedout')
+    || lower.includes('eai_again')
+}
+
 export async function executeClerkWithFallback(options: ClerkExecutionOptions): Promise<ClerkExecutionOutcome> {
   const preferred = options.preferredModel?.trim() || DEFAULT_CLERK_MODEL
   const candidates = buildExecutionCandidates(options.db, preferred)
@@ -386,7 +401,7 @@ export async function executeClerkWithFallback(options: ClerkExecutionOptions): 
     attempts.push({ model: candidate.model, error })
 
     const hasMoreCandidates = i < candidates.length - 1
-    if (!hasMoreCandidates || !isRateLimitFailure(error)) {
+    if (!hasMoreCandidates || !isTransientFailure(error, result.timedOut)) {
       return {
         ok: false,
         model: candidate.model,

@@ -1174,12 +1174,12 @@ export function getRoomActivity(
   if (eventTypes && eventTypes.length > 0) {
     const placeholders = eventTypes.map(() => '?').join(', ')
     const rows = db
-      .prepare(`SELECT * FROM room_activity WHERE room_id = ? AND event_type IN (${placeholders}) ORDER BY created_at DESC LIMIT ?`)
+      .prepare(`SELECT * FROM room_activity WHERE room_id = ? AND event_type IN (${placeholders}) ORDER BY created_at DESC, id DESC LIMIT ?`)
       .all(roomId, ...eventTypes, safeLimit)
     return (rows as Record<string, unknown>[]).map(mapRoomActivityRow)
   }
   const rows = db
-    .prepare('SELECT * FROM room_activity WHERE room_id = ? ORDER BY created_at DESC LIMIT ?')
+    .prepare('SELECT * FROM room_activity WHERE room_id = ? ORDER BY created_at DESC, id DESC LIMIT ?')
     .all(roomId, safeLimit)
   return (rows as Record<string, unknown>[]).map(mapRoomActivityRow)
 }
@@ -1614,7 +1614,31 @@ export function createEscalation(
   const result = db
     .prepare('INSERT INTO escalations (room_id, from_agent_id, to_agent_id, question) VALUES (?, ?, ?, ?)')
     .run(roomId, fromAgentId, toAgentId ?? null, question)
-  return getEscalation(db, result.lastInsertRowid as number)!
+  const escalation = getEscalation(db, result.lastInsertRowid as number)!
+
+  // Mirror message traffic into room activity so Overview > Timeline shows it live.
+  const trimmedQuestion = question.trim()
+  const detail = trimmedQuestion.length > 1000 ? `${trimmedQuestion.slice(0, 1000)}…` : trimmedQuestion
+  let summary = 'Message created'
+  if (toAgentId == null) {
+    summary = fromAgentId != null
+      ? `Worker #${fromAgentId} sent message to keeper`
+      : 'Message sent to keeper'
+  } else {
+    summary = fromAgentId != null
+      ? `Worker #${fromAgentId} sent message to worker #${toAgentId}`
+      : `Keeper sent message to worker #${toAgentId}`
+  }
+  logRoomActivity(
+    db,
+    roomId,
+    fromAgentId != null ? 'worker' : 'system',
+    summary,
+    detail || undefined,
+    fromAgentId ?? undefined
+  )
+
+  return escalation
 }
 
 export function getEscalation(db: Database.Database, id: number): Escalation | null {
@@ -1641,8 +1665,26 @@ export function listEscalations(db: Database.Database, roomId: number, status?: 
 }
 
 export function resolveEscalation(db: Database.Database, id: number, answer: string): void {
+  const escalation = getEscalation(db, id)
   db.prepare("UPDATE escalations SET answer = ?, status = 'resolved', resolved_at = datetime('now','localtime') WHERE id = ?")
     .run(answer, id)
+  if (!escalation) return
+
+  const trimmedAnswer = answer.trim()
+  const detail = trimmedAnswer.length > 1000 ? `${trimmedAnswer.slice(0, 1000)}…` : trimmedAnswer
+  let summary = 'Message resolved'
+  if (escalation.toAgentId == null && escalation.fromAgentId != null) {
+    summary = `Keeper replied to worker #${escalation.fromAgentId}`
+  } else if (escalation.toAgentId != null) {
+    summary = `Message resolved for worker #${escalation.toAgentId}`
+  }
+  logRoomActivity(
+    db,
+    escalation.roomId,
+    'system',
+    summary,
+    detail || undefined
+  )
 }
 
 export function getRecentKeeperAnswers(db: Database.Database, roomId: number, fromAgentId: number, limit: number = 5): Escalation[] {
@@ -2293,6 +2335,13 @@ function mapCycleLogRow(row: Record<string, unknown>): CycleLogEntry {
 }
 
 export function createWorkerCycle(db: Database.Database, workerId: number, roomId: number, model: string | null): WorkerCycle {
+  // Safety guard: ensure at most one running cycle per worker.
+  // This prevents stale "running" rows from lingering after restarts/races
+  // and confusing Overview Timeline/Console.
+  db.prepare(
+    "UPDATE worker_cycles SET status = 'failed', error_message = 'Superseded by newer cycle', finished_at = datetime('now','localtime') WHERE worker_id = ? AND status = 'running'"
+  ).run(workerId)
+
   const result = db.prepare(
     "INSERT INTO worker_cycles (worker_id, room_id, model) VALUES (?, ?, ?)"
   ).run(workerId, roomId, model)
@@ -2322,7 +2371,7 @@ export function completeWorkerCycle(
 export function listRoomCycles(db: Database.Database, roomId: number, limit: number = 20): WorkerCycle[] {
   const safeLimit = clampLimit(limit, 20, 200)
   const rows = db.prepare(
-    'SELECT * FROM worker_cycles WHERE room_id = ? ORDER BY started_at DESC LIMIT ?'
+    'SELECT * FROM worker_cycles WHERE room_id = ? ORDER BY started_at DESC, id DESC LIMIT ?'
   ).all(roomId, safeLimit)
   return (rows as Record<string, unknown>[]).map(mapWorkerCycleRow)
 }

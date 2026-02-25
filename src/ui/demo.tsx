@@ -16,7 +16,7 @@ if (!new URLSearchParams(window.location.search).has('demo')) {
 const now = new Date().toISOString()
 
 const cfg = {
-  threshold: 'majority' as const, timeoutMinutes: 30, keeperWeight: 'dynamic' as const,
+  threshold: 'majority' as const, timeoutMinutes: 30,
   tieBreaker: 'queen' as const, autoApprove: [] as string[], minCycleGapMs: 5000, minVoters: 2,
   sealedBallot: false, voterHealth: true, voterHealthThreshold: 0.5,
 }

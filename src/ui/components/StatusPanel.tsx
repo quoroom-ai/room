@@ -10,6 +10,7 @@ import {
   ROOM_NETWORK_EVENT_TYPES,
 } from '../lib/room-events'
 import { wsClient, type WsMessage } from '../lib/ws'
+import { storageGet, storageSet } from '../lib/storage'
 import type { Task, TaskRun, WorkerCycle, RoomActivityEntry, Worker, Wallet, RevenueSummary, OnChainBalance } from '@shared/types'
 import { formatRelativeTime } from '../utils/time'
 import { CopyAddressButton } from './CopyAddressButton'
@@ -56,6 +57,8 @@ const EVENT_TYPE_LABELS: Record<string, string> = {
   self_mod: 'Self-Mod',
 }
 
+const OVERVIEW_VIEW_MODE_KEY = 'quoroom_overview_view_mode'
+
 interface StatusPanelProps {
   onNavigate?: (tab: string) => void
   advancedMode: boolean
@@ -66,6 +69,10 @@ export function StatusPanel({ onNavigate, advancedMode, roomId }: StatusPanelPro
   useTick()
   const [containerRef, containerWidth] = useContainerWidth<HTMLDivElement>()
   const wide = containerWidth >= 600
+  const [viewMode, setViewMode] = useState<'activity' | 'console'>(() => {
+    const saved = storageGet(OVERVIEW_VIEW_MODE_KEY)
+    return saved === 'console' ? 'console' : 'activity'
+  })
 
   const fetchStatus = useCallback(async (): Promise<StatusData> => {
     const [stats, tasks, runs, workers, watches, runningRuns, cycles] = await Promise.all([
@@ -128,13 +135,24 @@ export function StatusPanel({ onNavigate, advancedMode, roomId }: StatusPanelPro
   const queenRunning = queenStatus?.running === true
   const queenActive = queenRunning && queenStatus?.agentState !== 'idle'
 
-  // Room activity — poll faster when queen is actively running
+  // Room activity — keep Overview responsive while user is on Timeline.
+  const isTimelineView = viewMode === 'activity'
+  const activityPollMs = isTimelineView
+    ? (queenActive ? 5000 : 10000)
+    : (queenActive ? 10000 : 30000)
   const { data: activity, refresh: refreshActivity } = usePolling<RoomActivityEntry[]>(
-    () => roomId ? api.rooms.getActivity(roomId, 30) : Promise.resolve([]),
-    queenActive ? 5000 : 30000
+    () => (isTimelineView && roomId) ? api.rooms.getActivity(roomId, 30) : Promise.resolve([]),
+    activityPollMs
   )
   const { data: workers } = usePolling<Worker[]>(() => api.workers.list(), 60000)
-  useEffect(() => { refreshActivity() }, [roomId, refreshActivity])
+  useEffect(() => {
+    if (!isTimelineView) return
+    refreshActivity()
+  }, [isTimelineView, roomId, refreshActivity])
+
+  useEffect(() => {
+    storageSet(OVERVIEW_VIEW_MODE_KEY, viewMode)
+  }, [viewMode])
 
   // Wallet info
   const { data: wallet, refresh: refreshWallet } = usePolling<Wallet | null>(
@@ -171,7 +189,9 @@ export function StatusPanel({ onNavigate, advancedMode, roomId }: StatusPanelPro
   useEffect(() => {
     if (!roomId) return
     return wsClient.subscribe(`room:${roomId}`, (event: WsMessage) => {
-      void refreshActivity()
+      if (isTimelineView) {
+        void refreshActivity()
+      }
       void refreshQueenStatus()
       void refreshTokenUsage()
       if (ROOM_BALANCE_EVENT_TYPES.has(event.type)) {
@@ -191,10 +211,10 @@ export function StatusPanel({ onNavigate, advancedMode, roomId }: StatusPanelPro
     refreshRevenueSummary,
     refreshTokenUsage,
     refreshWallet,
+    isTimelineView,
     roomId,
   ])
 
-  const [viewMode, setViewMode] = useState<'activity' | 'console'>('activity')
   const [activeFilters, setActiveFilters] = useState<Set<string>>(new Set())
   const [expandedActivityId, setExpandedActivityId] = useState<number | null>(null)
 

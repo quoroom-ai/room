@@ -228,6 +228,10 @@ function checkRateLimit(result: AgentExecutionResult): RateLimitInfo | null {
   })
 }
 
+function isCliContextOverflowError(message: string): boolean {
+  return /compact|compaction|context.*(window|limit|overflow|too large)|model_visible_bytes|token.*limit.*exceed/i.test(message)
+}
+
 export async function runCycle(
   db: Database.Database, roomId: number, worker: Worker, maxTurns?: number, options?: AgentLoopOptions
 ): Promise<string> {
@@ -319,6 +323,7 @@ export async function runCycle(
     ].join('')
 
     const isCli = model === 'claude' || model.startsWith('claude-') || model === 'codex'
+    const CLI_SESSION_MAX_TURNS = 20
 
     // ─── Load agent session ────────────────────────────────────────────────────
     // Group A (CLI): load sessionId for --resume
@@ -330,9 +335,18 @@ export async function runCycle(
     if (agentSession) {
       const updatedAt = new Date(agentSession.updatedAt)
       const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000)
-      if (updatedAt < sevenDaysAgo || agentSession.model !== model) {
-        // Stale session (>7 days) or model changed → start fresh
+      const cliSessionTooLong = isCli
+        && !!agentSession.sessionId
+        && agentSession.turnCount >= CLI_SESSION_MAX_TURNS
+      if (updatedAt < sevenDaysAgo || agentSession.model !== model || cliSessionTooLong) {
+        // Stale session, model switch, or long-running CLI thread → start fresh.
         queries.deleteAgentSession(db, worker.id)
+        if (cliSessionTooLong) {
+          logBuffer.addSynthetic(
+            'system',
+            `Session rotated after ${agentSession.turnCount} cycles to avoid context overflow`
+          )
+        }
       } else if (isCli && agentSession.sessionId) {
         resumeSessionId = agentSession.sessionId
       } else if (!isCli && agentSession.messagesJson) {
@@ -697,7 +711,7 @@ This is NOT optional — every cycle must produce at least one skill report.`)
         }
       : {}
 
-    const result = await executeAgent({
+    const executeWithSession = (sessionId?: string) => executeAgent({
       model,
       prompt,
       systemPrompt,
@@ -710,7 +724,7 @@ This is NOT optional — every cycle must produce at least one skill report.`)
       // CLI models: bypass permission prompts for headless operation
       permissionMode: isCli ? 'bypassPermissions' : undefined,
       // CLI models: pass resumeSessionId for native --resume
-      resumeSessionId,
+      resumeSessionId: sessionId,
       // API models: pass conversation history + persistence callback
       previousMessages: isCli ? undefined : previousMessages,
       onSessionUpdate: isCli ? undefined : (msgs: Array<{ role: string; content: string }>) => {
@@ -720,6 +734,17 @@ This is NOT optional — every cycle must produce at least one skill report.`)
       },
       ...apiToolOpts
     })
+
+    let result = await executeWithSession(resumeSessionId)
+    if (isCli && result.exitCode !== 0) {
+      const failure = result.output?.trim() || ''
+      if (isCliContextOverflowError(failure)) {
+        queries.deleteAgentSession(db, worker.id)
+        logBuffer.addSynthetic('system', 'Session overflow detected — retrying this cycle with a fresh session')
+        logBuffer.flush()
+        result = await executeWithSession(undefined)
+      }
+    }
 
     // Check for rate limit
     const rateLimitInfo = checkRateLimit(result)
@@ -741,9 +766,8 @@ This is NOT optional — every cycle must produce at least one skill report.`)
 
       // If a CLI model failed due to context overflow / compaction, reset the session
       // so the next cycle starts fresh instead of resuming a broken context forever.
-      if (isCli && resumeSessionId) {
-        const isContextError = /compact|compaction|context.*(window|limit|overflow|too large)|model_visible_bytes|token.*limit.*exceed/i.test(errorDetail)
-        if (isContextError) {
+      if (isCli) {
+        if (isCliContextOverflowError(errorDetail)) {
           queries.deleteAgentSession(db, worker.id)
           logBuffer.addSynthetic('system', 'Session reset due to context overflow — next cycle will start fresh')
           logBuffer.flush()

@@ -208,8 +208,6 @@ export function registerRoomTools(server: McpServer): void {
           .describe('Voting threshold for quorum decisions'),
         autoApprove: z.array(z.string()).optional()
           .describe('Decision types to auto-approve without voting (e.g. ["low_impact"])'),
-        keeperWeight: z.enum(['dynamic', 'equal']).optional()
-          .describe('Keeper vote weighting: dynamic (51% in small rooms) or equal'),
         tieBreaker: z.enum(['queen', 'none']).optional()
           .describe('Tie-breaking strategy: queen vote decides, or reject on tie'),
         minVoters: z.number().int().min(0).max(100).optional()
@@ -223,7 +221,7 @@ export function registerRoomTools(server: McpServer): void {
       }
     },
     async ({ roomId, queenCycleGapMs, queenMaxTurns, maxConcurrentTasks,
-             threshold, autoApprove, keeperWeight, tieBreaker,
+             threshold, autoApprove, tieBreaker,
              minVoters, sealedBallot, voterHealth, voterHealthThreshold }) => {
       const db = getMcpDatabase()
       const room = queries.getRoom(db, roomId)
@@ -257,10 +255,6 @@ export function registerRoomTools(server: McpServer): void {
       if (autoApprove !== undefined) {
         configUpdates.autoApprove = autoApprove
         changes.push(`autoApprove: [${room.config.autoApprove.join(',')}] → [${autoApprove.join(',')}]`)
-      }
-      if (keeperWeight !== undefined) {
-        configUpdates.keeperWeight = keeperWeight
-        changes.push(`keeperWeight: ${room.config.keeperWeight} → ${keeperWeight}`)
       }
       if (tieBreaker !== undefined) {
         configUpdates.tieBreaker = tieBreaker

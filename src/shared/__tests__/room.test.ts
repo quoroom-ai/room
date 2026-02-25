@@ -53,7 +53,7 @@ describe('createRoom', () => {
     expect(result.room.config.threshold).toBe('unanimous')
     expect(result.room.config.timeoutMinutes).toBe(120)
     // Defaults preserved
-    expect(result.room.config.keeperWeight).toBe('dynamic')
+    expect(result.room.config.tieBreaker).toBe('queen')
   })
 
   it('logs creation activity', () => {

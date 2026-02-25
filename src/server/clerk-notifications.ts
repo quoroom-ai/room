@@ -9,11 +9,24 @@ export type ClerkNotifyChannel = 'email' | 'telegram'
 
 export const CLERK_NOTIFY_EMAIL_KEY = 'clerk_notify_email'
 export const CLERK_NOTIFY_TELEGRAM_KEY = 'clerk_notify_telegram'
+export const CLERK_NOTIFY_MIN_INTERVAL_MINUTES_KEY = 'clerk_notify_min_interval_minutes'
+export const CLERK_NOTIFY_URGENT_MIN_INTERVAL_MINUTES_KEY = 'clerk_notify_urgent_min_interval_minutes'
 
 const CLERK_NOTIFY_ESCALATION_CURSOR_KEY = 'clerk_notify_escalation_cursor'
 const CLERK_NOTIFY_DECISION_CURSOR_KEY = 'clerk_notify_decision_cursor'
 const CLERK_NOTIFY_ROOM_MESSAGE_CURSOR_KEY = 'clerk_notify_room_message_cursor'
 const CLERK_NOTIFY_DIGEST_STYLE_CURSOR_KEY = 'clerk_notify_digest_style_cursor'
+const CLERK_NOTIFY_LAST_SENT_AT_KEY = 'clerk_notify_last_sent_at'
+
+const DEFAULT_NOTIFY_MIN_INTERVAL_MS = 6 * 60 * 60 * 1000
+const DEFAULT_NOTIFY_URGENT_MIN_INTERVAL_MS = 60 * 60 * 1000
+const MIN_NOTIFY_INTERVAL_MS = 30 * 60 * 1000
+const MAX_NOTIFY_INTERVAL_MS = 24 * 60 * 60 * 1000
+const MIN_URGENT_INTERVAL_MS = 10 * 60 * 1000
+const MAX_URGENT_INTERVAL_MS = 12 * 60 * 60 * 1000
+const URGENT_ESCALATION_THRESHOLD = 6
+const URGENT_DECISION_THRESHOLD = 4
+const URGENT_TOTAL_THRESHOLD = 12
 
 type CountPhrase = (count: number) => string
 
@@ -59,6 +72,28 @@ function parseCursor(raw: string | null | undefined): number {
   const parsed = Number.parseInt(String(raw ?? '').trim(), 10)
   if (!Number.isFinite(parsed) || parsed < 0) return 0
   return parsed
+}
+
+function parseIsoMs(raw: string | null | undefined): number | null {
+  const value = String(raw ?? '').trim()
+  if (!value) return null
+  const parsed = Date.parse(value)
+  return Number.isFinite(parsed) ? parsed : null
+}
+
+function resolveIntervalMs(
+  db: Database.Database,
+  key: string,
+  fallbackMs: number,
+  minMs: number,
+  maxMs: number,
+): number {
+  const raw = (queries.getSetting(db, key) ?? '').trim()
+  if (!raw) return fallbackMs
+  const minutes = Number.parseInt(raw, 10)
+  if (!Number.isFinite(minutes) || minutes < 0) return fallbackMs
+  if (minutes === 0) return 0
+  return Math.min(maxMs, Math.max(minMs, minutes * 60_000))
 }
 
 function getKeeperUserNumber(db: Database.Database): number | null {
@@ -199,6 +234,13 @@ interface PendingRoomMessageItem {
   message: ReturnType<typeof queries.getRoomMessage>
 }
 
+interface PendingDigestCounts {
+  escalations: number
+  decisions: number
+  roomMessages: number
+  total: number
+}
+
 const DIGEST_SECTION_LIMIT = 4
 
 function pickVariant<T>(variants: readonly T[], cursor: number, offset: number = 0): T {
@@ -267,6 +309,30 @@ function buildKeeperDigest(
   return lines.join('\n')
 }
 
+function getPendingDigestCounts(input: {
+  escalations: PendingEscalationItem[]
+  decisions: PendingDecisionItem[]
+  roomMessages: PendingRoomMessageItem[]
+}): PendingDigestCounts {
+  const escalations = input.escalations.length
+  const decisions = input.decisions.length
+  const roomMessages = input.roomMessages.length
+  return {
+    escalations,
+    decisions,
+    roomMessages,
+    total: escalations + decisions + roomMessages,
+  }
+}
+
+function isUrgentDigest(counts: PendingDigestCounts): boolean {
+  return (
+    counts.escalations >= URGENT_ESCALATION_THRESHOLD
+    || counts.decisions >= URGENT_DECISION_THRESHOLD
+    || counts.total >= URGENT_TOTAL_THRESHOLD
+  )
+}
+
 export async function relayPendingKeeperRequests(db: Database.Database): Promise<void> {
   if (isCloudDeployment()) return
 
@@ -315,6 +381,33 @@ export async function relayPendingKeeperRequests(db: Database.Database): Promise
   }, digestStyleCursor)
   if (!content) return
 
+  const pendingCounts = getPendingDigestCounts({
+    escalations: pendingEscalations,
+    decisions: pendingDecisions,
+    roomMessages: pendingRoomMessages,
+  })
+  const minIntervalMs = resolveIntervalMs(
+    db,
+    CLERK_NOTIFY_MIN_INTERVAL_MINUTES_KEY,
+    DEFAULT_NOTIFY_MIN_INTERVAL_MS,
+    MIN_NOTIFY_INTERVAL_MS,
+    MAX_NOTIFY_INTERVAL_MS,
+  )
+  const urgentIntervalMs = resolveIntervalMs(
+    db,
+    CLERK_NOTIFY_URGENT_MIN_INTERVAL_MINUTES_KEY,
+    DEFAULT_NOTIFY_URGENT_MIN_INTERVAL_MS,
+    MIN_URGENT_INTERVAL_MS,
+    MAX_URGENT_INTERVAL_MS,
+  )
+  const lastSentMs = parseIsoMs(queries.getSetting(db, CLERK_NOTIFY_LAST_SENT_AT_KEY))
+  if (lastSentMs != null) {
+    const elapsedMs = Date.now() - lastSentMs
+    const regularAllowed = minIntervalMs <= 0 || elapsedMs >= minIntervalMs
+    const urgentAllowed = isUrgentDigest(pendingCounts) && (urgentIntervalMs <= 0 || elapsedMs >= urgentIntervalMs)
+    if (!regularAllowed && !urgentAllowed) return
+  }
+
   const sent = await sendClerkAlert(db, { content })
   if (!sent) return
 
@@ -329,6 +422,7 @@ export async function relayPendingKeeperRequests(db: Database.Database): Promise
   queries.setSetting(db, CLERK_NOTIFY_DECISION_CURSOR_KEY, String(nextDecisionCursor))
   queries.setSetting(db, CLERK_NOTIFY_ROOM_MESSAGE_CURSOR_KEY, String(nextRoomMessageCursor))
   queries.setSetting(db, CLERK_NOTIFY_DIGEST_STYLE_CURSOR_KEY, String(digestStyleCursor + 1))
+  queries.setSetting(db, CLERK_NOTIFY_LAST_SENT_AT_KEY, new Date().toISOString())
 
   const byRoom = new Map<number, { room: Room; escalations: number; decisions: number; roomMessages: number }>()
   for (const item of pendingEscalations) {

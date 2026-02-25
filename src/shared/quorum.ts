@@ -112,11 +112,7 @@ export function tally(db: Database.Database, decisionId: number): DecisionStatus
     }
   }
 
-  // Graduated autonomy: keeper gets extra weight in small rooms
-  // Members = workers + keeper. Stage 1: keeper + queen (workers <= 1) → keeper 51%
-  // Stage 2: 3+ members (workers >= 2) → equal
-  const keeperWeightMode = room?.config.keeperWeight ?? 'dynamic'
-  const useWeighted = keeperWeightMode === 'dynamic' && voters.length <= 1
+  // Keeper and workers always count as one vote each.
   const queenWorkerId = room?.queenWorkerId ?? null
   const tieBreakerMode = room?.config.tieBreaker ?? 'queen'
 
@@ -131,12 +127,11 @@ export function tally(db: Database.Database, decisionId: number): DecisionStatus
     else abstainCount++
   }
 
-  // Count keeper vote with dynamic weight
+  // Count keeper vote
   const kv = decision.keeperVote
   if (kv && kv !== 'abstain') {
-    const keeperWeight = useWeighted ? 1.02 : 1.0
-    if (kv === 'yes') yesWeight += keeperWeight
-    else if (kv === 'no') noWeight += keeperWeight
+    if (kv === 'yes') yesWeight += 1
+    else if (kv === 'no') noWeight += 1
   } else if (kv === 'abstain') {
     abstainCount++
   }
@@ -170,9 +165,7 @@ export function tally(db: Database.Database, decisionId: number): DecisionStatus
     }
   }
 
-  const yesDisplay = useWeighted ? yesWeight.toFixed(2) : String(yesWeight)
-  const noDisplay = useWeighted ? noWeight.toFixed(2) : String(noWeight)
-  const result = `Yes: ${yesDisplay}, No: ${noDisplay}, Abstain: ${abstainCount}` + (useWeighted ? ' (weighted)' : '')
+  const result = `Yes: ${yesWeight}, No: ${noWeight}, Abstain: ${abstainCount}`
   queries.resolveDecision(db, decisionId, status, result)
 
   queries.logRoomActivity(db, decision.roomId, 'decision',

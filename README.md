@@ -8,7 +8,7 @@
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![npm version](https://img.shields.io/npm/v/quoroom)](https://www.npmjs.com/package/quoroom)
-[![Tests](https://img.shields.io/badge/tests-1076%20passing-brightgreen)](#)
+[![Tests](https://img.shields.io/badge/tests-1083%20passing-brightgreen)](#)
 [![GitHub stars](https://img.shields.io/github/stars/quoroom-ai/room)](https://github.com/quoroom-ai/room/stargazers)
 [![macOS](https://img.shields.io/badge/macOS-.pkg-000000?logo=apple&logoColor=white)](https://github.com/quoroom-ai/room/releases/latest)
 [![Windows](https://img.shields.io/badge/Windows-.exe-0078D4?logo=windows&logoColor=white)](https://github.com/quoroom-ai/room/releases/latest)
@@ -81,7 +81,7 @@ Quoroom is an open research project exploring autonomous agent collectives. Each
 
 **Activity Controls** — Throttle the queen per room: configurable cycle gap (sleep between runs), max turns per cycle, and quiet hours (time window where the queen rests). Plan-aware defaults (Pro/Max/API/None) apply automatically when you create a new room based on your Claude subscription tier.
 
-**Quorum Voting** — Agents propose and vote on decisions. Majority, supermajority, or unanimous — you choose the threshold.
+**Quorum Voting** — Agents propose and vote on decisions. Majority, supermajority, or unanimous — you choose the threshold. All voters (keeper and workers) have equal weight. Ties are broken by the queen's vote by default.
 
 **Goals** — Hierarchical goal decomposition with progress tracking. Set a top-level objective and let agents break it down.
 
@@ -463,7 +463,13 @@ docker run -p 3700:3700 quoroom
 
 ## Releasing
 
-Use the release runbook: [`docs/RELEASE_RUNBOOK.md`](docs/RELEASE_RUNBOOK.md)
+Triggered by pushing a git tag (`v*`) → GitHub Actions multi-platform build:
+
+- **macOS**: Universal `.pkg` (ARM64 + x64 via `lipo`), Swift tray app compiled, codesigned + Apple-notarized
+- **Windows**: NSIS `.exe` installer, signed with SSL.com eSigner
+- **Linux**: `.deb` package via `fpm`
+- All platforms bundle Node.js runtime (no system dependency), with auto-update and crash rollback
+- Post-build: GitHub Release → npm publish → Homebrew tap update
 
 <details>
 <summary>Project structure</summary>
@@ -507,6 +513,9 @@ room/
 │       ├── embeddings.ts       # Vector embeddings (all-MiniLM-L6-v2)
 │       └── __tests__/          # Test suite (907 tests)
 ├── e2e/                    # Playwright end-to-end tests
+├── installers/
+│   ├── macos/             # Swift tray app (QuoroomTray.swift)
+│   └── windows/           # NSIS installer + PowerShell/VBS scripts
 ├── scripts/
 │   └── build-mcp.js       # esbuild bundling
 ├── Dockerfile              # Cloud runtime image

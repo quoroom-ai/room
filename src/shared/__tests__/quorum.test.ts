@@ -250,30 +250,31 @@ describe('graduated autonomy (keeper voting)', () => {
     smallWorkerId = w.id
   })
 
-  it('stage 1: keeper yes + queen no → approved (keeper 51%)', () => {
+  it('stage 1: keeper yes + queen no → rejected (queen tie-breaker)', () => {
     const decision = propose(db, {
       roomId: tinyRoomId, proposerId: tinyQueenId,
-      proposal: 'Keeper wins', decisionType: 'strategy'
+      proposal: 'Queen wins tie', decisionType: 'strategy'
     })
     keeperVote(db, decision.id, 'yes')
     vote(db, decision.id, tinyQueenId, 'no')
     const resolved = queries.getDecision(db, decision.id)!
-    expect(resolved.status).toBe('approved')
-    expect(resolved.result).toContain('weighted')
+    // 1-1 tie → tieBreaker: 'queen', queen voted no → rejected
+    expect(resolved.status).toBe('rejected')
   })
 
-  it('stage 1: keeper no + queen yes → rejected (keeper 51%)', () => {
+  it('stage 1: keeper no + queen yes → approved (queen tie-breaker)', () => {
     const decision = propose(db, {
       roomId: tinyRoomId, proposerId: tinyQueenId,
-      proposal: 'Keeper rejects', decisionType: 'strategy'
+      proposal: 'Queen approves', decisionType: 'strategy'
     })
     keeperVote(db, decision.id, 'no')
     vote(db, decision.id, tinyQueenId, 'yes')
     const resolved = queries.getDecision(db, decision.id)!
-    expect(resolved.status).toBe('rejected')
+    // 1-1 tie → tieBreaker: 'queen', queen voted yes → approved
+    expect(resolved.status).toBe('approved')
   })
 
-  it('stage 2: keeper no + queen yes + worker yes → approved (outvoted)', () => {
+  it('stage 2: keeper no + queen yes + worker yes → approved (majority)', () => {
     const decision = propose(db, {
       roomId: smallRoomId, proposerId: smallQueenId,
       proposal: 'Collective wins', decisionType: 'strategy'
@@ -283,10 +284,9 @@ describe('graduated autonomy (keeper voting)', () => {
     vote(db, decision.id, smallWorkerId, 'yes')
     const resolved = queries.getDecision(db, decision.id)!
     expect(resolved.status).toBe('approved')
-    expect(resolved.result).not.toContain('weighted')
   })
 
-  it('stage 2: keeper yes + queen no + worker no → rejected (outvoted)', () => {
+  it('stage 2: keeper yes + queen no + worker no → rejected (majority)', () => {
     const decision = propose(db, {
       roomId: smallRoomId, proposerId: smallQueenId,
       proposal: 'Keeper outvoted', decisionType: 'strategy'
@@ -319,10 +319,10 @@ describe('graduated autonomy (keeper voting)', () => {
     const still = queries.getDecision(db, decision.id)!
     expect(still.status).toBe('voting')
 
-    // Queen votes — auto-tally fires, keeper had 51% weight → rejected
+    // Queen votes — auto-tally fires, 1-1 tie → queen tie-breaker → approved
     vote(db, decision.id, tinyQueenId, 'yes')
     const resolved = queries.getDecision(db, decision.id)!
-    expect(resolved.status).toBe('rejected')
+    expect(resolved.status).toBe('approved')
   })
 
   it('keeper abstain excluded from active weight', () => {
@@ -336,10 +336,7 @@ describe('graduated autonomy (keeper voting)', () => {
     expect(resolved.status).toBe('approved')
   })
 
-  it('keeperWeight equal → keeper has no extra weight', () => {
-    const config = { ...queries.getRoom(db, tinyRoomId)!.config, keeperWeight: 'equal' as const }
-    queries.updateRoom(db, tinyRoomId, { config })
-
+  it('keeper always has equal weight (tie-breaker decides)', () => {
     const decision = propose(db, {
       roomId: tinyRoomId, proposerId: tinyQueenId,
       proposal: 'Equal weight', decisionType: 'strategy'

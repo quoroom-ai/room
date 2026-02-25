@@ -524,7 +524,7 @@ describe('quoroom_room_activity', () => {
   })
 
   it('returns no activity message for empty room', async () => {
-    const room = queries.createRoom(db, 'Empty', null, { threshold: 'majority', timeoutMinutes: 60, keeperWeight: 'dynamic', tieBreaker: 'queen', autoApprove: ['low_impact'], minCycleGapMs: 1000 })
+    const room = queries.createRoom(db, 'Empty', null, { threshold: 'majority', timeoutMinutes: 60, tieBreaker: 'queen', autoApprove: ['low_impact'], minCycleGapMs: 1000 })
     const handler = toolHandlers.get('quoroom_room_activity')!
     const result = await handler({ id: room.id })
     expect(getResponseText(result)).toContain('No activity')
@@ -699,7 +699,7 @@ describe('quoroom_list_goals', () => {
   })
 
   it('returns no goals message', async () => {
-    const room = queries.createRoom(db, 'No Goals', null, { threshold: 'majority', timeoutMinutes: 60, keeperWeight: 'dynamic', tieBreaker: 'queen', autoApprove: ['low_impact'], minCycleGapMs: 1000 })
+    const room = queries.createRoom(db, 'No Goals', null, { threshold: 'majority', timeoutMinutes: 60, tieBreaker: 'queen', autoApprove: ['low_impact'], minCycleGapMs: 1000 })
     const handler = toolHandlers.get('quoroom_list_goals')!
     const result = await handler({ roomId: room.id })
     expect(getResponseText(result)).toContain('No goals')

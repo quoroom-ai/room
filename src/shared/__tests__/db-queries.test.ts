@@ -1457,7 +1457,7 @@ describe('credentials', () => {
   let roomId: number
 
   beforeEach(() => {
-    const room = q.createRoom(db, 'Cred Room', 'test goal', { threshold: 'majority', timeoutMinutes: 60, keeperWeight: 'dynamic', tieBreaker: 'queen', autoApprove: ['low_impact'], minCycleGapMs: 1000 })
+    const room = q.createRoom(db, 'Cred Room', 'test goal', { threshold: 'majority', timeoutMinutes: 60, tieBreaker: 'queen', autoApprove: ['low_impact'], minCycleGapMs: 1000 })
     roomId = room.id
   })
 
@@ -1515,7 +1515,7 @@ describe('credentials', () => {
   })
 
   it('listCredentials scopes to room', () => {
-    const room2 = q.createRoom(db, 'Other Room', null, { threshold: 'majority', timeoutMinutes: 60, keeperWeight: 'dynamic', tieBreaker: 'queen', autoApprove: ['low_impact'], minCycleGapMs: 1000 })
+    const room2 = q.createRoom(db, 'Other Room', null, { threshold: 'majority', timeoutMinutes: 60, tieBreaker: 'queen', autoApprove: ['low_impact'], minCycleGapMs: 1000 })
     q.createCredential(db, roomId, 'Room1 Key', 'api_key', 'v1')
     q.createCredential(db, room2.id, 'Room2 Key', 'api_key', 'v2')
     expect(q.listCredentials(db, roomId)).toHaveLength(1)
@@ -1556,7 +1556,7 @@ describe('escalations', () => {
   let workerId: number
 
   beforeEach(() => {
-    const room = q.createRoom(db, 'Esc Room', 'test', { threshold: 'majority', timeoutMinutes: 60, keeperWeight: 'dynamic', tieBreaker: 'queen', autoApprove: ['low_impact'], minCycleGapMs: 1000 })
+    const room = q.createRoom(db, 'Esc Room', 'test', { threshold: 'majority', timeoutMinutes: 60, tieBreaker: 'queen', autoApprove: ['low_impact'], minCycleGapMs: 1000 })
     roomId = room.id
     const queen = q.createWorker(db, { name: 'Queen', systemPrompt: 'queen', roomId })
     queenId = queen.id
@@ -1658,6 +1658,44 @@ describe('escalations', () => {
     const all = q.listEscalations(db, roomId)
     expect(all[0].question).toBe('First')
     expect(all[1].question).toBe('Second')
+  })
+
+  it('logs room activity when escalation is created', () => {
+    q.createEscalation(db, roomId, workerId, 'Timeline visibility check', queenId)
+    const activity = q.getRoomActivity(db, roomId, 20)
+    expect(activity.some(a =>
+      a.eventType === 'worker'
+      && a.summary.includes(`Worker #${workerId} sent message to worker #${queenId}`)
+      && (a.details ?? '').includes('Timeline visibility check')
+    )).toBe(true)
+  })
+
+  it('logs room activity when escalation is resolved', () => {
+    const esc = q.createEscalation(db, roomId, workerId, 'Need keeper response')
+    q.resolveEscalation(db, esc.id, 'Approved, continue')
+    const activity = q.getRoomActivity(db, roomId, 20)
+    expect(activity.some(a =>
+      a.eventType === 'system'
+      && a.summary.includes(`Keeper replied to worker #${workerId}`)
+      && (a.details ?? '').includes('Approved, continue')
+    )).toBe(true)
+  })
+})
+
+describe('worker cycles', () => {
+  it('supersedes stale running cycle for same worker before creating a new one', () => {
+    const room = q.createRoom(db, 'Cycle Room', 'test', { threshold: 'majority', timeoutMinutes: 60, tieBreaker: 'queen', autoApprove: ['low_impact'], minCycleGapMs: 1000 })
+    const worker = q.createWorker(db, { name: 'Cycle Worker', systemPrompt: 'worker', roomId: room.id })
+
+    const first = q.createWorkerCycle(db, worker.id, room.id, 'codex')
+    const second = q.createWorkerCycle(db, worker.id, room.id, 'codex')
+
+    const firstUpdated = q.getWorkerCycle(db, first.id)!
+    const secondUpdated = q.getWorkerCycle(db, second.id)!
+
+    expect(firstUpdated.status).toBe('failed')
+    expect(firstUpdated.errorMessage).toBe('Superseded by newer cycle')
+    expect(secondUpdated.status).toBe('running')
   })
 })
 

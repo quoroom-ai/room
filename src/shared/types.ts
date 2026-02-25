@@ -210,7 +210,6 @@ export interface MemoryStats {
 export interface RoomConfig {
   threshold: 'majority' | 'supermajority' | 'unanimous'
   timeoutMinutes: number
-  keeperWeight: 'dynamic' | 'equal'
   tieBreaker: 'queen' | 'none'
   autoApprove: string[]
   minCycleGapMs: number

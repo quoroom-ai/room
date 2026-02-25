@@ -253,7 +253,6 @@ Rules:
 export const DEFAULT_ROOM_CONFIG = {
   threshold: 'majority' as const,
   timeoutMinutes: 60,
-  keeperWeight: 'dynamic' as const,
   tieBreaker: 'queen' as const,
   autoApprove: ['low_impact'],
   minCycleGapMs: 1_000,

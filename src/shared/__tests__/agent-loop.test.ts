@@ -168,6 +168,71 @@ describe('runCycle', () => {
     const output = await runCycle(db, roomId, worker)
     expect(output).toContain('rate_limit_error')
   })
+
+  it('rotates long-running CLI sessions before execution', async () => {
+    for (let i = 0; i < 20; i++) {
+      queries.saveAgentSession(db, queenId, { sessionId: 'old-cli-session', model: 'claude' })
+    }
+
+    const worker = queries.getWorker(db, queenId)!
+    await runCycle(db, roomId, worker)
+
+    const callArgs = mockExecuteAgent.mock.calls[0][0]
+    expect(callArgs.resumeSessionId).toBeUndefined()
+
+    const session = queries.getAgentSession(db, queenId)
+    expect(session?.sessionId).toBe('session-1')
+    expect(session?.turnCount).toBe(1)
+  })
+
+  it('clears malformed CLI session when execution fails with context overflow', async () => {
+    queries.saveAgentSession(db, queenId, { sessionId: null, model: 'claude' })
+    mockExecuteAgent.mockResolvedValue({
+      output: 'Error: context window exceeded while compacting conversation history',
+      exitCode: 1,
+      durationMs: 100,
+      sessionId: null,
+      timedOut: false
+    })
+
+    const worker = queries.getWorker(db, queenId)!
+    const output = await runCycle(db, roomId, worker)
+
+    expect(output).toContain('context window exceeded')
+    expect(queries.getAgentSession(db, queenId)).toBeUndefined()
+  })
+
+  it('retries same cycle with fresh CLI session after context overflow', async () => {
+    queries.updateWorker(db, queenId, { model: 'codex' } as Parameters<typeof queries.updateWorker>[2])
+    queries.saveAgentSession(db, queenId, { sessionId: 'stale-codex-session', model: 'codex' })
+
+    mockExecuteAgent
+      .mockResolvedValueOnce({
+        output: 'ERROR codex_core::compact_remote: remote compaction failed model_visible_bytes=2100000',
+        exitCode: 1,
+        durationMs: 1200,
+        sessionId: 'stale-codex-session',
+        timedOut: false
+      })
+      .mockResolvedValueOnce({
+        output: 'Recovered after fresh session and executed tools.',
+        exitCode: 0,
+        durationMs: 900,
+        sessionId: 'fresh-codex-session',
+        timedOut: false
+      })
+
+    const worker = queries.getWorker(db, queenId)!
+    const output = await runCycle(db, roomId, worker)
+
+    expect(output).toContain('Recovered after fresh session')
+    expect(mockExecuteAgent).toHaveBeenCalledTimes(2)
+    expect(mockExecuteAgent.mock.calls[0][0].resumeSessionId).toBe('stale-codex-session')
+    expect(mockExecuteAgent.mock.calls[1][0].resumeSessionId).toBeUndefined()
+
+    const session = queries.getAgentSession(db, queenId)
+    expect(session?.sessionId).toBe('fresh-codex-session')
+  })
 })
 
 describe('startAgentLoop', () => {

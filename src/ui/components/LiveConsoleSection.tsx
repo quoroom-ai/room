@@ -1,5 +1,4 @@
 import { useState, useEffect, useRef, useCallback, useMemo } from 'react'
-import { useDocumentVisible } from '../hooks/useDocumentVisible'
 import { api } from '../lib/client'
 import { wsClient, type WsMessage } from '../lib/ws'
 import type { Task, TaskRun, ConsoleLogEntry, Worker, WorkerCycle, CycleLogEntry } from '@shared/types'
@@ -20,8 +19,8 @@ const STATUS_COLORS: Record<string, string> = {
   failed: 'text-status-error',
 }
 
-const LOG_POLL_MS = 5000
-const CYCLES_POLL_MS = 10000
+const LOG_POLL_MS = 3000
+const CYCLES_POLL_MS = 5000
 const MAX_ENTRIES = 200
 const MAX_ITEMS = 20
 
@@ -58,8 +57,7 @@ export function LiveConsoleSection({
   roomId,
   workers = [],
 }: LiveConsoleSectionProps): React.JSX.Element {
-  const isVisible = useDocumentVisible()
-  const active = isActive && isVisible
+  const active = isActive
 
   // ─── Cycles state ──────────────────────────────────────
   const [cycles, setCycles] = useState<WorkerCycle[]>([])

@@ -51,6 +51,21 @@ Current behavior:
 
 Implementation: `src/server/clerk-commentary.ts`.
 
+## Keeper Alert Digest Cadence
+
+Clerk external alerts (email/Telegram) for pending keeper requests are now batched by default.
+
+- Default digest cadence: once every 6 hours
+- Urgent backlog cadence: at most once per hour for large bursts
+- New items are queued and included in the next digest window
+
+Optional settings (minutes):
+
+- `clerk_notify_min_interval_minutes` (default 360)
+- `clerk_notify_urgent_min_interval_minutes` (default 60)
+
+Set either value to `0` to disable that specific cooldown.
+
 ## Clerk HTTP API
 
 All routes are under the local API server:
