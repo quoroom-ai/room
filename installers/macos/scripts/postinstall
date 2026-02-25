@@ -39,7 +39,16 @@ create_launcher_app() {
 
   mkdir -p "${APP_MACOS}" "${APP_RESOURCES}"
 
-  cat > "${APP_EXEC}" << 'APP'
+  # Copy the pre-compiled tray binary into the .app bundle.
+  TRAY_SRC="/usr/local/lib/quoroom/ui/QuoroomTray"
+  if [ ! -f "${TRAY_SRC}" ] && [ -f "${HOME}/usr/local/lib/quoroom/ui/QuoroomTray" ]; then
+    TRAY_SRC="${HOME}/usr/local/lib/quoroom/ui/QuoroomTray"
+  fi
+  if [ -f "${TRAY_SRC}" ]; then
+    cp -f "${TRAY_SRC}" "${APP_EXEC}"
+  else
+    # Fallback: minimal bash launcher (same health-check pattern).
+    cat > "${APP_EXEC}" << 'APP'
 #!/bin/bash
 PORT="${QUOROOM_PORT:-3700}"
 URL="http://localhost:${PORT}"
@@ -49,32 +58,20 @@ if [ ! -x "${BIN_PATH}" ] && [ -x "${HOME}/usr/local/lib/quoroom/bin/quoroom" ];
 fi
 LOG_DIR="${HOME}/Library/Logs/Quoroom"
 LOG_FILE="${LOG_DIR}/server.log"
-
 mkdir -p "${LOG_DIR}"
-
 is_quoroom_healthy() {
-  if ! command -v curl >/dev/null 2>&1; then
-    return 1
-  fi
-  CODE="$(curl -sS -m 1 -o /dev/null -w "%{http_code}" "${URL}/api/auth/handshake" || true)"
+  CODE="$(curl -sS -m 1 -o /dev/null -w "%{http_code}" "${URL}/api/auth/handshake" 2>/dev/null || true)"
   [ "${CODE}" = "200" ]
 }
-
-# Only skip startup when Quoroom is actually serving this port.
-if is_quoroom_healthy; then
-  open "${URL}"
-  exit 0
-fi
-
-nohup "${BIN_PATH}" serve --port "${PORT}" >> "${LOG_FILE}" 2>&1 &
+if is_quoroom_healthy; then open "${URL}"; exit 0; fi
+QUOROOM_NO_AUTO_OPEN=1 nohup "${BIN_PATH}" serve --port "${PORT}" >> "${LOG_FILE}" 2>&1 &
 for _ in 1 2 3 4 5 6 7 8 9 10; do
-  if is_quoroom_healthy; then
-    break
-  fi
+  if is_quoroom_healthy; then break; fi
   sleep 1
 done
 open "${URL}"
 APP
+  fi
   chmod 755 "${APP_EXEC}"
 
   if [ -f "${ICON_SRC_SERVER}" ]; then
@@ -104,6 +101,8 @@ APP
     <string>1.0</string>
     <key>LSMinimumSystemVersion</key>
     <string>11.0</string>
+    <key>LSUIElement</key>
+    <true/>
   </dict>
 </plist>
 PLIST
@@ -153,15 +152,10 @@ if [ -n "${OLD_PIDS}" ]; then
   kill -9 ${OLD_PIDS} 2>/dev/null || true
 fi
 
-# Start fresh server.
-START_CMD="nohup \"${BIN_PATH}\" serve --port ${PORT} >> \"${LOG_FILE}\" 2>&1 &"
-launchctl asuser "${CONSOLE_UID}" sudo -u "${CONSOLE_USER}" /bin/bash -lc "${START_CMD}" 2>/dev/null \
-  || sudo -u "${CONSOLE_USER}" /bin/bash -lc "${START_CMD}" 2>/dev/null \
-  || true
-
-# Open dashboard in the logged-in user's browser.
-launchctl asuser "${CONSOLE_UID}" sudo -u "${CONSOLE_USER}" open "${URL}" 2>/dev/null \
-  || sudo -u "${CONSOLE_USER}" open "${URL}" 2>/dev/null \
+# Launch the tray app — it handles server start, health check, and browser open.
+APP_TO_LAUNCH="${LAUNCHER_APPS_DIR}/Quoroom Server.app"
+launchctl asuser "${CONSOLE_UID}" sudo -u "${CONSOLE_USER}" open "${APP_TO_LAUNCH}" 2>/dev/null \
+  || sudo -u "${CONSOLE_USER}" open "${APP_TO_LAUNCH}" 2>/dev/null \
   || true
 
 exit 0

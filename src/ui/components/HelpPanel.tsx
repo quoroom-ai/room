@@ -194,7 +194,7 @@ export function HelpPanel({ installPrompt, onStartWalkthrough }: HelpPanelProps)
           Star on GitHub
         </button>
         <button
-          onClick={() => { window.location.href = 'mailto:hello@quoroom.ai' }}
+          onClick={() => { window.location.href = 'mailto:hello@email.quoroom.ai' }}
           className="w-full py-2 text-sm text-text-muted hover:text-text-secondary border border-border-primary hover:border-border-primary rounded-lg transition-colors"
         >
           Contact Developer

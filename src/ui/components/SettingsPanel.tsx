@@ -947,7 +947,7 @@ export function SettingsPanel({ advancedMode, onAdvancedModeChange, installPromp
             Report Bug
           </button>
           <button
-            onClick={() => window.open('mailto:hello@quoroom.ai')}
+            onClick={() => window.open('mailto:hello@email.quoroom.ai')}
             className="w-full py-2 text-sm bg-interactive text-text-invert rounded-lg hover:bg-interactive-hover transition-colors"
           >
             Email Developer
