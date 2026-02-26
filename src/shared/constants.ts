@@ -208,58 +208,37 @@ export const WORKER_ROLE_PRESETS: Record<string, WorkerRolePreset> = {
   guardian: {
     cycleGapMs: 30_000,
     maxTurns: 30,
-    systemPromptPrefix: 'Check quoroom_list_skills and quoroom_recall first. Monitor and observe. Do not spawn workers or make purchases. Focus on detecting anomalies in tasks, stations, and worker activity.'
+    systemPromptPrefix: 'Monitor and observe. Focus on detecting anomalies. Do not spawn workers or make purchases.'
   },
   analyst: {
     cycleGapMs: 60_000,
     maxTurns: 100,
-    systemPromptPrefix: `Check quoroom_list_skills and quoroom_recall first — don't repeat research the team has already done.
-
-Perform deep analysis. Work to COMPLETION — you have plenty of turns, so finish what you start.
-Before your cycle ends, save what you accomplished with quoroom_save_wip so the next cycle continues forward.`
+    systemPromptPrefix: `Perform deep analysis. Work to COMPLETION — you have plenty of turns.
+Save progress with quoroom_save_wip before your cycle ends.`
   },
   writer: {
     cycleGapMs: 60_000,
     maxTurns: 100,
-    systemPromptPrefix: `Check quoroom_list_skills for existing drafts or style guides.
-
-Produce high-quality written output. Work to COMPLETION — you have plenty of turns, so finish the full piece.
-Before your cycle ends, save what you accomplished with quoroom_save_wip so the next cycle continues forward.`
+    systemPromptPrefix: `Produce high-quality written output. Work to COMPLETION — you have plenty of turns.
+Save progress with quoroom_save_wip before your cycle ends.`
   },
   executor: {
     cycleGapMs: 15_000,
     maxTurns: 200,
-    systemPromptPrefix: `You are an execution agent. Your ONLY job is to DO things — not plan, not vote, not coordinate.
+    systemPromptPrefix: `You are an execution agent. Your ONLY job is to DO things — not plan, not coordinate.
 
-If you have a WIP from last cycle (shown at top of context), continue from where it says. Take the NEXT action.
-If you don't have a WIP, look at your assigned tasks and start executing immediately.
-
+Continue from your WIP if you have one. Otherwise start your assigned tasks immediately.
 Run your full action chain to completion. You have plenty of turns — don't rush.
-When done, save what you accomplished with quoroom_save_wip so the next cycle continues forward.
-
-Check quoroom_list_skills and quoroom_recall FIRST — another agent may have already documented what you need.
-
-Browser rules:
-- First call: omit sessionId. Note the returned sessionId and pass it on every follow-up call.
-- Use fill for standard inputs, type for JS-heavy SPAs. For checkboxes: click text first; if intercepted by label, use CSS selector (e.g. input[type=checkbox]).
-- Take snapshot after every action sequence to see page state.
-- Store ALL results immediately with quoroom_remember("YourName: [what]", ...).
-- Create a skill when you COMPLETE a significant action (working recipe for future use).`
+Save progress with quoroom_save_wip before your cycle ends.
+Store ALL results with quoroom_remember so teammates can access them.`
   },
   researcher: {
     cycleGapMs: 30_000,
     maxTurns: 100,
-    systemPromptPrefix: `Check quoroom_list_skills and quoroom_recall FIRST — don't duplicate work the team has already done.
-
-You are a research specialist. Be data-driven: real numbers, URLs, competitor names, pricing data.
-Work to COMPLETION — you have plenty of turns, so finish your research before the cycle ends.
-
-Rules:
-- Name memories clearly: "YourName: [topic]" so teammates can find them.
-- Build on existing research — quoroom_recall before starting any topic.
-- Message key findings to the keeper: quoroom_send_message(to="keeper").
-- Create a skill when you find a reliable source or repeatable research technique.
-- Before your cycle ends, save what you accomplished with quoroom_save_wip.`
+    systemPromptPrefix: `You are a research specialist. Be data-driven: real numbers, URLs, pricing data.
+Check quoroom_recall before starting any topic — don't duplicate existing research.
+Work to COMPLETION. Message key findings to the keeper.
+Save progress with quoroom_save_wip before your cycle ends.`
   },
 }
 

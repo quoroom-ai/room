@@ -2,7 +2,7 @@ import { z } from 'zod'
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
 import { getMcpDatabase } from '../db'
 import * as queries from '../../shared/db-queries'
-import { propose, tally } from '../../shared/quorum'
+import { announce } from '../../shared/quorum'
 import { nudgeWorker } from '../nudge'
 
 export function registerInboxTools(server: McpServer): void {
@@ -76,16 +76,12 @@ export function registerInboxTools(server: McpServer): void {
             const pendingDecisions = queries.listDecisions(db, roomId, 'voting')
             const alreadyPending = pendingDecisions.find(d => d.proposal === proposalText)
             if (!alreadyPending) {
-              const decision = propose(db, {
+              const decision = announce(db, {
                 roomId,
                 proposerId: null,
                 proposal: proposalText,
                 decisionType: 'low_impact',
               })
-              if (decision.status === 'voting') {
-                // If there are any votes, this may resolve immediately.
-                tally(db, decision.id)
-              }
               auditDecisionId = decision.id
             } else {
               auditDecisionId = alreadyPending.id

@@ -247,6 +247,7 @@ CREATE TABLE IF NOT EXISTS quorum_decisions (
     keeper_vote TEXT,
     min_voters INTEGER NOT NULL DEFAULT 0,
     sealed INTEGER NOT NULL DEFAULT 0,
+    effective_at DATETIME,
     created_at DATETIME DEFAULT (datetime('now','localtime')),
     resolved_at DATETIME
 );

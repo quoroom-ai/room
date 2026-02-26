@@ -1,13 +1,13 @@
 import type Database from 'better-sqlite3'
 import * as queries from './db-queries'
-import { propose, vote } from './quorum'
-import { updateGoalProgress, decomposeGoal, completeGoal, abandonGoal, setRoomObjective } from './goals'
+import { announce, object } from './quorum'
+import { completeGoal, setRoomObjective } from './goals'
 import { triggerAgent } from './agent-loop'
-import type { DecisionType, VoteValue } from './types'
+import type { DecisionType } from './types'
 import { webFetch, webSearch, browserActionPersistent, type BrowserAction } from './web-tools'
 import { WORKER_ROLE_PRESETS } from './constants'
 
-/** Wake all other running workers in a room (e.g. to vote on a proposal or read a message) */
+/** Wake all other running workers in a room (e.g. to see an announcement or message) */
 function wakeRoomWorkers(db: Database.Database, roomId: number, excludeWorkerId: number): void {
   const workers = queries.listRoomWorkers(db, roomId)
   for (const w of workers) {
@@ -39,388 +39,347 @@ export interface ToolDef {
   }
 }
 
-// ─── All queen tool definitions ─────────────────────────────────────────────
+// ─── Shared tool definitions ─────────────────────────────────────────────
 
-export const QUEEN_TOOL_DEFINITIONS: ToolDef[] = [
-  // ── Goals ──────────────────────────────────────────────────────────────
-  {
-    type: 'function',
-    function: {
-      name: 'quoroom_set_goal',
-      description: 'Set or update the room\'s primary objective.',
-      parameters: {
-        type: 'object',
-        properties: {
-          description: { type: 'string', description: 'The objective description' }
-        },
-        required: ['description']
-      }
+const TOOL_SET_GOAL: ToolDef = {
+  type: 'function',
+  function: {
+    name: 'quoroom_set_goal',
+    description: 'Set or update the room\'s primary objective.',
+    parameters: {
+      type: 'object',
+      properties: {
+        description: { type: 'string', description: 'The objective description' }
+      },
+      required: ['description']
     }
-  },
-  {
-    type: 'function',
-    function: {
-      name: 'quoroom_update_progress',
-      description: 'Log a progress observation on a goal. Optionally set a metric value from 0.0 to 1.0.',
-      parameters: {
-        type: 'object',
-        properties: {
-          goalId: { type: 'number', description: 'The goal ID' },
-          observation: { type: 'string', description: 'Description of the progress made' },
-          metricValue: { type: 'number', description: 'Progress value from 0.0 (0%) to 1.0 (100%)' }
-        },
-        required: ['goalId', 'observation']
-      }
-    }
-  },
-  {
-    type: 'function',
-    function: {
-      name: 'quoroom_create_subgoal',
-      description: 'Decompose a goal into smaller sub-goals.',
-      parameters: {
-        type: 'object',
-        properties: {
-          goalId: { type: 'number', description: 'The parent goal ID' },
-          descriptions: {
-            type: 'array',
-            description: 'Array of sub-goal descriptions',
-            items: { type: 'string' }
-          }
-        },
-        required: ['goalId', 'descriptions']
-      }
-    }
-  },
-  {
-    type: 'function',
-    function: {
-      name: 'quoroom_delegate_task',
-      description: 'Delegate a task to a specific worker. Creates a goal assigned to that worker. The worker will see it in their "Your Assigned Tasks" context. Use this to divide work among your team.',
-      parameters: {
-        type: 'object',
-        properties: {
-          workerName: { type: 'string', description: 'The worker name to assign to (from Room Workers list)' },
-          task: { type: 'string', description: 'Description of the task to delegate' },
-          parentGoalId: { type: 'number', description: 'Optional parent goal ID to attach as sub-goal' }
-        },
-        required: ['workerName', 'task']
-      }
-    }
-  },
-  {
-    type: 'function',
-    function: {
-      name: 'quoroom_complete_goal',
-      description: 'Mark a goal as completed (100% progress).',
-      parameters: {
-        type: 'object',
-        properties: {
-          goalId: { type: 'number', description: 'The goal ID to mark as completed' }
-        },
-        required: ['goalId']
-      }
-    }
-  },
-  {
-    type: 'function',
-    function: {
-      name: 'quoroom_abandon_goal',
-      description: 'Mark a goal as abandoned with a reason.',
-      parameters: {
-        type: 'object',
-        properties: {
-          goalId: { type: 'number', description: 'The goal ID to abandon' },
-          reason: { type: 'string', description: 'Reason for abandoning this goal' }
-        },
-        required: ['goalId', 'reason']
-      }
-    }
-  },
+  }
+}
 
-  // ── Quorum ─────────────────────────────────────────────────────────────
-  {
-    type: 'function',
-    function: {
-      name: 'quoroom_propose',
-      description: 'Create a proposal for the room quorum to vote on. Other workers will see it and vote. Requires minVoters votes to resolve.',
-      parameters: {
-        type: 'object',
-        properties: {
-          proposal: { type: 'string', description: 'The proposal text. Start with a short title on the first line, then details with line breaks and bullet points.' },
-          decisionType: {
-            type: 'string',
-            description: 'Type of decision',
-            enum: ['strategy', 'resource', 'personnel', 'rule_change', 'low_impact']
-          }
-        },
-        required: ['proposal', 'decisionType']
-      }
+const TOOL_DELEGATE_TASK: ToolDef = {
+  type: 'function',
+  function: {
+    name: 'quoroom_delegate_task',
+    description: 'Delegate a task to a specific worker. Creates a goal assigned to that worker.',
+    parameters: {
+      type: 'object',
+      properties: {
+        workerName: { type: 'string', description: 'The worker name to assign to' },
+        task: { type: 'string', description: 'Description of the task to delegate' },
+        parentGoalId: { type: 'number', description: 'Optional parent goal ID' }
+      },
+      required: ['workerName', 'task']
     }
-  },
-  {
-    type: 'function',
-    function: {
-      name: 'quoroom_vote',
-      description: 'Cast a vote on a pending quorum decision.',
-      parameters: {
-        type: 'object',
-        properties: {
-          decisionId: { type: 'number', description: 'The decision ID' },
-          vote: { type: 'string', description: 'Vote: yes, no, or abstain', enum: ['yes', 'no', 'abstain'] },
-          reasoning: { type: 'string', description: 'Optional reasoning for the vote' }
-        },
-        required: ['decisionId', 'vote']
-      }
-    }
-  },
+  }
+}
 
-  // ── Workers ────────────────────────────────────────────────────────────
-  {
-    type: 'function',
-    function: {
-      name: 'quoroom_create_worker',
-      description: 'Create a new agent worker. REQUIRED: name (string, e.g. "Alice") and systemPrompt (string, the agent\'s instructions). Do NOT pass worker_id or room_id — this creates a NEW worker. Role presets (guardian/analyst/writer) auto-apply cycle_gap_ms and max_turns defaults unless overridden.',
-      parameters: {
-        type: 'object',
-        properties: {
-          name: { type: 'string', description: 'The worker\'s name, e.g. "Alice" or "Research Agent"' },
-          systemPrompt: { type: 'string', description: 'Full instructions for this worker — personality, goals, constraints. E.g. "You are a research agent. Your job is to..."' },
-          role: { type: 'string', description: 'Optional job title or role preset. Built-in presets with execution defaults: "guardian" (60s cycle, 5 turns, monitoring-focused), "analyst" (300s cycle, 15 turns), "writer" (300s cycle, 20 turns).' },
-          description: { type: 'string', description: 'Optional one-line summary of what this worker does' },
-          cycle_gap_ms: { type: 'number', description: 'Override cycle gap in milliseconds (default: role preset or room default)' },
-          max_turns: { type: 'number', description: 'Override max turns per cycle (default: role preset or room default)' }
-        },
-        required: ['name', 'systemPrompt']
-      }
+const TOOL_COMPLETE_GOAL: ToolDef = {
+  type: 'function',
+  function: {
+    name: 'quoroom_complete_goal',
+    description: 'Mark a goal as completed.',
+    parameters: {
+      type: 'object',
+      properties: {
+        goalId: { type: 'number', description: 'The goal ID to mark as completed' }
+      },
+      required: ['goalId']
     }
-  },
-  {
-    type: 'function',
-    function: {
-      name: 'quoroom_update_worker',
-      description: 'Update an existing worker\'s name, role, system prompt, description, or execution settings.',
-      parameters: {
-        type: 'object',
-        properties: {
-          workerId: { type: 'number', description: 'The worker ID to update' },
-          name: { type: 'string', description: 'New name' },
-          role: { type: 'string', description: 'New role/function title' },
-          systemPrompt: { type: 'string', description: 'New system prompt' },
-          description: { type: 'string', description: 'New description' },
-          cycle_gap_ms: { type: 'number', description: 'Override cycle gap in milliseconds (null to reset to room default)' },
-          max_turns: { type: 'number', description: 'Override max turns per cycle (null to reset to room default)' }
-        },
-        required: ['workerId']
-      }
-    }
-  },
+  }
+}
 
-  // ── Tasks ──────────────────────────────────────────────────────────────
-  {
-    type: 'function',
-    function: {
-      name: 'quoroom_schedule',
-      description: 'Create a task for workers to execute — recurring (cron), one-time, or on-demand. The prompt runs as a separate Claude instance so must be fully self-contained.',
-      parameters: {
-        type: 'object',
-        properties: {
-          name: { type: 'string', description: 'Short task name' },
-          prompt: { type: 'string', description: 'Fully self-contained prompt that the task will execute' },
-          cronExpression: { type: 'string', description: 'Cron expression for recurring tasks (e.g. "0 9 * * *" for daily 9am). Omit for one-time or on-demand.' },
-          scheduledAt: { type: 'string', description: 'ISO-8601 datetime for one-time tasks. Omit for recurring or on-demand.' },
-          workerId: { type: 'number', description: 'Worker ID to assign this task to' },
-          maxTurns: { type: 'number', description: 'Max agentic turns per run (e.g. 25)' }
-        },
-        required: ['name', 'prompt']
-      }
-    }
-  },
-
-  // ── Memory ─────────────────────────────────────────────────────────────
-  {
-    type: 'function',
-    function: {
-      name: 'quoroom_remember',
-      description: 'Store a memory or observation for later recall. Use for facts, insights, decisions, or project details.',
-      parameters: {
-        type: 'object',
-        properties: {
-          name: { type: 'string', description: 'Short label for this memory (e.g. "Q1 budget decision")' },
-          content: { type: 'string', description: 'The detailed information to remember' },
-          type: {
-            type: 'string',
-            description: 'Memory type',
-            enum: ['fact', 'preference', 'person', 'project', 'event']
-          }
-        },
-        required: ['name', 'content']
-      }
-    }
-  },
-  {
-    type: 'function',
-    function: {
-      name: 'quoroom_recall',
-      description: 'Search stored memories by keyword.',
-      parameters: {
-        type: 'object',
-        properties: {
-          query: { type: 'string', description: 'Search keyword or phrase' }
-        },
-        required: ['query']
-      }
-    }
-  },
-
-  // ── Messaging ──────────────────────────────────────────────────────────
-  {
-    type: 'function',
-    function: {
-      name: 'quoroom_send_message',
-      description: 'Send a message to the keeper or another worker. The keeper sees all messages. Use to coordinate with teammates, report progress, ask for help, or escalate to the keeper.',
-      parameters: {
-        type: 'object',
-        properties: {
-          to: { type: 'string', description: 'Recipient: "keeper" or a worker name from Room Workers list' },
-          message: { type: 'string', description: 'The message content' }
-        },
-        required: ['to', 'message']
-      }
-    }
-  },
-
-  // ── Room config ─────────────────────────────────────────────────────────
-  {
-    type: 'function',
-    function: {
-      name: 'quoroom_configure_room',
-      description: 'Adjust queen cycle settings to self-regulate token usage.',
-      parameters: {
-        type: 'object',
-        properties: {
-          queenCycleGapMs: {
-            type: 'number',
-            description: 'Milliseconds between queen cycles (e.g. 300000 = 5 min, 1800000 = 30 min)'
-          },
-          queenMaxTurns: {
-            type: 'number',
-            description: 'Max tool-call turns per queen cycle (1–50)'
-          }
+const TOOL_ANNOUNCE: ToolDef = {
+  type: 'function',
+  function: {
+    name: 'quoroom_announce',
+    description: 'Announce a decision. Becomes effective after 10 minutes unless a worker objects.',
+    parameters: {
+      type: 'object',
+      properties: {
+        proposal: { type: 'string', description: 'The decision text' },
+        decisionType: {
+          type: 'string',
+          description: 'Type of decision',
+          enum: ['strategy', 'resource', 'personnel', 'rule_change', 'low_impact']
         }
-      }
+      },
+      required: ['proposal', 'decisionType']
     }
-  },
+  }
+}
 
-  // ── Web / Internet access ────────────────────────────────────────────────
-  {
-    type: 'function',
-    function: {
-      name: 'quoroom_web_search',
-      description: 'Search the web. Returns top 5 results with title, URL, and snippet. No API key required.',
-      parameters: {
-        type: 'object',
-        properties: {
-          query: { type: 'string', description: 'Search query' }
-        },
-        required: ['query']
-      }
+const TOOL_OBJECT: ToolDef = {
+  type: 'function',
+  function: {
+    name: 'quoroom_object',
+    description: 'Object to an announced decision. Blocks it from becoming effective.',
+    parameters: {
+      type: 'object',
+      properties: {
+        decisionId: { type: 'number', description: 'The decision ID to object to' },
+        reason: { type: 'string', description: 'Reason for objecting' }
+      },
+      required: ['decisionId', 'reason']
     }
-  },
-  {
-    type: 'function',
-    function: {
-      name: 'quoroom_web_fetch',
-      description: 'Fetch any URL and return its content as clean markdown text. Use to read articles, docs, pricing pages, or any public web page.',
-      parameters: {
-        type: 'object',
-        properties: {
-          url: { type: 'string', description: 'Full URL (https://...)' }
-        },
-        required: ['url']
-      }
-    }
-  },
-  {
-    type: 'function',
-    function: {
-      name: 'quoroom_browser',
-      description: 'Control a headless browser to interact with websites: navigate pages, click buttons, fill forms, buy services, register domains, create accounts. Returns accessibility tree snapshot. Pass sessionId to maintain cookies/login across calls.',
-      parameters: {
-        type: 'object',
-        properties: {
-          url: { type: 'string', description: 'Starting URL' },
-          actions: {
-            type: 'array',
-            description: 'Sequence of browser actions. Each action has "type" (navigate, click, fill, select, wait, submit, snapshot, scroll, hover, press, type, screenshot, waitForSelector) plus optional fields: url (navigate), text/selector (click), selector+value (fill/select), ms (wait/waitForSelector), selector (submit/hover/waitForSelector), value (press: key name like Enter/Tab, type: text to type), direction+amount (scroll).',
-            items: { type: 'object' }
-          },
-          sessionId: { type: 'string', description: 'Session ID from previous call to resume with same cookies/login. Omit for new session.' }
-        },
-        required: ['url', 'actions']
-      }
-    }
-  },
-  // ── Wallet ──────────────────────────────────────────────────────────────
-  {
-    type: 'function',
-    function: {
-      name: 'quoroom_wallet_balance',
-      description: 'Get the room\'s wallet balance (USDC). Returns address and transaction summary.',
-      parameters: {
-        type: 'object',
-        properties: {},
-        required: []
-      }
-    }
-  },
-  {
-    type: 'function',
-    function: {
-      name: 'quoroom_wallet_send',
-      description: 'Send USDC from the room\'s wallet to an address.',
-      parameters: {
-        type: 'object',
-        properties: {
-          to: { type: 'string', description: 'Recipient address (0x...)' },
-          amount: { type: 'string', description: 'Amount (e.g., "10.50")' }
-        },
-        required: ['to', 'amount']
-      }
-    }
-  },
-  {
-    type: 'function',
-    function: {
-      name: 'quoroom_wallet_history',
-      description: 'Get recent wallet transaction history.',
-      parameters: {
-        type: 'object',
-        properties: {
-          limit: { type: 'string', description: 'Max transactions to return (default: 10)' }
+  }
+}
+
+const TOOL_REMEMBER: ToolDef = {
+  type: 'function',
+  function: {
+    name: 'quoroom_remember',
+    description: 'Store a memory for later recall. Use for facts, credentials, contacts, research results.',
+    parameters: {
+      type: 'object',
+      properties: {
+        name: { type: 'string', description: 'Short label for this memory' },
+        content: { type: 'string', description: 'The detailed information to remember' },
+        type: {
+          type: 'string',
+          description: 'Memory type',
+          enum: ['fact', 'preference', 'person', 'project', 'event']
         }
-      }
+      },
+      required: ['name', 'content']
     }
-  },
+  }
+}
 
-  // ── WIP (Work-In-Progress) ──────────────────────────────────
-  {
-    type: 'function',
-    function: {
-      name: 'quoroom_save_wip',
-      description: 'Save what you accomplished this cycle and what should happen next. This is injected at the TOP of your next cycle\'s context so you (or a teammate) can continue forward without repeating work. Call this before your cycle ends. Pass "done" or empty string to clear WIP.',
-      parameters: {
-        type: 'object',
-        properties: {
-          status: {
-            type: 'string',
-            description: 'What you accomplished and what to do next. Example: "Registered tuta account (user: agent42@tuta.com, pwd in memory). Next: set up email forwarding and notify keeper."'
-          }
+const TOOL_RECALL: ToolDef = {
+  type: 'function',
+  function: {
+    name: 'quoroom_recall',
+    description: 'Search stored memories by keyword.',
+    parameters: {
+      type: 'object',
+      properties: {
+        query: { type: 'string', description: 'Search keyword or phrase' }
+      },
+      required: ['query']
+    }
+  }
+}
+
+const TOOL_SEND_MESSAGE: ToolDef = {
+  type: 'function',
+  function: {
+    name: 'quoroom_send_message',
+    description: 'Send a message to the keeper or another worker.',
+    parameters: {
+      type: 'object',
+      properties: {
+        to: { type: 'string', description: 'Recipient: "keeper" or a worker name' },
+        message: { type: 'string', description: 'The message content' }
+      },
+      required: ['to', 'message']
+    }
+  }
+}
+
+const TOOL_SAVE_WIP: ToolDef = {
+  type: 'function',
+  function: {
+    name: 'quoroom_save_wip',
+    description: 'Save what you accomplished this cycle so the next cycle continues forward. Call before your cycle ends.',
+    parameters: {
+      type: 'object',
+      properties: {
+        status: {
+          type: 'string',
+          description: 'What you accomplished and what to do next.'
+        }
+      },
+      required: ['status']
+    }
+  }
+}
+
+const TOOL_WEB_SEARCH: ToolDef = {
+  type: 'function',
+  function: {
+    name: 'quoroom_web_search',
+    description: 'Search the web. Returns top 5 results.',
+    parameters: {
+      type: 'object',
+      properties: {
+        query: { type: 'string', description: 'Search query' }
+      },
+      required: ['query']
+    }
+  }
+}
+
+const TOOL_WEB_FETCH: ToolDef = {
+  type: 'function',
+  function: {
+    name: 'quoroom_web_fetch',
+    description: 'Fetch any URL and return its content as clean markdown.',
+    parameters: {
+      type: 'object',
+      properties: {
+        url: { type: 'string', description: 'Full URL (https://...)' }
+      },
+      required: ['url']
+    }
+  }
+}
+
+const TOOL_BROWSER: ToolDef = {
+  type: 'function',
+  function: {
+    name: 'quoroom_browser',
+    description: 'Control a headless browser: navigate, click, fill forms, buy services, register domains, create accounts.',
+    parameters: {
+      type: 'object',
+      properties: {
+        url: { type: 'string', description: 'Starting URL' },
+        actions: {
+          type: 'array',
+          description: 'Sequence of browser actions.',
+          items: { type: 'object' }
         },
-        required: ['status']
+        sessionId: { type: 'string', description: 'Session ID from previous call to resume.' }
+      },
+      required: ['url', 'actions']
+    }
+  }
+}
+
+const TOOL_CREATE_WORKER: ToolDef = {
+  type: 'function',
+  function: {
+    name: 'quoroom_create_worker',
+    description: 'Create a new agent worker.',
+    parameters: {
+      type: 'object',
+      properties: {
+        name: { type: 'string', description: 'The worker\'s name' },
+        systemPrompt: { type: 'string', description: 'Instructions for this worker' },
+        role: { type: 'string', description: 'Role preset: executor, researcher, analyst, writer, guardian' },
+        description: { type: 'string', description: 'One-line summary' },
+        cycle_gap_ms: { type: 'number', description: 'Override cycle gap in milliseconds' },
+        max_turns: { type: 'number', description: 'Override max turns per cycle' }
+      },
+      required: ['name', 'systemPrompt']
+    }
+  }
+}
+
+const TOOL_UPDATE_WORKER: ToolDef = {
+  type: 'function',
+  function: {
+    name: 'quoroom_update_worker',
+    description: 'Update an existing worker.',
+    parameters: {
+      type: 'object',
+      properties: {
+        workerId: { type: 'number', description: 'The worker ID to update' },
+        name: { type: 'string', description: 'New name' },
+        role: { type: 'string', description: 'New role' },
+        systemPrompt: { type: 'string', description: 'New system prompt' },
+        description: { type: 'string', description: 'New description' },
+        cycle_gap_ms: { type: 'number', description: 'Override cycle gap' },
+        max_turns: { type: 'number', description: 'Override max turns' }
+      },
+      required: ['workerId']
+    }
+  }
+}
+
+const TOOL_CONFIGURE_ROOM: ToolDef = {
+  type: 'function',
+  function: {
+    name: 'quoroom_configure_room',
+    description: 'Adjust cycle settings to self-regulate token usage.',
+    parameters: {
+      type: 'object',
+      properties: {
+        queenCycleGapMs: { type: 'number', description: 'Milliseconds between cycles' },
+        queenMaxTurns: { type: 'number', description: 'Max tool-call turns per cycle (1–50)' }
       }
     }
   }
+}
+
+const TOOL_WALLET_BALANCE: ToolDef = {
+  type: 'function',
+  function: {
+    name: 'quoroom_wallet_balance',
+    description: 'Get the room\'s wallet balance.',
+    parameters: { type: 'object', properties: {}, required: [] }
+  }
+}
+
+const TOOL_WALLET_SEND: ToolDef = {
+  type: 'function',
+  function: {
+    name: 'quoroom_wallet_send',
+    description: 'Send USDC from the room\'s wallet.',
+    parameters: {
+      type: 'object',
+      properties: {
+        to: { type: 'string', description: 'Recipient address' },
+        amount: { type: 'string', description: 'Amount (e.g., "10.50")' }
+      },
+      required: ['to', 'amount']
+    }
+  }
+}
+
+const TOOL_CREATE_SKILL: ToolDef = {
+  type: 'function',
+  function: {
+    name: 'quoroom_create_skill',
+    description: 'Document a working recipe (step-by-step algorithm) after completing significant work.',
+    parameters: {
+      type: 'object',
+      properties: {
+        name: { type: 'string', description: 'Skill name' },
+        content: { type: 'string', description: 'Step-by-step recipe' }
+      },
+      required: ['name', 'content']
+    }
+  }
+}
+
+// ─── Role-based tool sets ────────────────────────────────────────────────
+
+/** Queen (coordinator) tools */
+export const QUEEN_TOOLS: ToolDef[] = [
+  TOOL_SET_GOAL, TOOL_DELEGATE_TASK, TOOL_COMPLETE_GOAL,
+  TOOL_ANNOUNCE,
+  TOOL_CREATE_WORKER, TOOL_UPDATE_WORKER,
+  TOOL_REMEMBER, TOOL_RECALL,
+  TOOL_SEND_MESSAGE,
+  TOOL_CONFIGURE_ROOM,
+  TOOL_WALLET_BALANCE, TOOL_WALLET_SEND,
+  TOOL_WEB_SEARCH, TOOL_WEB_FETCH, TOOL_BROWSER,
+  TOOL_SAVE_WIP,
+]
+
+/** Worker (executor) tools */
+export const WORKER_TOOLS: ToolDef[] = [
+  TOOL_COMPLETE_GOAL,
+  TOOL_OBJECT,
+  TOOL_REMEMBER, TOOL_RECALL,
+  TOOL_SEND_MESSAGE,
+  TOOL_CREATE_SKILL,
+  TOOL_WEB_SEARCH, TOOL_WEB_FETCH, TOOL_BROWSER,
+  TOOL_SAVE_WIP,
+]
+
+/** All tools combined (for backward compatibility) */
+export const QUEEN_TOOL_DEFINITIONS: ToolDef[] = [
+  TOOL_SET_GOAL, TOOL_DELEGATE_TASK, TOOL_COMPLETE_GOAL,
+  TOOL_ANNOUNCE, TOOL_OBJECT,
+  TOOL_CREATE_WORKER, TOOL_UPDATE_WORKER,
+  TOOL_REMEMBER, TOOL_RECALL,
+  TOOL_SEND_MESSAGE,
+  TOOL_CONFIGURE_ROOM,
+  TOOL_WALLET_BALANCE, TOOL_WALLET_SEND,
+  TOOL_WEB_SEARCH, TOOL_WEB_FETCH, TOOL_BROWSER,
+  TOOL_CREATE_SKILL,
+  TOOL_SAVE_WIP,
 ]
 
 // ─── Tool executor ──────────────────────────────────────────────────────────
@@ -450,40 +409,11 @@ export async function executeQueenTool(
         return { content: `Room goal set: "${description}" (goal #${goal.id})` }
       }
 
-      case 'quoroom_update_progress': {
-        const goalId = Number(args.goalId ?? args.goal_id)
-        if (!goalId || isNaN(goalId)) return { content: 'Error: goalId is required for quoroom_update_progress. Provide the numeric goal ID.', isError: true }
-        const goalCheck = queries.getGoal(db, goalId)
-        if (!goalCheck) return { content: `Error: goal #${goalId} not found.`, isError: true }
-        if (goalCheck.roomId !== roomId) return { content: `Error: goal #${goalId} belongs to another room. Your room's goals are shown in the Active Goals section — use those goal IDs.`, isError: true }
-        const observation = String(args.observation ?? args.progress ?? args.message ?? args.text ?? '')
-        const metricValue = args.metricValue != null ? Number(args.metricValue) : (args.metric_value != null ? Number(args.metric_value) : undefined)
-        const subGoals = queries.getSubGoals(db, goalId)
-        updateGoalProgress(db, goalId, observation, metricValue, workerId)
-        const goal = queries.getGoal(db, goalId)
-        const pct = Math.round((goal?.progress ?? 0) * 100)
-        const note = subGoals.length > 0 && metricValue != null
-          ? ` (metricValue ignored — goal has ${subGoals.length} sub-goals, progress is calculated from them. Update sub-goals directly.)`
-          : ''
-        return { content: `Progress logged on goal #${goalId}. Now at ${pct}%.${note}` }
-      }
-
-      case 'quoroom_create_subgoal': {
-        const goalId = Number(args.goalId)
-        const goalCheck = queries.getGoal(db, goalId)
-        if (!goalCheck) return { content: `Error: goal #${goalId} not found.`, isError: true }
-        if (goalCheck.roomId !== roomId) return { content: `Error: goal #${goalId} belongs to another room.`, isError: true }
-        const raw = args.descriptions
-        const descriptions = Array.isArray(raw) ? raw.map(String) : [String(raw)]
-        const subGoals = decomposeGoal(db, goalId, descriptions)
-        return { content: `Created ${subGoals.length} sub-goal(s) under goal #${goalId}.` }
-      }
-
       case 'quoroom_delegate_task': {
         const workerName = String(args.workerName ?? args.worker ?? args.to ?? '').trim()
         const task = String(args.task ?? args.description ?? args.goal ?? '').trim()
-        if (!workerName) return { content: 'Error: "workerName" is required (a worker name from Room Workers list).', isError: true }
-        if (!task) return { content: 'Error: "task" is required (description of the task to delegate).', isError: true }
+        if (!workerName) return { content: 'Error: "workerName" is required.', isError: true }
+        if (!task) return { content: 'Error: "task" is required.', isError: true }
         const roomWorkers = queries.listRoomWorkers(db, roomId)
         const target = queries.findWorkerByName(roomWorkers, workerName)
         if (!target) {
@@ -491,19 +421,7 @@ export async function executeQueenTool(
           return { content: `Worker "${workerName}" not found. Available: ${available || 'none'}`, isError: true }
         }
         const parentGoalId = args.parentGoalId != null ? Number(args.parentGoalId) : undefined
-        if (parentGoalId != null) {
-          const parentCheck = queries.getGoal(db, parentGoalId)
-          if (!parentCheck) return { content: `Error: parent goal #${parentGoalId} not found.`, isError: true }
-          if (parentCheck.roomId !== roomId) return { content: `Error: parent goal #${parentGoalId} belongs to another room.`, isError: true }
-        }
         const goal = queries.createGoal(db, roomId, task, parentGoalId, target.id)
-        if (parentGoalId) {
-          const parentGoal = queries.getGoal(db, parentGoalId)
-          if (parentGoal && parentGoal.status === 'active') {
-            queries.updateGoal(db, parentGoalId, { status: 'in_progress' })
-          }
-        }
-        // Wake the assigned worker so they pick up the task
         try { triggerAgent(db, roomId, target.id) } catch { /* may not be running */ }
         return { content: `Task delegated to ${target.name}: "${task}" (goal #${goal.id})` }
       }
@@ -517,91 +435,84 @@ export async function executeQueenTool(
         return { content: `Goal #${goalId} marked as completed.` }
       }
 
-      case 'quoroom_abandon_goal': {
-        const goalId = Number(args.goalId)
-        const goalCheck = queries.getGoal(db, goalId)
-        if (!goalCheck) return { content: `Error: goal #${goalId} not found.`, isError: true }
-        if (goalCheck.roomId !== roomId) return { content: `Error: goal #${goalId} belongs to another room.`, isError: true }
-        const reason = String(args.reason ?? 'No reason given')
-        abandonGoal(db, goalId, reason)
-        return { content: `Goal #${goalId} abandoned: ${reason}` }
-      }
-
-      // ── Quorum ───────────────────────────────────────────────────────
-      case 'quoroom_propose': {
-        // Tolerate common small-model arg name variations
-        const proposalText = String(args.proposal ?? args.text ?? args.description ?? args.content ?? args.idea ?? '').trim()
-        if (!proposalText) return { content: 'Error: proposal text is required. Provide a "proposal" string.', isError: true }
-        // De-dup: reject if a similar proposal is pending or was recently approved
+      // ── Governance ───────────────────────────────────────────────────
+      case 'quoroom_announce': {
+        const proposalText = String(args.proposal ?? args.text ?? args.description ?? '').trim()
+        if (!proposalText) return { content: 'Error: proposal text is required.', isError: true }
         const recentDecisions = queries.listDecisions(db, roomId)
         const isDuplicate = recentDecisions.slice(0, 10).some(d =>
-          (d.status === 'voting' || d.status === 'approved') &&
+          (d.status === 'announced' || d.status === 'effective' || d.status === 'approved') &&
           d.proposal.toLowerCase() === proposalText.toLowerCase()
         )
         if (isDuplicate) {
-          return { content: `A similar proposal already exists: "${proposalText}". No need to propose again.`, isError: true }
+          return { content: `A similar decision already exists: "${proposalText}".`, isError: true }
         }
-        const decisionType = String(args.decisionType ?? args.type ?? args.impact ?? args.category ?? 'low_impact') as DecisionType
-        const decision = propose(db, {
-          roomId,
-          proposerId: workerId,
-          proposal: proposalText,
-          decisionType
-        })
+        const decisionType = String(args.decisionType ?? args.type ?? 'low_impact') as DecisionType
+        const decision = announce(db, { roomId, proposerId: workerId, proposal: proposalText, decisionType })
         if (decision.status === 'approved') {
-          return { content: `Proposal auto-approved: "${proposalText}"` }
+          return { content: `Decision auto-approved: "${proposalText}"` }
         }
-        // Proposer auto-casts YES but does NOT force tally — let others vote
-        try {
-          vote(db, decision.id, workerId, 'yes')
-        } catch { /* non-fatal if already voted */ }
-        const updated = queries.getDecision(db, decision.id)
-        if (updated && updated.status !== 'voting') {
-          return { content: `Proposal resolved (${updated.status}): "${proposalText}"` }
-        }
-        // Wake other workers so they can vote
         wakeRoomWorkers(db, roomId, workerId)
-        return { content: `Proposal #${decision.id} created (you voted YES): "${proposalText}". Waiting for other workers to vote.` }
+        return { content: `Decision #${decision.id} announced: "${proposalText}". Effective in 10 min unless objected.` }
+      }
+
+      case 'quoroom_object': {
+        const decisionId = Number(args.decisionId)
+        const reason = String(args.reason ?? 'No reason given').trim()
+        try {
+          const decision = object(db, decisionId, workerId, reason)
+          return { content: `Objected to decision #${decisionId}: ${reason}. Status: ${decision.status}` }
+        } catch (e) {
+          return { content: (e as Error).message, isError: true }
+        }
+      }
+
+      // Legacy: support old propose/vote calls from existing MCP tools
+      case 'quoroom_propose': {
+        const proposalText = String(args.proposal ?? args.text ?? args.description ?? '').trim()
+        if (!proposalText) return { content: 'Error: proposal text is required.', isError: true }
+        const decisionType = String(args.decisionType ?? args.type ?? 'low_impact') as DecisionType
+        const decision = announce(db, { roomId, proposerId: workerId, proposal: proposalText, decisionType })
+        if (decision.status === 'approved') {
+          return { content: `Decision auto-approved: "${proposalText}"` }
+        }
+        wakeRoomWorkers(db, roomId, workerId)
+        return { content: `Decision #${decision.id} announced: "${proposalText}". Effective in 10 min unless objected.` }
       }
 
       case 'quoroom_vote': {
-        vote(
-          db,
-          Number(args.decisionId),
-          workerId,
-          String(args.vote ?? 'abstain') as VoteValue,
-          args.reasoning ? String(args.reasoning) : undefined
-        )
-        const decision = queries.getDecision(db, Number(args.decisionId))
-        if (decision && decision.status !== 'voting') {
-          return { content: `Vote cast. Decision resolved: ${decision.status}` }
+        // Legacy: treat vote as object if 'no', otherwise acknowledge
+        const decisionId = Number(args.decisionId)
+        const voteValue = String(args.vote ?? 'abstain')
+        if (voteValue === 'no') {
+          const reason = String(args.reasoning ?? 'Voted no')
+          try {
+            object(db, decisionId, workerId, reason)
+            return { content: `Objection recorded on decision #${decisionId}.` }
+          } catch {
+            return { content: `Vote noted on decision #${decisionId}.` }
+          }
         }
-        return { content: `Vote "${args.vote}" cast on decision #${args.decisionId}.` }
+        return { content: `Acknowledged on decision #${decisionId}.` }
       }
 
       // ── Workers ──────────────────────────────────────────────────────
       case 'quoroom_create_worker': {
-        // Tolerate common model hallucinations for arg names
-        const name = String(args.name ?? args.workerName ?? args.worker_name ?? args.type ?? args.role ?? '').trim()
-        const systemPrompt = String(args.systemPrompt ?? args.system_prompt ?? args.instructions ?? args.prompt ?? '').trim()
-        if (!name) return { content: 'Error: name is required for quoroom_create_worker. Provide a "name" string.', isError: true }
-        if (!systemPrompt) return { content: 'Error: systemPrompt is required for quoroom_create_worker. Provide a "systemPrompt" string describing this worker\'s role and instructions.', isError: true }
-        // De-dup: reject if worker with same name already exists in this room
+        const name = String(args.name ?? args.workerName ?? '').trim()
+        const systemPrompt = String(args.systemPrompt ?? args.system_prompt ?? args.instructions ?? '').trim()
+        if (!name) return { content: 'Error: name is required.', isError: true }
+        if (!systemPrompt) return { content: 'Error: systemPrompt is required.', isError: true }
         const existingWorkers = queries.listRoomWorkers(db, roomId)
         if (existingWorkers.some(w => w.name.toLowerCase() === name.toLowerCase())) {
-          return { content: `Worker "${name}" already exists in this room. Use quoroom_update_worker to modify it, or choose a different name.`, isError: true }
+          return { content: `Worker "${name}" already exists.`, isError: true }
         }
         const role = args.role && args.role !== args.name ? String(args.role) : undefined
         const description = args.description ? String(args.description) : undefined
-        // Apply role preset defaults (explicit args override preset)
         const preset = role ? WORKER_ROLE_PRESETS[role] : undefined
         const cycleGapMs = args.cycle_gap_ms != null ? Number(args.cycle_gap_ms) : (preset?.cycleGapMs ?? null)
         const maxTurns = args.max_turns != null ? Number(args.max_turns) : (preset?.maxTurns ?? null)
         queries.createWorker(db, { name, role, systemPrompt, description, cycleGapMs, maxTurns, roomId })
-        const presetNote = preset && (cycleGapMs || maxTurns)
-          ? ` [${role} preset: ${cycleGapMs ? `${cycleGapMs / 1000}s cycle` : ''}${cycleGapMs && maxTurns ? ', ' : ''}${maxTurns ? `${maxTurns} turns` : ''}]`
-          : ''
-        return { content: `Created worker "${name}"${role ? ` (${role})` : ''}${presetNote}.` }
+        return { content: `Created worker "${name}"${role ? ` (${role})` : ''}.` }
       }
 
       case 'quoroom_update_worker': {
@@ -619,55 +530,15 @@ export async function executeQueenTool(
         return { content: `Updated worker "${w.name}".` }
       }
 
-      // ── Tasks ────────────────────────────────────────────────────────
-      case 'quoroom_schedule': {
-        const name = String(args.name ?? 'Unnamed task')
-        const prompt = String(args.prompt ?? '')
-        const cronExpression = args.cronExpression ? String(args.cronExpression) : undefined
-        const scheduledAt = args.scheduledAt ? String(args.scheduledAt) : undefined
-        const taskWorkerId = args.workerId ? Number(args.workerId) : undefined
-        const maxTurns = args.maxTurns ? Number(args.maxTurns) : undefined
-        const triggerType: 'cron' | 'once' | 'manual' = cronExpression ? 'cron' : scheduledAt ? 'once' : 'manual'
-
-        // De-dup: reject if active task with same name exists in this room
-        const existingTasks = queries.listTasks(db, roomId, 'active')
-        if (existingTasks.some(t => t.name.toLowerCase() === name.toLowerCase())) {
-          return { content: `Task "${name}" already exists. Choose a different name or manage the existing task.`, isError: true }
-        }
-
-        // Validate workerId belongs to this room — prevents cross-room assignment
-        if (taskWorkerId) {
-          const taskWorker = queries.getWorker(db, taskWorkerId)
-          if (!taskWorker || taskWorker.roomId !== roomId) {
-            return { content: `Error: Worker #${taskWorkerId} does not belong to this room. Use a workerId from this room (see Room Workers section), or omit workerId to use the default.`, isError: true }
-          }
-        }
-
-        queries.createTask(db, {
-          name,
-          prompt,
-          triggerType,
-          cronExpression,
-          scheduledAt,
-          workerId: taskWorkerId,
-          maxTurns,
-          roomId,
-          executor: 'claude_code',
-          triggerConfig: JSON.stringify({ source: 'queen' })
-        })
-        return { content: `Task "${name}" created (${triggerType}).` }
-      }
-
       // ── Memory ───────────────────────────────────────────────────────
       case 'quoroom_remember': {
         const name = String(args.name ?? '')
         const content = String(args.content ?? '')
         const type = String(args.type ?? 'fact') as 'fact' | 'preference' | 'person' | 'project' | 'event'
-        // De-dup: if entity with same name exists in this room, add observation instead of creating duplicate
         const existing = queries.listEntities(db, roomId).find(e => e.name.toLowerCase() === name.toLowerCase())
         if (existing) {
           queries.addObservation(db, existing.id, content, 'queen')
-          return { content: `Updated memory "${name}" (added new observation to existing entry).` }
+          return { content: `Updated memory "${name}".` }
         }
         const entity = queries.createEntity(db, name, type, undefined, roomId)
         queries.addObservation(db, entity.id, content, 'queen')
@@ -689,7 +560,7 @@ export async function executeQueenTool(
       case 'quoroom_send_message': {
         const to = String(args.to ?? '').trim()
         const message = String(args.message ?? args.question ?? '').trim()
-        if (!to) return { content: 'Error: "to" is required ("keeper" or a worker name).', isError: true }
+        if (!to) return { content: 'Error: "to" is required.', isError: true }
         if (!message) return { content: 'Error: "message" is required.', isError: true }
 
         if (to.toLowerCase() === 'keeper') {
@@ -699,7 +570,6 @@ export async function executeQueenTool(
           return { content: `Message sent to keeper (#${escalation.id}).${deliveryNote}` }
         }
 
-        // Send to a specific worker
         const roomWorkers = queries.listRoomWorkers(db, roomId)
         const target = queries.findWorkerByName(roomWorkers, to)
         if (!target) {
@@ -708,7 +578,6 @@ export async function executeQueenTool(
         }
         if (target.id === workerId) return { content: 'Cannot send a message to yourself.', isError: true }
         const escalation = queries.createEscalation(db, roomId, workerId, message, target.id)
-        // Wake target worker so they see the message
         try { triggerAgent(db, roomId, target.id) } catch { /* may not be running */ }
         return { content: `Message sent to ${target.name} (#${escalation.id}).` }
       }
@@ -759,17 +628,16 @@ export async function executeQueenTool(
       }
 
       case 'quoroom_wallet_send': {
-        return { content: 'Wallet send requires on-chain transaction — use the MCP tool quoroom_wallet_send with encryptionKey, or ask the keeper to send funds.', isError: true }
+        return { content: 'Wallet send requires on-chain transaction — use the MCP tool with encryptionKey.', isError: true }
       }
 
-      case 'quoroom_wallet_history': {
-        const wallet = queries.getWalletByRoom(db, roomId)
-        if (!wallet) return { content: 'No wallet found for this room.', isError: true }
-        const limit = Math.min(Number(args.limit) || 10, 50)
-        const txs = queries.listWalletTransactions(db, wallet.id, limit)
-        if (txs.length === 0) return { content: 'No transactions yet.' }
-        const lines = txs.map(tx => `[${tx.type}] ${tx.amount} USDC — ${tx.description ?? ''} (${tx.status})`).join('\n')
-        return { content: lines }
+      // ── Skills ────────────────────────────────────────────────────
+      case 'quoroom_create_skill': {
+        const name = String(args.name ?? '').trim()
+        const content = String(args.content ?? '').trim()
+        if (!name || !content) return { content: 'Error: name and content are required.', isError: true }
+        queries.createSkill(db, roomId, name, content, { agentCreated: true, createdByWorkerId: workerId })
+        return { content: `Skill "${name}" created.` }
       }
 
       // ── WIP (Work-In-Progress) ────────────────────────────────
@@ -777,7 +645,7 @@ export async function executeQueenTool(
         const status = String(args.status ?? '').trim()
         const isDone = !status || status.toLowerCase() === 'done' || status.toLowerCase() === 'complete' || status.toLowerCase() === 'completed'
         queries.updateWorkerWip(db, workerId, isDone ? null : status.slice(0, 2000))
-        return { content: isDone ? 'WIP cleared.' : 'WIP saved. Next cycle will see it at the top of context.' }
+        return { content: isDone ? 'WIP cleared.' : 'WIP saved. Next cycle will continue from here.' }
       }
 
       default:
@@ -870,6 +738,6 @@ async function deliverQueenMessage(db: Database.Database, roomId: number, questi
     else if (data.telegram === 'failed') parts.push('telegram ✗')
     return parts.length > 0 ? `External delivery: ${parts.join(', ')}.` : ''
   } catch {
-    return '' // Best-effort — don't block the tool call
+    return ''
   }
 }

@@ -115,6 +115,15 @@ export function runMigrations(database: Database.Database, log: (msg: string) =>
     log('Migrated: added wip column to workers')
   }
 
+  // Add effective_at column to quorum_decisions (announce-and-object governance)
+  const hasEffectiveAt = (database.prepare(
+    `SELECT name FROM pragma_table_info('quorum_decisions') WHERE name='effective_at'`
+  ).get() as { name: string } | undefined)?.name
+  if (!hasEffectiveAt) {
+    database.exec(`ALTER TABLE quorum_decisions ADD COLUMN effective_at DATETIME`)
+    log('Migrated: added effective_at column to quorum_decisions')
+  }
+
   // Migrate ollama models → 'claude' (ollama removed in v0.1.12+)
   const ollamaWorkers = database
     .prepare(`SELECT id FROM workers WHERE model LIKE 'ollama:%'`)

@@ -6,7 +6,7 @@ import type {
   Watch,
   Room, CreateRoomInput, RoomActivityEntry,
   Goal, GoalUpdate,
-  QuorumDecision, QuorumVote,
+  QuorumDecision,
   Skill,
   Escalation,
   ChatMessage,
@@ -431,16 +431,14 @@ export const api = {
       request<Goal[]>('GET', `/api/rooms/${roomId}/goals${qs({ status })}`),
     get: (id: number) =>
       request<Goal>('GET', `/api/goals/${id}`),
-    getSubgoals: (id: number) =>
-      request<Goal[]>('GET', `/api/goals/${id}/subgoals`),
-    create: (roomId: number, description: string, parentGoalId?: number, assignedWorkerId?: number) =>
-      request<Goal>('POST', `/api/rooms/${roomId}/goals`, { description, parentGoalId, assignedWorkerId }),
+    create: (roomId: number, description: string, assignedWorkerId?: number) =>
+      request<Goal>('POST', `/api/rooms/${roomId}/goals`, { description, assignedWorkerId }),
     update: (id: number, body: Record<string, unknown>) =>
       request<Goal>('PATCH', `/api/goals/${id}`, body),
     delete: (id: number) =>
       request<{ ok: true }>('DELETE', `/api/goals/${id}`),
-    addUpdate: (id: number, observation: string, metricValue?: number, workerId?: number) =>
-      request<GoalUpdate>('POST', `/api/goals/${id}/updates`, { observation, metricValue, workerId }),
+    addUpdate: (id: number, observation: string) =>
+      request<GoalUpdate>('POST', `/api/goals/${id}/updates`, { observation }),
     getUpdates: (id: number, limit?: number) =>
       request<GoalUpdate[]>('GET', `/api/goals/${id}/updates${qs({ limit })}`),
   },
@@ -453,12 +451,6 @@ export const api = {
       request<QuorumDecision>('GET', `/api/decisions/${id}`),
     create: (roomId: number, body: Record<string, unknown>) =>
       request<QuorumDecision>('POST', `/api/rooms/${roomId}/decisions`, body),
-    resolve: (id: number, status: string, result?: string) =>
-      request<QuorumDecision>('POST', `/api/decisions/${id}/resolve`, { status, result }),
-    vote: (id: number, workerId: number, vote: string, reasoning?: string) =>
-      request<QuorumVote>('POST', `/api/decisions/${id}/vote`, { workerId, vote, reasoning }),
-    getVotes: (id: number) =>
-      request<QuorumVote[]>('GET', `/api/decisions/${id}/votes`),
     keeperVote: (id: number, vote: string) =>
       request<QuorumDecision>('POST', `/api/decisions/${id}/keeper-vote`, { vote }),
   },

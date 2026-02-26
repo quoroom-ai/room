@@ -39,16 +39,9 @@ describe('decomposeGoal', () => {
     expect(subs[2].parentGoalId).toBe(root.id)
     expect(subs[0].description).toBe('Research market')
 
-    // Parent should be marked in_progress
+    // Parent stays in its current status (no automatic in_progress)
     const updated = queries.getGoal(db, root.id)!
-    expect(updated.status).toBe('in_progress')
-  })
-
-  it('throws for completed goal', () => {
-    const roomId = createTestRoom()
-    const root = setRoomObjective(db, roomId, 'Done goal')
-    completeGoal(db, root.id)
-    expect(() => decomposeGoal(db, root.id, ['sub'])).toThrow("Cannot decompose goal with status 'completed'")
+    expect(updated.status).toBe('active')
   })
 
   it('throws for nonexistent goal', () => {
@@ -57,7 +50,7 @@ describe('decomposeGoal', () => {
 })
 
 describe('updateGoalProgress', () => {
-  it('logs an update and sets leaf goal progress', () => {
+  it('logs an update without changing goal progress', () => {
     const roomId = createTestRoom()
     const goal = setRoomObjective(db, roomId, 'Test')
     const update = updateGoalProgress(db, goal.id, 'Started work', 0.5)
@@ -65,38 +58,9 @@ describe('updateGoalProgress', () => {
     expect(update.observation).toBe('Started work')
     expect(update.metricValue).toBe(0.5)
 
+    // Progress on the goal itself is unchanged (flat model — just logs)
     const refreshed = queries.getGoal(db, goal.id)!
-    expect(refreshed.progress).toBe(0.5)
-  })
-
-  it('clamps progress to 0-1', () => {
-    const roomId = createTestRoom()
-    const goal = setRoomObjective(db, roomId, 'Test')
-
-    updateGoalProgress(db, goal.id, 'Over', 1.5)
-    expect(queries.getGoal(db, goal.id)!.progress).toBe(1)
-
-    updateGoalProgress(db, goal.id, 'Under', -0.5)
-    expect(queries.getGoal(db, goal.id)!.progress).toBe(0)
-  })
-
-  it('recalculates parent progress from sub-goals', () => {
-    const roomId = createTestRoom()
-    const root = setRoomObjective(db, roomId, 'Root')
-    const subs = decomposeGoal(db, root.id, ['A', 'B'])
-
-    updateGoalProgress(db, subs[0].id, 'Done', 1.0)
-    updateGoalProgress(db, subs[1].id, 'Half', 0.5)
-
-    const refreshed = queries.getGoal(db, root.id)!
-    expect(refreshed.progress).toBe(0.75)
-  })
-
-  it('accepts percentage-style metric values from 2 to 100', () => {
-    const roomId = createTestRoom()
-    const goal = setRoomObjective(db, roomId, 'Percent metric')
-    updateGoalProgress(db, goal.id, 'Half done', 50)
-    expect(queries.getGoal(db, goal.id)!.progress).toBe(0.5)
+    expect(refreshed.progress).toBe(0)
   })
 })
 
@@ -111,18 +75,18 @@ describe('completeGoal', () => {
     expect(refreshed.progress).toBe(1.0)
   })
 
-  it('recalculates parent on completion', () => {
+  it('does not recalculate parent progress', () => {
     const roomId = createTestRoom()
     const root = setRoomObjective(db, roomId, 'Root')
     const subs = decomposeGoal(db, root.id, ['A', 'B'])
 
     completeGoal(db, subs[0].id)
     const afterOne = queries.getGoal(db, root.id)!
-    expect(afterOne.progress).toBe(0.5)
+    expect(afterOne.progress).toBe(0) // parent unchanged
 
     completeGoal(db, subs[1].id)
     const afterBoth = queries.getGoal(db, root.id)!
-    expect(afterBoth.progress).toBe(1.0)
+    expect(afterBoth.progress).toBe(0) // still unchanged
   })
 })
 

@@ -191,10 +191,7 @@ const TOOL_NAMES: Record<string, string> = {
   quoroom_delete_worker: 'removing a worker',
   // Goals
   quoroom_set_goal: 'setting a goal',
-  quoroom_create_subgoal: 'creating a subgoal',
-  quoroom_update_progress: 'updating progress',
   quoroom_complete_goal: 'completing goal',
-  quoroom_abandon_goal: 'abandoning goal',
   quoroom_list_goals: 'checking goals',
   quoroom_delegate_task: 'delegating task',
   // Messages & inbox
@@ -207,12 +204,11 @@ const TOOL_NAMES: Record<string, string> = {
   quoroom_keeper_vote: 'casting keeper vote',
   quoroom_reply_room_message: 'replying to room inbox message',
   // Decisions / quorum
-  quoroom_propose: 'proposing a vote',
-  quoroom_vote: 'casting a vote',
+  quoroom_announce: 'announcing a decision',
+  quoroom_object: 'objecting to a decision',
   quoroom_list_decisions: 'checking decisions',
   quoroom_decision_detail: 'reading decision details',
   // Tasks & scheduling
-  quoroom_schedule: 'scheduling a task',
   quoroom_list_tasks: 'listing tasks',
   quoroom_run_task: 'running a task',
   quoroom_pause_task: 'pausing a task',

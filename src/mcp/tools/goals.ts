@@ -65,8 +65,7 @@ export function registerGoalTools(server: McpServer): void {
       const db = getMcpDatabase()
       try {
         updateGoalProgress(db, goalId, observation, metricValue, workerId)
-        const goal = queries.getGoal(db, goalId)
-        return { content: [{ type: 'text' as const, text: `Progress logged. Goal #${goalId} is now at ${Math.round((goal?.progress ?? 0) * 100)}%.` }] }
+        return { content: [{ type: 'text' as const, text: `Progress logged on goal #${goalId}.` }] }
       } catch (e) {
         return { content: [{ type: 'text' as const, text: (e as Error).message }], isError: true }
       }
@@ -172,8 +171,7 @@ export function registerGoalTools(server: McpServer): void {
       function formatTree(nodes: typeof tree, indent: number = 0): string {
         return nodes.map(n => {
           const prefix = '  '.repeat(indent)
-          const pct = Math.round(n.progress * 100)
-          const line = `${prefix}- [${pct}%] ${n.description} (${n.status})`
+          const line = `${prefix}- ${n.description} (${n.status})`
           const children = n.children.length > 0 ? '\n' + formatTree(n.children, indent + 1) : ''
           return line + children
         }).join('\n')

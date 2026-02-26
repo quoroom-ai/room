@@ -1206,6 +1206,7 @@ function mapDecisionRow(row: Record<string, unknown>): QuorumDecision {
     keeperVote: (row.keeper_vote as VoteValue | null) ?? null,
     minVoters: (row.min_voters as number) ?? 0,
     sealed: ((row.sealed as number) ?? 0) === 1,
+    effectiveAt: (row.effective_at as string | null) ?? null,
     createdAt: row.created_at as string,
     resolvedAt: (row.resolved_at as string | null) ?? null
   }
@@ -1220,6 +1221,21 @@ export function createDecision(
     .prepare('INSERT INTO quorum_decisions (room_id, proposer_id, proposal, decision_type, threshold, timeout_at, min_voters, sealed) VALUES (?, ?, ?, ?, ?, ?, ?, ?)')
     .run(roomId, proposerId, proposal, decisionType, threshold, timeoutAt ?? null, minVoters, sealed ? 1 : 0)
   return getDecision(db, result.lastInsertRowid as number)!
+}
+
+export function createAnnouncement(
+  db: Database.Database, roomId: number, proposerId: number | null,
+  proposal: string, decisionType: DecisionType, effectiveAt: string
+): QuorumDecision {
+  const result = db
+    .prepare('INSERT INTO quorum_decisions (room_id, proposer_id, proposal, decision_type, status, effective_at) VALUES (?, ?, ?, ?, ?, ?)')
+    .run(roomId, proposerId, proposal, decisionType, 'announced', effectiveAt)
+  return getDecision(db, result.lastInsertRowid as number)!
+}
+
+export function getAnnouncedDecisions(db: Database.Database): QuorumDecision[] {
+  const rows = db.prepare("SELECT * FROM quorum_decisions WHERE status = 'announced' AND effective_at IS NOT NULL AND effective_at <= datetime('now','localtime')").all()
+  return (rows as Record<string, unknown>[]).map(mapDecisionRow)
 }
 
 export function getDecision(db: Database.Database, id: number): QuorumDecision | null {

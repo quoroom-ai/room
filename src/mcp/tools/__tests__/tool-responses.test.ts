@@ -661,7 +661,7 @@ describe('quoroom_update_progress', () => {
 
     const handler = toolHandlers.get('quoroom_update_progress')!
     const result = await handler({ goalId: goals[0].id, observation: 'Made progress', metricValue: 0.5 })
-    expect(getResponseText(result)).toContain('50%')
+    expect(getResponseText(result)).toContain('logged')
   })
 })
 

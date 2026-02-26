@@ -16,30 +16,6 @@ const STATUS_COLORS: Record<string, string> = {
   blocked: 'bg-status-error-bg text-status-error',
 }
 
-function toPercent(value: number): number {
-  if (!Number.isFinite(value)) return 0
-  const normalized = value <= 1 ? value * 100 : value
-  return Math.max(0, Math.min(100, normalized))
-}
-
-function buildTree(goals: Goal[]): Array<Goal & { depth: number }> {
-  const byParent = new Map<number | null, Goal[]>()
-  for (const g of goals) {
-    const key = g.parentGoalId
-    if (!byParent.has(key)) byParent.set(key, [])
-    byParent.get(key)!.push(g)
-  }
-  const result: Array<Goal & { depth: number }> = []
-  function walk(parentId: number | null, depth: number): void {
-    for (const g of byParent.get(parentId) ?? []) {
-      result.push({ ...g, depth })
-      walk(g.id, depth + 1)
-    }
-  }
-  walk(null, 0)
-  return result
-}
-
 interface GoalsPanelProps {
   roomId: number | null
   autonomyMode: 'auto' | 'semi'
@@ -61,12 +37,10 @@ export function GoalsPanel({ roomId, autonomyMode }: GoalsPanelProps): React.JSX
 
   // Create form
   const [createDesc, setCreateDesc] = useState('')
-  const [createParentId, setCreateParentId] = useState<number | ''>('')
   const [createWorkerId, setCreateWorkerId] = useState<number | ''>('')
 
   // Add update form
   const [updateObs, setUpdateObs] = useState('')
-  const [updateMetric, setUpdateMetric] = useState('')
 
   useEffect(() => {
     refresh()
@@ -86,11 +60,10 @@ export function GoalsPanel({ roomId, autonomyMode }: GoalsPanelProps): React.JSX
     await api.goals.create(
       roomId,
       createDesc.trim(),
-      createParentId || undefined,
+      undefined,
       createWorkerId || undefined
     )
     setCreateDesc('')
-    setCreateParentId('')
     setCreateWorkerId('')
     setShowCreate(false)
     refresh()
@@ -110,13 +83,8 @@ export function GoalsPanel({ roomId, autonomyMode }: GoalsPanelProps): React.JSX
 
   async function handleAddUpdate(goalId: number): Promise<void> {
     if (!updateObs.trim()) return
-    const rawMetric = updateMetric ? Number(updateMetric) : undefined
-    const metricValue = rawMetric != null && Number.isFinite(rawMetric)
-      ? (rawMetric > 1 ? rawMetric / 100 : rawMetric)
-      : undefined
-    await api.goals.addUpdate(goalId, updateObs.trim(), metricValue)
+    await api.goals.addUpdate(goalId, updateObs.trim())
     setUpdateObs('')
-    setUpdateMetric('')
     const updates = await api.goals.getUpdates(goalId, 20)
     setUpdatesCache(prev => ({ ...prev, [goalId]: updates }))
     refresh()
@@ -138,7 +106,6 @@ export function GoalsPanel({ roomId, autonomyMode }: GoalsPanelProps): React.JSX
     refresh()
   }
 
-  const tree = goals ? buildTree(goals) : []
   const workerMap = new Map((workers ?? []).map(w => [w.id, w]))
 
   return (
@@ -170,16 +137,6 @@ export function GoalsPanel({ roomId, autonomyMode }: GoalsPanelProps): React.JSX
           />
           <div className="flex gap-2">
             <Select
-              value={String(createParentId)}
-              onChange={(v) => setCreateParentId(v ? Number(v) : '')}
-              className="flex-1"
-              placeholder="No parent (top-level)"
-              options={[
-                { value: '', label: 'No parent (top-level)' },
-                ...(goals ?? []).map(g => ({ value: String(g.id), label: g.description.slice(0, 60) }))
-              ]}
-            />
-            <Select
               value={String(createWorkerId)}
               onChange={(v) => setCreateWorkerId(v ? Number(v) : '')}
               className="flex-1"
@@ -203,145 +160,107 @@ export function GoalsPanel({ roomId, autonomyMode }: GoalsPanelProps): React.JSX
       <div className="flex-1 overflow-y-auto">
         {!roomId ? (
           <div className="p-4 text-sm text-text-muted">Select a room to view goals.</div>
-        ) : tree.length === 0 && goals ? (
+        ) : (goals ?? []).length === 0 && goals ? (
           <div className="p-4 text-sm text-text-muted">No goals yet.{semi ? ' Create one to get started.' : ' Goals are created by agents.'}</div>
         ) : (
           <div className="p-3 space-y-2">
-            {tree.map(goal => {
-              const progressPct = toPercent(goal.progress)
-              const indent = Math.min(goal.depth, 5) * 16
-              return (
-                <div key={goal.id} className="bg-surface-secondary border border-border-primary rounded-lg overflow-hidden" style={{ marginLeft: `${indent}px` }}>
-                  <div
-                    className="flex items-center gap-2 px-3 py-2 hover:bg-surface-hover cursor-pointer"
-                    onClick={() => toggleExpand(goal.id)}
-                  >
-                    <div className="min-w-0 flex-1">
-                      <div className="flex items-center gap-2">
-                        <span className="text-sm text-text-primary">{goal.description}</span>
-                        <span className={`px-1.5 py-0.5 rounded-lg text-xs font-medium shrink-0 ${STATUS_COLORS[goal.status] ?? 'bg-surface-tertiary text-text-muted'}`}>
-                          {goal.status.replace('_', ' ')}
-                        </span>
-                      </div>
-                      <div className="flex items-center gap-2 mt-1">
-                        <div className="flex-1 h-1.5 bg-surface-tertiary rounded-full max-w-[120px]">
-                          <div
-                            className="h-full bg-interactive rounded-full transition-all"
-                            style={{ width: `${progressPct}%` }}
-                          />
-                        </div>
-                        <span className="text-xs text-text-muted">{Math.round(progressPct)}%</span>
-                        {goal.assignedWorkerId && workerMap.has(goal.assignedWorkerId) && (
-                          <span className="text-xs text-text-muted">
-                            {workerMap.get(goal.assignedWorkerId)!.name}
-                          </span>
-                        )}
-                      </div>
+            {(goals ?? []).map(goal => (
+              <div key={goal.id} className="bg-surface-secondary border border-border-primary rounded-lg overflow-hidden">
+                <div
+                  className="flex items-center gap-2 px-3 py-2 hover:bg-surface-hover cursor-pointer"
+                  onClick={() => toggleExpand(goal.id)}
+                >
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-center gap-2">
+                      <span className="text-sm text-text-primary">{goal.description}</span>
+                      <span className={`px-1.5 py-0.5 rounded-lg text-xs font-medium shrink-0 ${STATUS_COLORS[goal.status] ?? 'bg-surface-tertiary text-text-muted'}`}>
+                        {goal.status.replace('_', ' ')}
+                      </span>
                     </div>
-                    <span className="text-sm text-text-muted">{expandedId === goal.id ? '\u25BC' : '\u25B6'}</span>
+                    {goal.assignedWorkerId && workerMap.has(goal.assignedWorkerId) && (
+                      <span className="text-xs text-text-muted">
+                        {workerMap.get(goal.assignedWorkerId)!.name}
+                      </span>
+                    )}
                   </div>
+                  <span className="text-sm text-text-muted">{expandedId === goal.id ? '\u25BC' : '\u25B6'}</span>
+                </div>
 
-                  {expandedId === goal.id && (
-                    <div className="px-3 pb-3 pt-2 border-t border-border-primary bg-surface-secondary space-y-2">
-                      {/* Status actions */}
-                      <div className="flex gap-2 flex-wrap">
-                        {goal.status !== 'completed' && (
-                          <button
-                            onClick={() => guard(() => { void handleStatusChange(goal.id, 'completed') })}
-                            className={`text-xs px-3 py-2 md:px-2.5 md:py-1.5 rounded-lg border ${modeAwareButtonClass(semi, 'border-emerald-200 text-status-success hover:bg-emerald-50')}`}
-                          >
-                            Complete
-                          </button>
-                        )}
-                        {goal.status !== 'in_progress' && goal.status !== 'completed' && (
-                          <button
-                            onClick={() => guard(() => { void handleStatusChange(goal.id, 'in_progress') })}
-                            className={`text-xs px-3 py-2 md:px-2.5 md:py-1.5 rounded-lg border ${modeAwareButtonClass(semi, 'border-interactive text-interactive hover:bg-interactive-bg')}`}
-                          >
-                            Start
-                          </button>
-                        )}
-                        {goal.status !== 'blocked' && goal.status !== 'completed' && (
-                          <button
-                            onClick={() => guard(() => { void handleStatusChange(goal.id, 'blocked') })}
-                            className={`text-xs px-3 py-2 md:px-2.5 md:py-1.5 rounded-lg border ${modeAwareButtonClass(semi, 'border-red-200 text-status-error hover:bg-red-50')}`}
-                          >
-                            Block
-                          </button>
-                        )}
-                        {goal.status !== 'abandoned' && (
-                          <button
-                            onClick={() => guard(() => { void handleStatusChange(goal.id, 'abandoned') })}
-                            className={`text-xs px-3 py-2 md:px-2.5 md:py-1.5 rounded-lg border ${modeAwareButtonClass(semi, 'border-border-primary text-text-muted hover:bg-surface-hover')}`}
-                          >
-                            Abandon
-                          </button>
-                        )}
+                {expandedId === goal.id && (
+                  <div className="px-3 pb-3 pt-2 border-t border-border-primary bg-surface-secondary space-y-2">
+                    {/* Status actions */}
+                    <div className="flex gap-2 flex-wrap">
+                      {goal.status !== 'completed' && (
                         <button
-                          onClick={() => guard(() => { void handleDelete(goal.id) })}
-                          onBlur={() => setConfirmDeleteId(null)}
-                          className={`text-xs px-3 py-2 md:px-2.5 md:py-1.5 rounded-lg border ${modeAwareButtonClass(semi, 'border-red-200 text-status-error hover:text-red-600')}`}
+                          onClick={() => guard(() => { void handleStatusChange(goal.id, 'completed') })}
+                          className={`text-xs px-3 py-2 md:px-2.5 md:py-1.5 rounded-lg border ${modeAwareButtonClass(semi, 'border-emerald-200 text-status-success hover:bg-emerald-50')}`}
                         >
-                          {confirmDeleteId === goal.id ? 'Confirm?' : 'Delete'}
+                          Complete
+                        </button>
+                      )}
+                      {goal.status !== 'blocked' && goal.status !== 'completed' && (
+                        <button
+                          onClick={() => guard(() => { void handleStatusChange(goal.id, 'blocked') })}
+                          className={`text-xs px-3 py-2 md:px-2.5 md:py-1.5 rounded-lg border ${modeAwareButtonClass(semi, 'border-red-200 text-status-error hover:bg-red-50')}`}
+                        >
+                          Block
+                        </button>
+                      )}
+                      <button
+                        onClick={() => guard(() => { void handleDelete(goal.id) })}
+                        onBlur={() => setConfirmDeleteId(null)}
+                        className={`text-xs px-3 py-2 md:px-2.5 md:py-1.5 rounded-lg border ${modeAwareButtonClass(semi, 'border-red-200 text-status-error hover:text-red-600')}`}
+                      >
+                        {confirmDeleteId === goal.id ? 'Confirm?' : 'Delete'}
+                      </button>
+                    </div>
+
+                    {/* Add update */}
+                    {semi ? (
+                      <div className="flex gap-2">
+                        <input
+                          value={updateObs}
+                          onChange={(e) => setUpdateObs(e.target.value)}
+                          placeholder="Log an update..."
+                          className="flex-1 px-2.5 py-1.5 text-sm border border-border-primary rounded-lg focus:outline-none focus:border-text-muted bg-surface-primary text-text-primary placeholder:text-text-muted"
+                        />
+                        <button
+                          onClick={() => handleAddUpdate(goal.id)}
+                          disabled={!updateObs.trim()}
+                          className="text-sm bg-interactive text-text-invert px-2.5 py-1.5 rounded-lg hover:bg-interactive-hover disabled:opacity-50"
+                        >
+                          Log
                         </button>
                       </div>
+                    ) : (
+                      <div>
+                        <button
+                          onClick={requestSemiMode}
+                          className={`text-sm px-2.5 py-1.5 rounded-lg ${AUTO_MODE_LOCKED_BUTTON_CLASS}`}
+                        >
+                          Log Update
+                        </button>
+                      </div>
+                    )}
 
-                      {/* Add update */}
-                      {semi ? (
-                        <div className="flex gap-2">
-                          <input
-                            value={updateObs}
-                            onChange={(e) => setUpdateObs(e.target.value)}
-                            placeholder="Log an update..."
-                            className="flex-1 px-2.5 py-1.5 text-sm border border-border-primary rounded-lg focus:outline-none focus:border-text-muted bg-surface-primary text-text-primary placeholder:text-text-muted"
-                          />
-                          <input
-                            value={updateMetric}
-                            onChange={(e) => setUpdateMetric(e.target.value)}
-                            placeholder="%"
-                            className="w-12 px-2.5 py-1.5 text-sm border border-border-primary rounded-lg focus:outline-none focus:border-text-muted bg-surface-primary text-text-primary placeholder:text-text-muted text-center"
-                          />
-                          <button
-                            onClick={() => handleAddUpdate(goal.id)}
-                            disabled={!updateObs.trim()}
-                            className="text-sm bg-interactive text-text-invert px-2.5 py-1.5 rounded-lg hover:bg-interactive-hover disabled:opacity-50"
-                          >
-                            Log
-                          </button>
-                        </div>
-                      ) : (
-                        <div>
-                          <button
-                            onClick={requestSemiMode}
-                            className={`text-sm px-2.5 py-1.5 rounded-lg ${AUTO_MODE_LOCKED_BUTTON_CLASS}`}
-                          >
-                            Log Update
-                          </button>
-                        </div>
-                      )}
-
-                      {/* Updates history */}
-                      {updatesCache[goal.id] && updatesCache[goal.id].length > 0 ? (
-                        <div className={`space-y-2${semi ? ' pt-1 border-t border-border-primary' : ''}`}>
-                          <div className="text-xs font-medium text-text-muted">Updates</div>
-                          {updatesCache[goal.id].map(u => (
-                            <div key={u.id} className="text-sm text-text-muted flex gap-2">
-                              <span className="text-text-muted shrink-0">{formatRelativeTime(u.createdAt)}</span>
-                              <span>{u.observation}</span>
-                              {u.metricValue !== null && u.metricValue !== undefined && (
-                                <span className="text-interactive shrink-0">{Math.round(toPercent(u.metricValue))}%</span>
-                              )}
-                            </div>
-                          ))}
-                        </div>
-                      ) : (
-                        <div className="text-sm text-text-muted">No updates yet</div>
-                      )}
-                    </div>
-                  )}
-                </div>
-              )
-            })}
+                    {/* Updates history */}
+                    {updatesCache[goal.id] && updatesCache[goal.id].length > 0 ? (
+                      <div className={`space-y-2${semi ? ' pt-1 border-t border-border-primary' : ''}`}>
+                        <div className="text-xs font-medium text-text-muted">Updates</div>
+                        {updatesCache[goal.id].map(u => (
+                          <div key={u.id} className="text-sm text-text-muted flex gap-2">
+                            <span className="text-text-muted shrink-0">{formatRelativeTime(u.createdAt)}</span>
+                            <span>{u.observation}</span>
+                          </div>
+                        ))}
+                      </div>
+                    ) : (
+                      <div className="text-sm text-text-muted">No updates yet</div>
+                    )}
+                  </div>
+                )}
+              </div>
+            ))}
           </div>
         )}
       </div>

@@ -77,7 +77,7 @@ describe('Goal routes', () => {
       expect((res.body as any[])[0].description).toBe('Child goal')
     })
 
-    it('marks parent as in_progress when first subgoal is created', async () => {
+    it('keeps parent as active when subgoal is created', async () => {
       const parentRes = await request(ctx, 'POST', `/api/rooms/${roomId}/goals`, {
         description: 'Parent status goal'
       })
@@ -90,7 +90,7 @@ describe('Goal routes', () => {
 
       const parentAfter = await request(ctx, 'GET', `/api/goals/${parentId}`)
       expect(parentAfter.status).toBe(200)
-      expect((parentAfter.body as any).status).toBe('in_progress')
+      expect((parentAfter.body as any).status).toBe('active')
     })
   })
 
@@ -140,7 +140,7 @@ describe('Goal routes', () => {
       expect((res.body as any).observation).toBe('Made progress')
     })
 
-    it('recalculates goal progress from metric value', async () => {
+    it('logs metric value without changing goal progress', async () => {
       const createRes = await request(ctx, 'POST', `/api/rooms/${roomId}/goals`, {
         description: 'Metric goal'
       })
@@ -152,25 +152,10 @@ describe('Goal routes', () => {
       })
       expect(updateRes.status).toBe(201)
 
+      // Progress is no longer set from metric values (WIP replaces progress tracking)
       const getRes = await request(ctx, 'GET', `/api/goals/${id}`)
       expect(getRes.status).toBe(200)
-      expect((getRes.body as any).progress).toBe(0.5)
-    })
-
-    it('accepts percentage metric values', async () => {
-      const createRes = await request(ctx, 'POST', `/api/rooms/${roomId}/goals`, {
-        description: 'Percent metric goal'
-      })
-      const id = (createRes.body as any).id
-
-      await request(ctx, 'POST', `/api/goals/${id}/updates`, {
-        observation: 'Half done in percent',
-        metricValue: 50
-      })
-
-      const getRes = await request(ctx, 'GET', `/api/goals/${id}`)
-      expect(getRes.status).toBe(200)
-      expect((getRes.body as any).progress).toBe(0.5)
+      expect((getRes.body as any).progress).toBe(0)
     })
 
     it('returns 400 if observation missing', async () => {

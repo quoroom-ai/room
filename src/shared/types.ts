@@ -8,7 +8,7 @@ export type RoomStatus = typeof ROOM_STATUSES[keyof typeof ROOM_STATUSES]
 export type AgentState = typeof AGENT_STATES[keyof typeof AGENT_STATES]
 export type DecisionType = typeof DECISION_TYPES[keyof typeof DECISION_TYPES]
 export type GoalStatus = typeof GOAL_STATUSES[keyof typeof GOAL_STATUSES]
-export type DecisionStatus = 'voting' | 'approved' | 'rejected' | 'vetoed' | 'expired'
+export type DecisionStatus = 'voting' | 'approved' | 'rejected' | 'vetoed' | 'expired' | 'announced' | 'objected' | 'effective'
 export type VoteValue = 'yes' | 'no' | 'abstain'
 export type ActivityEventType = 'decision' | 'milestone' | 'financial' | 'deployment' | 'worker' | 'error' | 'system' | 'self_mod'
 export type EscalationStatus = 'pending' | 'in_progress' | 'resolved'
@@ -280,6 +280,7 @@ export interface QuorumDecision {
   keeperVote: VoteValue | null
   minVoters: number
   sealed: boolean
+  effectiveAt: string | null
   createdAt: string
   resolvedAt: string | null
 }

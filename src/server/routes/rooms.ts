@@ -230,6 +230,7 @@ export function registerRoomRoutes(router: Router): void {
     const pendingEscalations = queries.listEscalations(ctx.db, roomId, 'pending' as EscalationStatus).length
     const unreadMessages = queries.listRoomMessages(ctx.db, roomId, 'unread').length
     const activeVotes = queries.listDecisions(ctx.db, roomId, 'voting').length
+      + queries.listDecisions(ctx.db, roomId, 'announced').length
     return {
       data: {
         roomId,

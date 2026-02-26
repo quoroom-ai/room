@@ -80,14 +80,15 @@ describe('runCycle', () => {
     expect(callArgs.prompt).toContain('Make money')
   })
 
-  it('includes pending decisions in context', async () => {
-    queries.createDecision(db, roomId, queenId, 'Build SaaS?', 'strategy')
+  it('includes announced decisions in context', async () => {
+    queries.createAnnouncement(db, roomId, queenId, 'Build SaaS?', 'strategy',
+      new Date(Date.now() + 600000).toISOString())
 
     const worker = queries.getWorker(db, queenId)!
     await runCycle(db, roomId, worker)
 
     const callArgs = mockExecuteAgent.mock.calls[0][0]
-    expect(callArgs.prompt).toContain('Pending Proposals')
+    expect(callArgs.prompt).toContain('Announced Decisions')
     expect(callArgs.prompt).toContain('Build SaaS?')
   })
 
@@ -99,7 +100,7 @@ describe('runCycle', () => {
     await runCycle(db, roomId, worker)
 
     const callArgs = mockExecuteAgent.mock.calls[0][0]
-    expect(callArgs.prompt).toContain('Messages from Other Workers')
+    expect(callArgs.prompt).toContain('Messages from Workers')
     expect(callArgs.prompt).toContain('How should I proceed?')
   })
 
@@ -113,7 +114,7 @@ describe('runCycle', () => {
     expect(mockExecuteAgent.mock.calls[0][0].model).toBe('openai:gpt-4o-mini')
   })
 
-  it('injects matching skills into system prompt', async () => {
+  it('does not inject skills into system prompt (pull-only)', async () => {
     queries.createSkill(db, roomId, 'Money Making', 'Focus on revenue.', {
       activationContext: ['money', 'revenue'],
       autoActivate: true
@@ -123,8 +124,8 @@ describe('runCycle', () => {
     await runCycle(db, roomId, worker)
 
     const callArgs = mockExecuteAgent.mock.calls[0][0]
-    expect(callArgs.systemPrompt).toContain('Money Making')
-    expect(callArgs.systemPrompt).toContain('Focus on revenue.')
+    // Skills are no longer auto-injected — agents use quoroom_recall to pull them
+    expect(callArgs.systemPrompt).not.toContain('Active Skills')
   })
 
   it('throws RateLimitError when executor returns rate limit response', async () => {
