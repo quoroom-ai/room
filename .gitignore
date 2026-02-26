@@ -23,6 +23,7 @@ PLAN.md
 e2e/report/
 e2e/results/
 e2e/screenshots/
+e2e/videos/
 test-results/
 coverage/
 

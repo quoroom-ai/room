@@ -174,6 +174,9 @@ function App(): React.JSX.Element {
     readyUpdateVersion: string | null
   } | null>(null)
   const [devDbBanner, setDevDbBanner] = useState<{ dbPath: string; dataDir?: string } | null>(null)
+  const [localModeBanner, setLocalModeBanner] = useState<{ port: string; dbPath: string; dataDir?: string } | null>(null)
+  const [localModeDismissed, setLocalModeDismissed] = useState(() => storageGet('quoroom_local_mode_dismissed') === 'true')
+  const [earlyBannerDismissed, setEarlyBannerDismissed] = useState(() => storageGet('quoroom_early_banner_dismissed') === 'true')
   const [updateDismissed, setUpdateDismissed] = useState(false)
 
   // Remote origin gate: 'probing' → 'connect' or redirect to localhost
@@ -385,6 +388,13 @@ function App(): React.JSX.Element {
           setDevDbBanner({ dbPath: status.dbPath, dataDir: status.dataDir })
         } else {
           setDevDbBanner(null)
+        }
+
+        const isLocal = (status.deploymentMode ?? 'local') === 'local'
+        if (isLocal && status.dbPath) {
+          setLocalModeBanner({ port: location.port || DEFAULT_PORT, dbPath: status.dbPath, dataDir: status.dataDir })
+        } else {
+          setLocalModeBanner(null)
         }
 
         const ui = status.updateInfo
@@ -846,17 +856,28 @@ function App(): React.JSX.Element {
 
       {/* Main content */}
       <div className="flex-1 flex flex-col min-w-0">
-        <div className="flex items-center gap-3 px-4 py-2 bg-brand-50 border-b border-brand-200 shrink-0">
-          <span className="text-sm text-brand-700 flex-1">
-            You're early! We're building Quoroom every day and releasing often. If something isn't working, let us know.
-          </span>
-          <button
-            onClick={() => window.open('mailto:hello@email.quoroom.ai?subject=Bug report&body=Hi, I found an issue in Quoroom:')}
-            className="text-sm px-4 py-1.5 bg-interactive text-text-invert rounded-lg hover:bg-interactive-hover shrink-0 font-medium transition-colors"
-          >
-            Email Developer
-          </button>
-        </div>
+        {!earlyBannerDismissed && (
+          <div className="flex items-center gap-3 px-4 py-2 bg-brand-50 border-b border-brand-200 shrink-0">
+            <span className="text-sm text-brand-700 flex-1">
+              You're early! We're building Quoroom every day and releasing often. If something isn't working,{' '}
+              <a
+                href="mailto:hello@email.quoroom.ai?subject=Bug report&body=Hi, I found an issue in Quoroom:"
+                className="underline hover:no-underline font-medium"
+              >
+                let us know
+              </a>.
+            </span>
+            <button
+              onClick={() => {
+                setEarlyBannerDismissed(true)
+                storageSet('quoroom_early_banner_dismissed', 'true')
+              }}
+              className="text-brand-400 hover:text-brand-600 text-lg leading-none shrink-0 transition-colors"
+            >
+              &times;
+            </button>
+          </div>
+        )}
 
         {devDbBanner && (
           <div className="px-4 py-2 bg-status-warning-bg border-b border-amber-200 shrink-0">
@@ -874,6 +895,33 @@ function App(): React.JSX.Element {
               className="mt-1 text-[11px] text-status-warning underline hover:no-underline"
             >
               Clear storage
+            </button>
+          </div>
+        )}
+
+        {APP_MODE === 'local' && localModeBanner && !localModeDismissed && (
+          <div className="flex items-center gap-3 px-4 py-2 bg-status-info-bg border-b border-blue-200 shrink-0">
+            <div className="flex-1 min-w-0">
+              <div className="text-[11px] font-semibold uppercase tracking-wide text-status-info">
+                Local UI · Port {localModeBanner.port}
+              </div>
+              <div className="text-xs text-text-secondary break-all">
+                DB: <span className="font-mono">{localModeBanner.dbPath}</span>
+              </div>
+              {localModeBanner.dataDir && (
+                <div className="text-xs text-text-secondary break-all">
+                  Data: <span className="font-mono">{localModeBanner.dataDir}</span>
+                </div>
+              )}
+            </div>
+            <button
+              onClick={() => {
+                setLocalModeDismissed(true)
+                storageSet('quoroom_local_mode_dismissed', 'true')
+              }}
+              className="text-status-info hover:text-blue-800 dark:hover:text-blue-300 text-lg leading-none shrink-0 transition-colors"
+            >
+              &times;
             </button>
           </div>
         )}
