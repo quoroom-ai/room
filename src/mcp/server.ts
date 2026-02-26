@@ -18,6 +18,7 @@ import { registerCredentialTools } from './tools/credentials'
 import { registerResourceTools } from './tools/resources'
 import { registerInviteTools } from './tools/invite'
 import { registerBrowserTools } from './tools/browser'
+import { registerWipTools } from './tools/wip'
 import { closeMcpDatabase } from './db'
 import { closeBrowser } from '../shared/web-tools'
 
@@ -47,6 +48,7 @@ async function main(): Promise<void> {
   registerResourceTools(server)
   registerInviteTools(server)
   registerBrowserTools(server)
+  registerWipTools(server)
 
   // Clean up database and browser on process exit
   const cleanup = (): void => {

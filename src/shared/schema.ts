@@ -33,6 +33,7 @@ CREATE TABLE IF NOT EXISTS workers (
     agent_state TEXT NOT NULL DEFAULT 'idle',
     votes_cast INTEGER NOT NULL DEFAULT 0,
     votes_missed INTEGER NOT NULL DEFAULT 0,
+    wip TEXT,
     created_at DATETIME DEFAULT (datetime('now','localtime')),
     updated_at DATETIME DEFAULT (datetime('now','localtime'))
 );

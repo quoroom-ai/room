@@ -106,6 +106,15 @@ export function runMigrations(database: Database.Database, log: (msg: string) =>
     log('Migrated: added allowed_tools column to rooms')
   }
 
+  // Add wip (work-in-progress) column to workers
+  const hasWorkerWip = (database.prepare(
+    `SELECT name FROM pragma_table_info('workers') WHERE name='wip'`
+  ).get() as { name: string } | undefined)?.name
+  if (!hasWorkerWip) {
+    database.exec(`ALTER TABLE workers ADD COLUMN wip TEXT`)
+    log('Migrated: added wip column to workers')
+  }
+
   // Migrate ollama models → 'claude' (ollama removed in v0.1.12+)
   const ollamaWorkers = database
     .prepare(`SELECT id FROM workers WHERE model LIKE 'ollama:%'`)

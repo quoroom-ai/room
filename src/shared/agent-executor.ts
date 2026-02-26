@@ -344,7 +344,7 @@ async function executeOpenAiWithTools(options: AgentExecutionOptions): Promise<A
     {
       role: 'user' as const,
       content: isResume
-        ? `NEW CYCLE. Updated room state:\n${options.prompt}\n\nContinue working toward the goal.`
+        ? `NEW CYCLE. Updated room state:\n${options.prompt}\n\nTake the next action. Do not repeat what was already accomplished (see WIP/context above). Execute to completion.`
         : options.prompt
     }
   ]
@@ -460,7 +460,7 @@ async function executeAnthropicWithTools(options: AgentExecutionOptions): Promis
     {
       role: 'user',
       content: isResume
-        ? `NEW CYCLE. Updated room state:\n${options.prompt}\n\nContinue working toward the goal.`
+        ? `NEW CYCLE. Updated room state:\n${options.prompt}\n\nTake the next action. Do not repeat what was already accomplished (see WIP/context above). Execute to completion.`
         : options.prompt
     }
   ]

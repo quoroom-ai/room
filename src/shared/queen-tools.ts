@@ -401,6 +401,25 @@ export const QUEEN_TOOL_DEFINITIONS: ToolDef[] = [
         }
       }
     }
+  },
+
+  // ── WIP (Work-In-Progress) ──────────────────────────────────
+  {
+    type: 'function',
+    function: {
+      name: 'quoroom_save_wip',
+      description: 'Save what you accomplished this cycle and what should happen next. This is injected at the TOP of your next cycle\'s context so you (or a teammate) can continue forward without repeating work. Call this before your cycle ends. Pass "done" or empty string to clear WIP.',
+      parameters: {
+        type: 'object',
+        properties: {
+          status: {
+            type: 'string',
+            description: 'What you accomplished and what to do next. Example: "Registered tuta account (user: agent42@tuta.com, pwd in memory). Next: set up email forwarding and notify keeper."'
+          }
+        },
+        required: ['status']
+      }
+    }
   }
 ]
 
@@ -751,6 +770,14 @@ export async function executeQueenTool(
         if (txs.length === 0) return { content: 'No transactions yet.' }
         const lines = txs.map(tx => `[${tx.type}] ${tx.amount} USDC — ${tx.description ?? ''} (${tx.status})`).join('\n')
         return { content: lines }
+      }
+
+      // ── WIP (Work-In-Progress) ────────────────────────────────
+      case 'quoroom_save_wip': {
+        const status = String(args.status ?? '').trim()
+        const isDone = !status || status.toLowerCase() === 'done' || status.toLowerCase() === 'complete' || status.toLowerCase() === 'completed'
+        queries.updateWorkerWip(db, workerId, isDone ? null : status.slice(0, 2000))
+        return { content: isDone ? 'WIP cleared.' : 'WIP saved. Next cycle will see it at the top of context.' }
       }
 
       default:

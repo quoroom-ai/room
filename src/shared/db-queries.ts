@@ -236,9 +236,15 @@ function mapWorkerRow(row: Record<string, unknown>): Worker {
     agentState: ((row.agent_state as string) ?? 'idle') as Worker['agentState'],
     votesCast: (row.votes_cast as number) ?? 0,
     votesMissed: (row.votes_missed as number) ?? 0,
+    wip: (row.wip as string | null) ?? null,
     createdAt: row.created_at as string,
     updatedAt: row.updated_at as string
   }
+}
+
+export function updateWorkerWip(db: Database.Database, workerId: number, wip: string | null): void {
+  db.prepare("UPDATE workers SET wip = ?, updated_at = datetime('now','localtime') WHERE id = ?")
+    .run(wip, workerId)
 }
 
 // ─── Tasks ──────────────────────────────────────────────────
@@ -2392,7 +2398,8 @@ export function countProductiveToolCalls(db: Database.Database, workerId: number
     AND (content LIKE '%web_search%' OR content LIKE '%web_fetch%' OR content LIKE '%remember%'
       OR content LIKE '%send_message%' OR content LIKE '%inbox_send%'
       OR content LIKE '%update_progress%' OR content LIKE '%complete_goal%'
-      OR content LIKE '%set_goal%' OR content LIKE '%delegate_task%' OR content LIKE '%propose%' OR content LIKE '%vote%')
+      OR content LIKE '%set_goal%' OR content LIKE '%delegate_task%' OR content LIKE '%propose%' OR content LIKE '%vote%'
+      OR content LIKE '%browser%' OR content LIKE '%save_wip%')
   `).get(workerId, lastNCycles) as { cnt: number }
   return row.cnt
 }

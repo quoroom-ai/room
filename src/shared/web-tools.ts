@@ -56,7 +56,7 @@ interface BrowserSession {
 }
 
 const _sessions = new Map<string, BrowserSession>()
-const SESSION_IDLE_TIMEOUT = 10 * 60 * 1000 // 10 min idle before cleanup
+const SESSION_IDLE_TIMEOUT = 30 * 60 * 1000 // 30 min idle before cleanup (agents need longer for cycle gaps)
 let _cleanupInterval: ReturnType<typeof setInterval> | null = null
 
 function startSessionCleanup(): void {

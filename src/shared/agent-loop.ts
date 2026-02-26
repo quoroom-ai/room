@@ -103,7 +103,9 @@ export async function startAgentLoop(
       }
 
       try {
-        await runCycle(db, roomId, currentWorker, currentWorker.maxTurns ?? currentRoom.queenMaxTurns, options)
+        // Floor: never less than 50 turns — let agents finish their work
+        const effectiveMaxTurns = Math.max(currentWorker.maxTurns ?? currentRoom.queenMaxTurns, 50)
+        await runCycle(db, roomId, currentWorker, effectiveMaxTurns, options)
       } catch (err) {
         if (!loop.running) break
 
@@ -143,8 +145,11 @@ export async function startAgentLoop(
 
       if (!loop.running) break
 
-      // Configurable sleep between cycles (token burn safeguard)
-      const gap = currentWorker.cycleGapMs ?? currentRoom.queenCycleGapMs
+      // Adaptive gap: short when agent has active WIP (momentum), normal otherwise
+      const MOMENTUM_GAP = 10_000  // 10s — maintain action momentum
+      const baseGap = currentWorker.cycleGapMs ?? currentRoom.queenCycleGapMs
+      const freshWorker = queries.getWorker(db, workerId)
+      const gap = freshWorker?.wip ? Math.min(baseGap, MOMENTUM_GAP) : baseGap
       try {
         const abort = new AbortController()
         loop.abort = abort
@@ -397,20 +402,27 @@ export async function runCycle(
 
     // ─── Build context prompt ──────────────────────────────────────────────────
     const contextParts: string[] = []
+    const isExecutor = worker.role === 'executor'
 
-    // Identity — always first so agents know their roomId and workerId for MCP tool calls
+    // 1. Identity — always first so agents know their roomId and workerId for MCP tool calls
     contextParts.push(
       `## Your Identity\n- Room ID: ${roomId}\n- Your Worker ID: ${worker.id}\n- Your Name: ${worker.name}`
     )
 
-    const keeperReferralCode = queries.getSetting(db, 'keeper_referral_code')?.trim()
-    if (keeperReferralCode) {
-      const encodedKeeperCode = encodeURIComponent(keeperReferralCode)
-      contextParts.push(
-        `## Keeper Referral\n- Keeper code: ${keeperReferralCode}\n- Invite link: https://quoroom.ai/invite/${encodedKeeperCode}\n- Share link: https://quoroom.ai/share/v2/${encodedKeeperCode}`
-      )
+    // 2. WIP — resume directive (highest priority, before everything else)
+    const wip = worker.wip
+    if (wip) {
+      contextParts.push(`## >>> CONTINUE FORWARD <<<
+Last cycle you accomplished / were working on:
+
+${wip}
+
+NOW take the NEXT action. Do NOT repeat what's already done — build on it.
+If the above action is complete, start a new one toward the room objective.
+At the end of this cycle, call quoroom_save_wip to save your updated position.`)
     }
 
+    // 3. Room Objective + Goals + Assigned Tasks
     if (status.room.goal) {
       contextParts.push(`## Room Objective\n${status.room.goal}`)
     }
@@ -431,7 +443,7 @@ export async function runCycle(
       }
     }
 
-    // Auto-load room memories for all models — queens build knowledge across cycles
+    // 4. Room Memory
     const memoryEntities = queries.listEntities(db, roomId).slice(0, 20)
     if (memoryEntities.length > 0) {
       const memLines = memoryEntities
@@ -446,130 +458,25 @@ export async function runCycle(
       }
     }
 
-    const votingDecisions = queries.listDecisions(db, roomId, 'voting')
-    if (votingDecisions.length > 0) {
-      const decisionLines = votingDecisions.map(d => {
-        const votes = queries.getVotes(db, d.id)
-        const alreadyVoted = votes.some(v => v.workerId === worker.id)
-        const proposerW = d.proposerId ? roomWorkers.find(w => w.id === d.proposerId) : null
-        const by = proposerW ? ` (by ${proposerW.name})` : ''
-        const voteStatus = alreadyVoted ? ' ✓ you voted' : ' ← VOTE NEEDED'
-        return `- #${d.id}: ${d.proposal}${by} [${votes.length} votes so far, need ${d.minVoters}+]${voteStatus}`
-      })
-      contextParts.push(`## Pending Proposals — Use quoroom_vote to cast your vote\n${decisionLines.join('\n')}`)
-    }
-
-    // Show recent resolved decisions so queen knows what's already been decided
-    const recentResolved = queries.listRecentDecisions(db, roomId, 5)
-    if (recentResolved.length > 0) {
-      contextParts.push(`## Recent Decisions (already done — do NOT repeat these)\n${recentResolved.map(d => {
-        const icon = d.status === 'approved' ? '✓' : '✗'
-        return `- ${icon} ${d.status}: "${d.proposal.slice(0, 120)}"`
-      }).join('\n')}`)
-    }
-
-    // Split messages: my messages to keeper vs. messages from other workers directed at me
-    const myKeeperMessages = pendingEscalations.filter(e => e.fromAgentId === worker.id && !e.toAgentId)
-    const incomingWorkerMessages = pendingEscalations.filter(e => e.toAgentId === worker.id && e.fromAgentId !== worker.id)
-
-    if (myKeeperMessages.length > 0) {
-      contextParts.push(`## Pending Messages to Keeper (awaiting reply)\n${myKeeperMessages.map(e =>
-        `- #${e.id}: ${e.question}`
-      ).join('\n')}`)
-    }
-
-    if (incomingWorkerMessages.length > 0) {
-      const senderNames = new Map(roomWorkers.map(w => [w.id, w.name]))
-      contextParts.push(`## Messages from Other Workers\n${incomingWorkerMessages.map(e => {
-        const sender = senderNames.get(e.fromAgentId ?? 0) ?? `Worker #${e.fromAgentId}`
-        return `- #${e.id} from ${sender}: ${e.question}`
-      }).join('\n')}`)
-    }
-
-    if (recentKeeperAnswers.length > 0) {
-      contextParts.push(`## Keeper Answers (recent)\n${recentKeeperAnswers.map(e =>
-        `- Q: ${e.question}\n  A: ${e.answer}`
-      ).join('\n')}`)
-    }
-
-    // All models get 15 most recent activity items for goal tracking
-    const activitySlice = recentActivity.slice(0, 15)
-    if (activitySlice.length > 0) {
-      contextParts.push(`## Recent Activity\n${activitySlice.map(a =>
-        `- [${a.eventType}] ${a.summary}`
-      ).join('\n')}`)
-    }
-
-    if (roomWorkers.length > 0) {
-      contextParts.push(`## Room Workers\n${roomWorkers.map(w =>
-        `- #${w.id} ${w.name}${w.role ? ` (${w.role})` : ''} — ${w.agentState}`
-      ).join('\n')}`)
-    }
-
-    if (roomTasks.length > 0) {
-      contextParts.push(`## Room Tasks\n${roomTasks.map(t =>
-        `- #${t.id} "${t.name}" [${t.triggerType}] — ${t.status}`
-      ).join('\n')}`)
-    }
-
-    // Wallet awareness — every queen sees their room's financial state
-    const wallet = queries.getWalletByRoom(db, roomId)
-    if (wallet) {
-      const summary = queries.getWalletTransactionSummary(db, wallet.id)
-      const net = (parseFloat(summary.received) - parseFloat(summary.sent)).toFixed(2)
-      contextParts.push(`## Wallet\nAddress: ${wallet.address}\nBalance: ${net} USDC (received: ${summary.received}, spent: ${summary.sent})`)
-    }
-
-    if (unreadMessages.length > 0) {
-      contextParts.push(`## Unread Messages\n${unreadMessages.map(m =>
-        `- #${m.id} from ${m.fromRoomId ?? 'unknown'}: ${m.subject}`
-      ).join('\n')}`)
-    }
-
-    // Station awareness — all models get this (relevant for planning worker execution)
-    const activeStations = cloudStations.filter(s => s.status === 'active')
-    if (cloudStations.length > 0) {
-      const stationLines = cloudStations.map(s =>
-        `- #${s.id} "${s.stationName}" (${s.tier}) — ${s.status} — $${s.monthlyCost}/mo`
-      )
-      contextParts.push(`## Stations (${activeStations.length} active)\n${stationLines.join('\n')}`)
-
-      }
-
-    if (publicRooms.length > 0) {
-      const top3 = publicRooms.slice(0, 3)
-      contextParts.push(
-        `## Public Rooms (cross-room learning)\nOther rooms you can learn strategies from:\n${top3.map((r, i) =>
-          `${i + 1}. "${r.name}" — ${r.earnings} USDC | Goal: ${r.goal ?? 'No goal set'}`
-        ).join('\n')}`
-      )
-    }
-
-    // Execution settings + rate limit awareness — all models
-    const rateLimitEvents = recentActivity.filter(a =>
-      a.eventType === 'system' && a.summary.includes('rate limited')
-    )
-    const settingsParts = [
-      `- Cycle gap: ${Math.round(status.room.queenCycleGapMs / 1000)}s`,
-      `- Max turns per cycle: ${status.room.queenMaxTurns}`,
-      `- Max concurrent tasks: ${status.room.maxConcurrentTasks}`
-    ]
-    if (rateLimitEvents.length > 0) {
-      settingsParts.push(`- **Rate limits hit recently: ${rateLimitEvents.length}** (in last ${recentActivity.length} events)`)
-    }
-    contextParts.push(`## Execution Settings\n${settingsParts.join('\n')}`)
-
-    // Stuck detector: if last 2 completed cycles had zero productive tool calls, inject pivot directive
+    // 5. Stuck detector (before instructions so agent sees urgency)
     const STUCK_THRESHOLD_CYCLES = 2
     const productiveCallCount = queries.countProductiveToolCalls(db, worker.id, STUCK_THRESHOLD_CYCLES)
     const recentCompletedCycles = queries.listRoomCycles(db, roomId, 5)
       .filter(c => c.workerId === worker.id && c.status === 'completed')
     const isStuck = recentCompletedCycles.length >= STUCK_THRESHOLD_CYCLES && productiveCallCount === 0
     if (isStuck) {
-      contextParts.push(`## ⚠ STUCK DETECTED\nYour last ${STUCK_THRESHOLD_CYCLES} cycles produced no external results (no web searches, no memories stored, no goal progress, no keeper messages). You MUST change strategy NOW:\n- Try a different web search query\n- Store what you know in memory even if incomplete\n- Update goal progress with what you've learned\n- Message the keeper if you're blocked\nDo NOT repeat the same approach. Pivot immediately.`)
-      logBuffer.addSynthetic('system', `Stuck detector: 0 productive tool calls in last ${STUCK_THRESHOLD_CYCLES} cycles — injecting pivot directive`)
+      if (wip) {
+        contextParts.push(`## ⚠ ACTION STALLED\nYour last ${STUCK_THRESHOLD_CYCLES} cycles had a WIP but produced no external results. Your current approach may be blocked.\n- Try a different method to accomplish the same goal\n- Save what you learned (quoroom_remember) and report the blocker (quoroom_send_message to keeper)\n- Clear your WIP (quoroom_save_wip with a new plan) and try an alternate approach\nDo NOT keep retrying the same failing steps.`)
+      } else {
+        contextParts.push(`## ⚠ STUCK — TAKE ACTION NOW\nYour last ${STUCK_THRESHOLD_CYCLES} cycles produced no external results (no web searches, no memories stored, no goal progress, no keeper messages). You are circling.\nSTOP planning and ideating. Pick ONE concrete action and execute it NOW:\n- Use quoroom_browser to register an account, buy a domain, or fill a form\n- Use web search to find a specific lead or service\n- Use quoroom_send_message to report what is blocking you\nThen save your progress: quoroom_save_wip("Doing X, reached step Y")`)
+      }
+      logBuffer.addSynthetic('system', `Stuck detector: 0 productive tool calls in last ${STUCK_THRESHOLD_CYCLES} cycles — injecting ${wip ? 'stalled' : 'stuck'} directive`)
     }
 
+    // 6. Tools + Instructions
+    const rateLimitEvents = recentActivity.filter(a =>
+      a.eventType === 'system' && a.summary.includes('rate limited')
+    )
     const selfRegulateHint = rateLimitEvents.length > 0
       ? '\n- **Self-regulate**: You are hitting rate limits. Use quoroom_configure_room to increase your cycle gap or reduce max turns to stay within API limits.'
       : ''
@@ -588,18 +495,22 @@ export async function runCycle(
     const toolLines: string[] = []
     const goalTools = ['quoroom_set_goal', 'quoroom_update_progress', 'quoroom_create_subgoal', 'quoroom_delegate_task', 'quoroom_complete_goal', 'quoroom_abandon_goal'].filter(has)
     if (goalTools.length) toolLines.push(`**Goals:** ${goalTools.join(', ')}`)
-    const govTools = ['quoroom_propose', 'quoroom_vote'].filter(has)
-    if (govTools.length) toolLines.push(`**Governance:** ${govTools.join(', ')}`)
-    const workerTools = ['quoroom_create_worker', 'quoroom_update_worker'].filter(has)
-    if (workerTools.length) toolLines.push(`**Workers:** ${workerTools.join(', ')}`)
-    if (has('quoroom_schedule')) toolLines.push('**Tasks:** quoroom_schedule')
+    if (!isExecutor) {
+      const govTools = ['quoroom_propose', 'quoroom_vote'].filter(has)
+      if (govTools.length) toolLines.push(`**Governance:** ${govTools.join(', ')}`)
+      const workerTools = ['quoroom_create_worker', 'quoroom_update_worker'].filter(has)
+      if (workerTools.length) toolLines.push(`**Workers:** ${workerTools.join(', ')}`)
+      if (has('quoroom_schedule')) toolLines.push('**Tasks:** quoroom_schedule')
+    }
     const memTools = ['quoroom_remember', 'quoroom_recall'].filter(has)
     if (memTools.length) toolLines.push(`**Memory:** ${memTools.join(', ')}`)
-    const walletToolNames = isCli
-      ? ['quoroom_wallet_balance', 'quoroom_wallet_send', 'quoroom_wallet_history', 'quoroom_wallet_topup']
-      : ['quoroom_wallet_balance', 'quoroom_wallet_send', 'quoroom_wallet_history']
-    const filteredWallet = walletToolNames.filter(has)
-    if (filteredWallet.length) toolLines.push(`**Wallet:** ${filteredWallet.join(', ')}`)
+    if (!isExecutor) {
+      const walletToolNames = isCli
+        ? ['quoroom_wallet_balance', 'quoroom_wallet_send', 'quoroom_wallet_history', 'quoroom_wallet_topup']
+        : ['quoroom_wallet_balance', 'quoroom_wallet_send', 'quoroom_wallet_history']
+      const filteredWallet = walletToolNames.filter(has)
+      if (filteredWallet.length) toolLines.push(`**Wallet:** ${filteredWallet.join(', ')}`)
+    }
     const webToolNames = isCli
       ? null  // CLI uses built-in web tools
       : ['quoroom_web_search', 'quoroom_web_fetch', 'quoroom_browser']
@@ -618,14 +529,20 @@ export async function runCycle(
       if (isCli) toolLines.push(`**Comms:** ${filteredComms.map(t => t === 'quoroom_send_message' ? `${t} (message keeper or worker)` : t === 'quoroom_inbox_list' ? `${t} (inter-room)` : t).join(', ')}`)
       else toolLines.push(`**Comms:** ${filteredComms.join(', ')}`)
     }
-    if (has('quoroom_configure_room')) toolLines.push(`**Settings:** quoroom_configure_room${selfRegulateHint}`)
+    if (!isExecutor && has('quoroom_configure_room')) toolLines.push(`**Settings:** quoroom_configure_room${selfRegulateHint}`)
     const skillToolNames = ['quoroom_create_skill', 'quoroom_list_skills', 'quoroom_edit_skill', 'quoroom_activate_skill', 'quoroom_deactivate_skill'].filter(has)
-    if (skillToolNames.length) toolLines.push(`**Skills:** ${skillToolNames.join(', ')} — write execution reports (MANDATORY each cycle)`)
+    if (skillToolNames.length) toolLines.push(`**Skills:** ${skillToolNames.join(', ')}`)
+    if (has('quoroom_save_wip')) toolLines.push('**WIP:** quoroom_save_wip — save what you accomplished so the next cycle continues forward')
     const toolList = toolLines.join('\n')
 
-    contextParts.push(`## Instructions\nBased on the current state, decide what to do next and call the appropriate tools. Available tools:\n\n${toolList}\n\nDo NOT "stand by" or wait for anyone — every cycle must make progress. Act autonomously: make decisions and execute. Inform the keeper of progress or important updates using quoroom_send_message (to="keeper"), but never block on a response. If the keeper hasn't replied, proceed with your best judgment.\n\nRevenue is always a priority. Every room must sustain itself financially. Actively seek ways to earn: offer services to the keeper, propose paid work to other rooms, or find monetizable opportunities in your domain. Check your wallet balance and report financial status to the keeper.\n\n${toolCallInstruction}`)
+    const hasWip = !!wip
+    const actionPriority = hasWip
+      ? 'You have an active WIP above — your #1 priority is to CONTINUE that action. Only handle housekeeping (votes, messages) after your main action is done or blocked.'
+      : 'Take concrete action toward the room objective. Execute — do not just plan or analyze.'
 
-    // Browser tips — shown whenever quoroom_browser is available
+    contextParts.push(`## Instructions\n${actionPriority}\n\nAvailable tools:\n\n${toolList}\n\nYou have plenty of turns — run your action to completion. Don't rush.\nBefore your cycle ends, save what you accomplished: quoroom_save_wip(...).\nCreate a skill (quoroom_create_skill) when you COMPLETE a significant action — this shares the recipe with the whole team.\n\nRevenue is always a priority. Actively seek ways to earn: offer services to the keeper, propose paid work to other rooms, or find monetizable opportunities.\n\n${toolCallInstruction}`)
+
+    // 7. Browser tips — shown whenever quoroom_browser is available
     if (has('quoroom_browser')) {
       contextParts.push(`## Browser Tool — quoroom_browser
 You have a persistent browser tool. Use it to interact with websites: navigate, click, fill forms, submit, scroll, take screenshots.
@@ -633,7 +550,7 @@ You have a persistent browser tool. Use it to interact with websites: navigate, 
 **Session persistence:**
 - First call: omit sessionId → starts fresh session. Note the returned sessionId.
 - Follow-up calls: pass sessionId back → keeps cookies, login state, localStorage.
-- Sessions expire after 10 min of inactivity. If expired, start a new session and re-login.
+- Sessions expire after 30 min of inactivity. If expired, start a new session and re-login.
 
 **Reliable form filling (learned techniques):**
 - Always end action sequences with a \`snapshot\` to see current page state.
@@ -653,32 +570,139 @@ You have a persistent browser tool. Use it to interact with websites: navigate, 
 **Store everything:** After creating accounts, finding contacts, or completing any action — immediately use quoroom_remember to save credentials, URLs, and results so the team and future cycles can access them.`)
     }
 
-    // Knowledge persistence — skills + memory
+    // 8. Knowledge persistence — skills + memory (condensed)
     if (skillToolNames.length || memTools.length) {
       const parts: string[] = ['## Knowledge Persistence']
-      parts.push('You lose context between cycles. Save important discoveries so you and your teammates can reuse them.')
+      parts.push('Save important discoveries so you and your teammates can reuse them.')
       if (memTools.length) {
-        parts.push(`\n**Memory** (quoroom_remember/recall): Store facts, credentials, contacts, research results. Check memory with quoroom_recall before starting work — don't repeat what's already done. Also call quoroom_list_skills — skills contain the team's execution algorithms and may have exactly the recipe you need.`)
+        parts.push(`\n**Memory** (quoroom_remember/recall): Store facts, credentials, contacts, research results. Check memory with quoroom_recall before starting work — don't repeat what's already done.`)
       }
       if (skillToolNames.length) {
-        parts.push(`\n**Skills — Execution Reports** (quoroom_create_skill): At the END of each cycle, create a skill documenting what you did. Skills are injected into every agent's system prompt — the whole team reads them next cycle.
-
-**MANDATORY: Before your cycle ends, call quoroom_create_skill with a report:**
-- Title: "[task]: [site/service name]" (e.g. "Tuta signup", "Email scraping from GitHub")
-- Body: step-by-step algorithm you used, including:
-  1. What you tried FIRST (and why it failed, with exact error or behavior)
-  2. What you tried NEXT (and whether it worked)
-  3. The WORKING approach with exact selectors, URLs, field names
-  4. Gotchas and warnings (e.g. "checkbox click intercepted by label — use CSS selector instead")
-- Set \`autoActivate: true\` and \`activationContext\` with keywords (e.g. ["tuta", "signup", "email", "checkbox"])
-
-Example skill body:
-"## Tuta Free Account Signup\\n1. Navigate to app.tuta.com → click 'Sign up'\\n2. Select Free plan (3rd radio) → click 'Continue'\\n3. Username: use 'fill' on textbox labeled 'Email address'\\n4. Password: use 'type' (not fill) — SPA input needs char-by-char\\n5. Checkboxes: text click fails (label intercepts). USE CSS: input[type=checkbox]:nth-of-type(1) and :nth-of-type(2)\\n6. CAPTCHA: clock type — screenshot it, read time as hh:mm\\nFAILED: Ctrl+A to clear field (doesn't work in this SPA). Use triple-click or reload page instead."
-
-This is NOT optional — every cycle must produce at least one skill report.`)
+        parts.push(`\n**Skills** (quoroom_create_skill): When you COMPLETE a significant action, create a skill documenting the working recipe (step-by-step algorithm, exact selectors, gotchas). Skills are injected into every agent's prompt — the whole team benefits.`)
       }
       contextParts.push(parts.join('\n'))
     }
+
+    // 9. Housekeeping — secondary priority, skipped for executor workers
+    if (!isExecutor) {
+      const housekeepingParts: string[] = []
+
+      const votingDecisions = queries.listDecisions(db, roomId, 'voting')
+      if (votingDecisions.length > 0) {
+        const decisionLines = votingDecisions.map(d => {
+          const votes = queries.getVotes(db, d.id)
+          const alreadyVoted = votes.some(v => v.workerId === worker.id)
+          const proposerW = d.proposerId ? roomWorkers.find(w => w.id === d.proposerId) : null
+          const by = proposerW ? ` (by ${proposerW.name})` : ''
+          const voteStatus = alreadyVoted ? ' ✓ you voted' : ' ← VOTE NEEDED'
+          return `- #${d.id}: ${d.proposal}${by} [${votes.length} votes so far, need ${d.minVoters}+]${voteStatus}`
+        })
+        housekeepingParts.push(`**Pending Proposals** — Use quoroom_vote to cast your vote\n${decisionLines.join('\n')}`)
+      }
+
+      const recentResolved = queries.listRecentDecisions(db, roomId, 5)
+      if (recentResolved.length > 0) {
+        housekeepingParts.push(`**Recent Decisions** (already done — do NOT repeat)\n${recentResolved.map(d => {
+          const icon = d.status === 'approved' ? '✓' : '✗'
+          return `- ${icon} ${d.status}: "${d.proposal.slice(0, 120)}"`
+        }).join('\n')}`)
+      }
+
+      const myKeeperMessages = pendingEscalations.filter(e => e.fromAgentId === worker.id && !e.toAgentId)
+      const incomingWorkerMessages = pendingEscalations.filter(e => e.toAgentId === worker.id && e.fromAgentId !== worker.id)
+
+      if (myKeeperMessages.length > 0) {
+        housekeepingParts.push(`**Pending Messages to Keeper** (awaiting reply)\n${myKeeperMessages.map(e =>
+          `- #${e.id}: ${e.question}`
+        ).join('\n')}`)
+      }
+
+      if (incomingWorkerMessages.length > 0) {
+        const senderNames = new Map(roomWorkers.map(w => [w.id, w.name]))
+        housekeepingParts.push(`**Messages from Other Workers**\n${incomingWorkerMessages.map(e => {
+          const sender = senderNames.get(e.fromAgentId ?? 0) ?? `Worker #${e.fromAgentId}`
+          return `- #${e.id} from ${sender}: ${e.question}`
+        }).join('\n')}`)
+      }
+
+      if (recentKeeperAnswers.length > 0) {
+        housekeepingParts.push(`**Keeper Answers** (recent)\n${recentKeeperAnswers.map(e =>
+          `- Q: ${e.question}\n  A: ${e.answer}`
+        ).join('\n')}`)
+      }
+
+      const activitySlice = recentActivity.slice(0, 15)
+      if (activitySlice.length > 0) {
+        housekeepingParts.push(`**Recent Activity**\n${activitySlice.map(a =>
+          `- [${a.eventType}] ${a.summary}`
+        ).join('\n')}`)
+      }
+
+      if (roomWorkers.length > 0) {
+        housekeepingParts.push(`**Room Workers**\n${roomWorkers.map(w =>
+          `- #${w.id} ${w.name}${w.role ? ` (${w.role})` : ''} — ${w.agentState}`
+        ).join('\n')}`)
+      }
+
+      if (roomTasks.length > 0) {
+        housekeepingParts.push(`**Room Tasks**\n${roomTasks.map(t =>
+          `- #${t.id} "${t.name}" [${t.triggerType}] — ${t.status}`
+        ).join('\n')}`)
+      }
+
+      if (housekeepingParts.length > 0) {
+        contextParts.push(`## Housekeeping (handle after your main action)\n${housekeepingParts.join('\n\n')}`)
+      }
+    }
+
+    // 10. Operational context — wallet, stations, etc.
+    const wallet = queries.getWalletByRoom(db, roomId)
+    if (wallet) {
+      const summary = queries.getWalletTransactionSummary(db, wallet.id)
+      const net = (parseFloat(summary.received) - parseFloat(summary.sent)).toFixed(2)
+      contextParts.push(`## Wallet\nAddress: ${wallet.address}\nBalance: ${net} USDC (received: ${summary.received}, spent: ${summary.sent})`)
+    }
+
+    if (unreadMessages.length > 0) {
+      contextParts.push(`## Unread Messages\n${unreadMessages.map(m =>
+        `- #${m.id} from ${m.fromRoomId ?? 'unknown'}: ${m.subject}`
+      ).join('\n')}`)
+    }
+
+    const activeStations = cloudStations.filter(s => s.status === 'active')
+    if (cloudStations.length > 0) {
+      const stationLines = cloudStations.map(s =>
+        `- #${s.id} "${s.stationName}" (${s.tier}) — ${s.status} — $${s.monthlyCost}/mo`
+      )
+      contextParts.push(`## Stations (${activeStations.length} active)\n${stationLines.join('\n')}`)
+    }
+
+    if (publicRooms.length > 0) {
+      const top3 = publicRooms.slice(0, 3)
+      contextParts.push(
+        `## Public Rooms (cross-room learning)\nOther rooms you can learn strategies from:\n${top3.map((r, i) =>
+          `${i + 1}. "${r.name}" — ${r.earnings} USDC | Goal: ${r.goal ?? 'No goal set'}`
+        ).join('\n')}`
+      )
+    }
+
+    const keeperReferralCode = queries.getSetting(db, 'keeper_referral_code')?.trim()
+    if (keeperReferralCode) {
+      const encodedKeeperCode = encodeURIComponent(keeperReferralCode)
+      contextParts.push(
+        `## Keeper Referral\n- Keeper code: ${keeperReferralCode}\n- Invite link: https://quoroom.ai/invite/${encodedKeeperCode}\n- Share link: https://quoroom.ai/share/v2/${encodedKeeperCode}`
+      )
+    }
+
+    const settingsParts = [
+      `- Cycle gap: ${Math.round(status.room.queenCycleGapMs / 1000)}s`,
+      `- Max turns per cycle: ${status.room.queenMaxTurns}`,
+      `- Max concurrent tasks: ${status.room.maxConcurrentTasks}`
+    ]
+    if (rateLimitEvents.length > 0) {
+      settingsParts.push(`- **Rate limits hit recently: ${rateLimitEvents.length}** (in last ${recentActivity.length} events)`)
+    }
+    contextParts.push(`## Execution Settings\n${settingsParts.join('\n')}`)
 
     const prompt = contextParts.join('\n\n')
 
@@ -716,8 +740,8 @@ This is NOT optional — every cycle must produce at least one skill report.`)
       prompt,
       systemPrompt,
       apiKey,
-      timeoutMs: 5 * 60 * 1000,
-      maxTurns: maxTurns ?? 10,
+      timeoutMs: worker.role === 'executor' ? 30 * 60 * 1000 : 15 * 60 * 1000,
+      maxTurns: maxTurns ?? 50,
       onConsoleLog: logBuffer.onConsoleLog,
       // CLI models: block non-quoroom MCP tools (daymon, etc.)
       disallowedTools: isCli ? 'mcp__daymon*' : undefined,

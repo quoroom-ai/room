@@ -34,6 +34,7 @@ export interface Worker {
   agentState: AgentState
   votesCast: number
   votesMissed: number
+  wip: string | null
   createdAt: string
   updatedAt: string
 }
