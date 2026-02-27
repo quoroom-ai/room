@@ -183,7 +183,7 @@ brew install quoroom-ai/quoroom/quoroom
 
 ### Download
 
-Download from [GitHub Releases](https://github.com/quoroom-ai/room/releases). Installers add `quoroom` to your PATH automatically. No dependencies needed.
+Download from [GitHub Releases](https://github.com/quoroom-ai/room/releases). Installers add `quoroom` to your PATH automatically. No dependencies needed. The installer bundles only Node.js v20 — no third-party software, toolbars, or extensions are included.
 
 Installer launchers:
 - macOS `.pkg`: open `/Applications/Quoroom Server.app`
