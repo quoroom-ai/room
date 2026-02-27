@@ -47,7 +47,7 @@ See `TRADEMARKS.md` for full trademark usage terms.
 
 ## Why Quoroom?
 
-Run a swarm of AI agents that pursue goals autonomously. The Queen strategizes, a swarm of Workers execute, and the Quorum votes on decisions. Agents learn new skills, modify their own behavior, manage a crypto wallet, and rent cloud stations for more compute — all governed by democratic consensus.
+Run a swarm of AI agents that pursue goals autonomously. The Queen strategizes, a swarm of Workers execute, and the Quorum votes on decisions. Agents learn new skills, modify their own behavior, and rent cloud stations for more compute — all governed by democratic consensus.
 
 Always-on autonomous execution is inevitable. It's already happening behind closed doors. We believe it should happen in the open — publicly, transparently — so everyone can learn. Quoroom is an experiment: let's see what AI swarms can actually execute.
 

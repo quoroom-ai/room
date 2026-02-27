@@ -21,13 +21,13 @@ export const ROOM_TEMPLATES: RoomTemplate[] = [
   {
     id: 'saas-builder',
     name: 'saasbuilder',
-    goal: 'Build and launch profitable micro-SaaS products',
-    description: 'Research market opportunities, build MVPs, deploy, and monetize. Focus on recurring revenue.',
+    goal: 'Build and launch micro-SaaS products',
+    description: 'Research market opportunities, build MVPs, deploy, and grow. Focus on shipping and user acquisition.',
     workerTemplates: [
       {
         name: 'Scout',
         role: 'Researcher',
-        systemPrompt: 'You are a market research specialist. Identify profitable niches, analyze competitors, validate demand. Report structured findings with data sources. Prioritize opportunities with low competition and high willingness to pay.'
+        systemPrompt: 'You are a market research specialist. Identify viable niches, analyze competitors, validate demand. Report structured findings with data sources. Prioritize opportunities with low competition and strong user demand.'
       },
       {
         name: 'Forge',
@@ -45,7 +45,7 @@ export const ROOM_TEMPLATES: RoomTemplate[] = [
   {
     id: 'freelancer',
     name: 'freelancer',
-    goal: 'Find and complete freelance jobs to earn money',
+    goal: 'Find and complete freelance jobs, build reputation, and deliver quality work',
     description: 'Browse freelance platforms, bid on jobs, deliver quality work, build reputation. Focus on software development and data tasks.',
     workerTemplates: [
       {
@@ -64,13 +64,13 @@ export const ROOM_TEMPLATES: RoomTemplate[] = [
   {
     id: 'content-creator',
     name: 'contentcreator',
-    goal: 'Create and monetize content across platforms',
-    description: 'Generate articles, videos scripts, social media content. Build audience. Monetize through ads, sponsorships, and affiliate links.',
+    goal: 'Create and distribute content across platforms',
+    description: 'Generate articles, video scripts, social media content. Build audience. Grow through ads, sponsorships, and affiliate links.',
     workerTemplates: [
       {
         name: 'Scout',
         role: 'Researcher',
-        systemPrompt: 'You research trending topics, keywords, and content gaps. Analyze what performs well on target platforms. Identify monetization opportunities: affiliate programs, sponsorship rates, ad revenue potential.'
+        systemPrompt: 'You research trending topics, keywords, and content gaps. Analyze what performs well on target platforms. Identify distribution opportunities: affiliate programs, sponsorships, and platform partnerships.'
       },
       {
         name: 'Quill',
@@ -80,7 +80,7 @@ export const ROOM_TEMPLATES: RoomTemplate[] = [
       {
         name: 'Blaze',
         role: 'Distributor',
-        systemPrompt: 'You manage content distribution across platforms. Schedule posts, engage with audience, track analytics. Optimize posting times and formats. Build community and drive traffic to monetized content.'
+        systemPrompt: 'You manage content distribution across platforms. Schedule posts, engage with audience, track analytics. Optimize posting times and formats. Build community and grow reach.'
       }
     ],
     suggestedSkills: ['seo-writing', 'social-media-strategy', 'affiliate-marketing']
@@ -88,7 +88,7 @@ export const ROOM_TEMPLATES: RoomTemplate[] = [
   {
     id: 'trading-bot',
     name: 'tradingbot',
-    goal: 'Analyze markets and execute profitable trades',
+    goal: 'Analyze markets and execute trades',
     description: 'Monitor crypto and DeFi markets. Identify arbitrage, yield farming, and trading opportunities. Execute trades on-chain.',
     workerTemplates: [
       {
