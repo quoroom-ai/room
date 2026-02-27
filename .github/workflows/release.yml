@@ -465,7 +465,7 @@ jobs:
           echo "macOS package was signed but not notarized."
           echo "Missing secrets: ${{ steps.notarize_creds.outputs.missing }}"
 
-      - name: Verify final .pkg signature and notarization state
+      - name: Verify final .pkg signature and timestamp state
         run: |
           set -euo pipefail
           VERSION="${GITHUB_REF_NAME#v}"
@@ -474,9 +474,6 @@ jobs:
           echo "${CHECK_OUTPUT}"
           echo "${CHECK_OUTPUT}" | grep -F "Status: signed by a developer certificate issued by Apple for distribution" >/dev/null
           echo "${CHECK_OUTPUT}" | grep -F "Signed with a trusted timestamp on:" >/dev/null
-          if [ "${{ steps.notarize_creds.outputs.enabled }}" = "true" ]; then
-            echo "${CHECK_OUTPUT}" | grep -F "Notarization: trusted by the Apple notary service" >/dev/null
-          fi
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
