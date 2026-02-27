@@ -1,6 +1,6 @@
 <p align="center">
   <a href="https://quoroom.ai">
-    <img src="docs/banner.png?v=2" alt="Quoroom — Swarm Intelligence. Relentless Execution." width="100%">
+    <img src="docs/banner.png?v=3" alt="Quoroom — Swarm Intelligence. Relentless Execution." width="100%">
   </a>
 </p>
 
