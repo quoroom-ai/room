@@ -49,7 +49,7 @@ See `TRADEMARKS.md` for full trademark usage terms.
 
 Run a swarm of AI agents that pursue goals autonomously. The Queen strategizes, a swarm of Workers execute, and the Quorum votes on decisions. Agents learn new skills, modify their own behavior, manage a crypto wallet, and rent cloud stations for more compute — all governed by democratic consensus.
 
-Autonomous agents earning money is inevitable. It's already happening behind closed doors. We believe it should happen in the open — publicly, transparently — so everyone can learn. Quoroom is an experiment: let's see what AI can actually do.
+Always-on autonomous execution is inevitable. It's already happening behind closed doors. We believe it should happen in the open — publicly, transparently — so everyone can learn. Quoroom is an experiment: let's see what AI swarms can actually execute.
 
 The architecture draws from swarm intelligence research: decentralized decision-making, emergent behavior from local interactions, and collective intelligence that exceeds any individual agent. The queen doesn't dictate — the swarm decides.
 
@@ -103,7 +103,7 @@ Quoroom is an open research project exploring autonomous agent collectives. Each
 
 **Keeper Control Model** — Rooms run in a keeper-controlled mode with full dashboard/API control for agent and user tokens. Cloud member tokens are read-only plus limited collaboration endpoints (vote, resolve/reply, mark read).
 
-**Public Rooms** — Toggle your room public on [quoroom.ai/rooms](https://quoroom.ai/rooms). Stats and earnings appear on the leaderboard. Room registers with cloud and sends heartbeats every 5 minutes. No account needed to browse.
+**Public Rooms** — Toggle your room public on [quoroom.ai/rooms](https://quoroom.ai/rooms). Live room stats and activity appear on the leaderboard. Room registers with cloud and sends heartbeats every 5 minutes. No account needed to browse.
 
 **HTTP Server + REST API** — Full REST API with dual-token auth (agent + user) and WebSocket real-time events. Cloud member role uses constrained collaboration access. Run `quoroom serve` to start.
 
