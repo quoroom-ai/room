@@ -384,7 +384,7 @@ function CreateTaskForm({ workers, onCreated, roomId }: { workers: Worker[] | nu
   )
 }
 
-export function TasksPanel({ roomId, autonomyMode }: { roomId?: number | null; autonomyMode: 'auto' | 'semi' }): React.JSX.Element {
+export function TasksPanel({ roomId, autonomyMode }: { roomId?: number | null; autonomyMode: 'semi' }): React.JSX.Element {
   useTick()
   const { semi, guard, requestSemiMode, showLockModal, closeLockModal } = useAutonomyControlGate(autonomyMode)
   const [containerRef, containerWidth] = useContainerWidth<HTMLDivElement>()

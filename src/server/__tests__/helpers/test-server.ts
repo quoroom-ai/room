@@ -13,7 +13,7 @@ export interface TestContext {
   server: http.Server
   /** Agent token (full access) */
   token: string
-  /** User token (restricted in auto mode) */
+  /** User token (keeper full access) */
   userToken: string
   baseUrl: string
   close: () => void

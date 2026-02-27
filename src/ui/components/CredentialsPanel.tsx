@@ -16,7 +16,7 @@ const TYPE_LABELS: Record<string, string> = {
 
 interface CredentialsPanelProps {
   roomId: number | null
-  autonomyMode: 'auto' | 'semi'
+  autonomyMode: 'semi'
 }
 
 export function CredentialsPanel({ roomId }: CredentialsPanelProps): React.JSX.Element {

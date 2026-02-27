@@ -10,7 +10,7 @@ import type { Skill } from '@shared/types'
 
 interface SkillsPanelProps {
   roomId: number | null
-  autonomyMode: 'auto' | 'semi'
+  autonomyMode: 'semi'
 }
 
 export function SkillsPanel({ roomId, autonomyMode }: SkillsPanelProps): React.JSX.Element {

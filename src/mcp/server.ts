@@ -2,7 +2,6 @@ import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js'
 import { registerMemoryTools } from './tools/memory'
 import { registerSchedulerTools } from './tools/scheduler'
-import { registerWatcherTools } from './tools/watcher'
 import { registerWorkerTools } from './tools/workers'
 import { registerSettingsTools } from './tools/settings'
 import { registerRoomTools } from './tools/room'
@@ -32,7 +31,6 @@ async function main(): Promise<void> {
 
   registerMemoryTools(server)
   registerSchedulerTools(server)
-  registerWatcherTools(server)
   registerWorkerTools(server)
   registerSettingsTools(server)
   registerRoomTools(server)

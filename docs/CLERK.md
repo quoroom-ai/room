@@ -2,7 +2,7 @@
 
 The Clerk is the keeper-facing global assistant in Quoroom.
 
-Unlike room chat, Clerk has a system-wide view and can help manage multiple rooms from one place.
+Unlike room-scoped escalations and inbox messages, Clerk has a system-wide view and can help manage multiple rooms from one place.
 
 ## What Clerk Can Do
 

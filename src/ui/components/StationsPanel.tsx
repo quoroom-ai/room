@@ -59,7 +59,7 @@ function formatShortDate(iso: string | null): string {
 
 interface StationsPanelProps {
   roomId: number | null
-  autonomyMode: 'auto' | 'semi'
+  autonomyMode: 'semi'
 }
 
 export function StationsPanel({ roomId, autonomyMode }: StationsPanelProps): React.JSX.Element {

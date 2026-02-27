@@ -95,7 +95,7 @@ export async function handleWebhookRequest(
       ? payload.message.trim()
       : 'Webhook triggered'
 
-    queries.insertChatMessage(db, room.id, 'user', message)
+    queries.createEscalation(db, room.id, null, message, room.queenWorkerId ?? undefined)
 
     if (room.queenWorkerId) {
       triggerAgent(db, room.id, room.queenWorkerId)

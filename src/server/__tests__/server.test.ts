@@ -3,7 +3,7 @@ import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { createTestServer, request, requestAsUser, requestNoAuth, type TestContext } from './helpers/test-server'
-import { updateRoom, listRooms, listClerkMessages, listChatMessages } from '../../shared/db-queries'
+import { listRooms, listClerkMessages, listChatMessages } from '../../shared/db-queries'
 import { createRoom as createRoomFull } from '../../shared/room'
 import { eventBus, type WsEvent } from '../event-bus'
 
@@ -65,46 +65,28 @@ describe('Server integration', () => {
     })
   })
 
-  describe('Role-based access (auto mode)', () => {
-    it('agent can create resources in auto mode', async () => {
+  describe('Role-based access', () => {
+    it('agent can create resources', async () => {
       const res = await request(ctx, 'POST', '/api/rooms', { name: 'testroom' })
       expect(res.status).toBe(201)
     })
 
-    it('user can read resources in auto mode', async () => {
+    it('user can read resources', async () => {
       const res = await requestAsUser(ctx, 'GET', '/api/rooms')
       expect(res.status).toBe(200)
     })
 
-    it('user cannot create tasks in auto mode', async () => {
+    it('user can create tasks', async () => {
       const res = await requestAsUser(ctx, 'POST', '/api/tasks', {
         prompt: 'test task',
         cronExpression: null
       })
-      expect(res.status).toBe(403)
+      expect(res.status).toBe(201)
     })
 
-    it('user can change settings in auto mode', async () => {
+    it('user can change settings', async () => {
       const res = await requestAsUser(ctx, 'PUT', '/api/settings/test_key', { value: 'test_value' })
       expect(res.status).toBe(200)
-    })
-  })
-
-  describe('Role-based access (semi mode)', () => {
-    it('user can create tasks in semi mode', async () => {
-      // Create a room in semi mode
-      const result = createRoomFull(ctx.db, { name: 'Semi Test Room' })
-      updateRoom(ctx.db, result.room.id, { autonomyMode: 'semi' })
-
-      const res = await requestAsUser(ctx, 'POST', '/api/tasks', {
-        prompt: 'semi test task',
-        cronExpression: null,
-        roomId: result.room.id
-      })
-      expect(res.status).toBe(201)
-
-      // Switch back to auto for other tests
-      updateRoom(ctx.db, result.room.id, { autonomyMode: 'auto' })
     })
   })
 

@@ -1,4 +1,3 @@
-import { watch as fsWatch, statSync, existsSync, type FSWatcher } from 'node:fs'
 import { join } from 'node:path'
 import { homedir } from 'node:os'
 import cron from 'node-cron'
@@ -6,8 +5,6 @@ import type Database from 'better-sqlite3'
 import * as queries from '../shared/db-queries'
 import { APP_NAME } from '../shared/constants'
 import { executeTask, isTaskRunning } from '../shared/task-runner'
-import { executeAgent } from '../shared/agent-executor'
-import { resolveApiKeyForModel } from '../shared/model-provider'
 import { startCommentaryEngine, stopCommentaryEngine } from './clerk-commentary'
 import { triggerAgent } from '../shared/agent-loop'
 import {
@@ -18,32 +15,19 @@ import {
 } from '../shared/cloud-sync'
 import { pollQueenInbox } from './routes/contacts'
 import { relayPendingKeeperRequests } from './clerk-notifications'
-import type { Watch } from '../shared/types'
 import { eventBus } from './event-bus'
 
 const SCHEDULER_REFRESH_MS = 15_000
-const WATCH_REFRESH_MS = 15_000
 const TASK_MAINTENANCE_MS = 60_000
 const CLOUD_MESSAGE_SYNC_MS = 60_000
 const QUEEN_INBOX_POLL_MS = getBoundedIntervalMs('QUOROOM_QUEEN_INBOX_POLL_MS', 2_500, 1_000, 30_000)
 const CLERK_ALERT_RELAY_MS = getBoundedIntervalMs('QUOROOM_CLERK_ALERT_RELAY_MS', 15_000, 3_000, 120_000)
-const WATCH_DEBOUNCE_MS = 1_500
 const CLERK_CONTACT_ONBOARDING_START_KEY = 'clerk_contact_onboarding_started_at'
 
 const cronJobs = new Map<number, { expression: string; job: cron.ScheduledTask }>()
 const pendingTaskStarts = new Set<number>()
 
-interface WatchRuntimeState {
-  watcher: FSWatcher
-  debounceTimer: ReturnType<typeof setTimeout> | null
-  pending: { eventType: string; changedPath: string } | null
-  running: boolean
-}
-
-const watchStates = new Map<number, WatchRuntimeState>()
-
 let schedulerTimer: ReturnType<typeof setInterval> | null = null
-let watcherTimer: ReturnType<typeof setInterval> | null = null
 let maintenanceTimer: ReturnType<typeof setInterval> | null = null
 let cloudMessageTimer: ReturnType<typeof setInterval> | null = null
 let queenInboxTimer: ReturnType<typeof setInterval> | null = null
@@ -266,154 +250,6 @@ function runTaskMaintenance(db: Database.Database): void {
   queries.pruneOldRuns(db)
 }
 
-function closeWatch(id: number): void {
-  const state = watchStates.get(id)
-  if (!state) return
-  if (state.debounceTimer) clearTimeout(state.debounceTimer)
-  try { state.watcher.close() } catch { /* ignore */ }
-  watchStates.delete(id)
-}
-
-function executeWatchAction(db: Database.Database, watch: Watch, eventType: string, changedPath: string): Promise<void> {
-  return (async () => {
-    queries.markWatchTriggered(db, watch.id)
-
-    if (!watch.actionPrompt?.trim()) {
-      return
-    }
-
-    let model = 'claude'
-    let systemPrompt: string | undefined
-    let apiKey: string | undefined
-
-    if (watch.roomId != null) {
-      const room = queries.getRoom(db, watch.roomId)
-      if (room?.queenWorkerId) {
-        const queen = queries.getWorker(db, room.queenWorkerId)
-        if (queen) {
-          model = queen.model ?? 'claude'
-          systemPrompt = queen.systemPrompt
-        }
-      }
-      apiKey = resolveApiKeyForModel(db, watch.roomId, model)
-    }
-
-    const prompt = [
-      watch.actionPrompt.trim(),
-      '',
-      '## Watch Event',
-      `- Event: ${eventType}`,
-      `- Watched path: ${watch.path}`,
-      `- Changed path: ${changedPath}`
-    ].join('\n')
-
-    const result = await executeAgent({
-      model,
-      prompt,
-      systemPrompt,
-      apiKey,
-      maxTurns: 6,
-      timeoutMs: 3 * 60 * 1000
-    })
-
-    if (watch.roomId != null) {
-      if (result.exitCode === 0 && !result.timedOut) {
-        queries.logRoomActivity(
-          db,
-          watch.roomId,
-          'system',
-          `Watch triggered: ${watch.path}`,
-          result.output.slice(0, 500)
-        )
-      } else {
-        queries.logRoomActivity(
-          db,
-          watch.roomId,
-          'error',
-          `Watch action failed: ${watch.path}`,
-          result.output.slice(0, 500)
-        )
-      }
-    }
-  })().catch((err) => {
-    console.error(`Watch ${watch.id} execution error:`, err)
-  })
-}
-
-function scheduleWatchExecution(db: Database.Database, watch: Watch, eventType: string, changedPath: string): void {
-  const state = watchStates.get(watch.id)
-  if (!state) return
-
-  const execute = (): void => {
-    if (state.running) {
-      state.pending = { eventType, changedPath }
-      return
-    }
-    state.running = true
-    void executeWatchAction(db, watch, eventType, changedPath)
-      .finally(() => {
-        state.running = false
-        if (state.pending) {
-          const pending = state.pending
-          state.pending = null
-          scheduleWatchExecution(db, watch, pending.eventType, pending.changedPath)
-        }
-      })
-  }
-
-  if (state.debounceTimer) clearTimeout(state.debounceTimer)
-  state.debounceTimer = setTimeout(execute, WATCH_DEBOUNCE_MS)
-}
-
-function startWatch(db: Database.Database, watch: Watch): void {
-  if (watchStates.has(watch.id)) return
-  if (!existsSync(watch.path)) return
-
-  const isDirectory = (() => {
-    try {
-      return statSync(watch.path).isDirectory()
-    } catch {
-      return false
-    }
-  })()
-
-  let watcher: FSWatcher
-  const onChange = (eventType: string, filename: string | null): void => {
-    const changed = filename ? join(watch.path, filename.toString()) : watch.path
-    scheduleWatchExecution(db, watch, eventType, changed)
-  }
-
-  try {
-    watcher = fsWatch(watch.path, { recursive: isDirectory, encoding: 'utf8' }, onChange)
-  } catch {
-    try {
-      watcher = fsWatch(watch.path, { encoding: 'utf8' }, onChange)
-    } catch {
-      return
-    }
-  }
-
-  watchStates.set(watch.id, {
-    watcher,
-    debounceTimer: null,
-    pending: null,
-    running: false
-  })
-}
-
-function refreshWatches(db: Database.Database): void {
-  const active = queries.listWatches(db, undefined, 'active')
-  const activeIds = new Set(active.map((watch) => watch.id))
-
-  for (const watch of active) {
-    if (!watchStates.has(watch.id)) startWatch(db, watch)
-  }
-
-  for (const id of watchStates.keys()) {
-    if (!activeIds.has(id)) closeWatch(id)
-  }
-}
-
 async function syncCloudRoomMessages(db: Database.Database): Promise<void> {
   const rooms = queries.listRooms(db)
   const keeperReferralCode = queries.getSetting(db, 'keeper_referral_code')
@@ -462,7 +298,6 @@ export function startServerRuntime(db: Database.Database): void {
   refreshCronJobs(db)
   runDueOneTimeTasks(db)
   runTaskMaintenance(db)
-  refreshWatches(db)
   void syncCloudRoomMessages(db)
   queueQueenInboxPoll(db)
   queueClerkAlertRelay(db)
@@ -471,10 +306,6 @@ export function startServerRuntime(db: Database.Database): void {
     refreshCronJobs(db)
     runDueOneTimeTasks(db)
   }, SCHEDULER_REFRESH_MS)
-
-  watcherTimer = setInterval(() => {
-    refreshWatches(db)
-  }, WATCH_REFRESH_MS)
 
   maintenanceTimer = setInterval(() => {
     runTaskMaintenance(db)
@@ -530,13 +361,11 @@ function resumeActiveQueens(db: Database.Database): void {
 export function stopServerRuntime(): void {
   stopCommentaryEngine()
   if (schedulerTimer) clearInterval(schedulerTimer)
-  if (watcherTimer) clearInterval(watcherTimer)
   if (maintenanceTimer) clearInterval(maintenanceTimer)
   if (cloudMessageTimer) clearInterval(cloudMessageTimer)
   if (queenInboxTimer) clearInterval(queenInboxTimer)
   if (clerkAlertTimer) clearInterval(clerkAlertTimer)
   schedulerTimer = null
-  watcherTimer = null
   maintenanceTimer = null
   cloudMessageTimer = null
   queenInboxTimer = null
@@ -552,8 +381,4 @@ export function stopServerRuntime(): void {
   }
   cronJobs.clear()
   pendingTaskStarts.clear()
-
-  for (const id of [...watchStates.keys()]) {
-    closeWatch(id)
-  }
 }

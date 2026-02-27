@@ -446,7 +446,7 @@ export function SettingsPanel({ advancedMode, onAdvancedModeChange, installPromp
           </div>
           <p className="text-xs text-text-muted mt-0.5 leading-tight">Global setting for Clerk outreach. Default is both.</p>
         </div>
-        {toggle('Advanced mode', advancedMode, toggleAdvancedMode, 'Show memory, watches, results tabs and extra controls')}
+        {toggle('Advanced mode', advancedMode, toggleAdvancedMode, 'Show memory and extra controls')}
         {toggle('Telemetry', telemetryEnabled, toggleTelemetry, 'Send heartbeats to quoroom.ai (room appears in online counter and leaderboard)')}
         <div className="py-1.5">
           <div className="flex items-center justify-between text-sm">

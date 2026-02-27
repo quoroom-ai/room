@@ -830,7 +830,7 @@ export async function pollQueenInbox(
           }
         } else {
           const body = `[Reply from keeper via ${channel} to ${nickname}]\n${msg.body}`
-          queries.insertChatMessage(db, room.id, 'user', body)
+          queries.createEscalation(db, room.id, null, body, room.queenWorkerId ?? undefined)
           queries.logRoomActivity(db, room.id, 'system', `Keeper replied to ${nickname} via ${channel}`, msg.body.slice(0, 200))
           shouldWakeQueen = true
         }

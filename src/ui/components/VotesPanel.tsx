@@ -38,7 +38,7 @@ function formatEffective(effectiveAt: string | null): string {
 
 interface VotesPanelProps {
   roomId: number | null
-  autonomyMode: 'auto' | 'semi'
+  autonomyMode: 'semi'
 }
 
 export function VotesPanel({ roomId, autonomyMode }: VotesPanelProps): React.JSX.Element {

@@ -1053,7 +1053,7 @@ function mapRoomRow(row: Record<string, unknown>): Room {
     goal: (row.goal as string | null) ?? null,
     status: (row.status as string) as Room['status'],
     visibility: (row.visibility as string) as Room['visibility'],
-    autonomyMode: ((row.autonomy_mode as string) ?? 'auto') as 'auto' | 'semi',
+    autonomyMode: 'semi',
     maxConcurrentTasks: (row.max_concurrent_tasks as number) ?? 3,
     workerModel: (row.worker_model as string) ?? 'claude',
     queenCycleGapMs: (row.queen_cycle_gap_ms as number) ?? 1_800_000,
@@ -1115,11 +1115,11 @@ export function listRooms(db: Database.Database, status?: string): Room[] {
 }
 
 export function updateRoom(db: Database.Database, id: number, updates: Partial<{
-  name: string; queenWorkerId: number | null; goal: string | null; status: string; visibility: string; autonomyMode: string; maxConcurrentTasks: number; workerModel: string; queenCycleGapMs: number; queenMaxTurns: number; queenQuietFrom: string | null; queenQuietUntil: string | null; config: RoomConfig; referredByCode: string | null; queenNickname: string; allowedTools: string | null; webhookToken: string | null
+  name: string; queenWorkerId: number | null; goal: string | null; status: string; visibility: string; maxConcurrentTasks: number; workerModel: string; queenCycleGapMs: number; queenMaxTurns: number; queenQuietFrom: string | null; queenQuietUntil: string | null; config: RoomConfig; referredByCode: string | null; queenNickname: string; allowedTools: string | null; webhookToken: string | null
 }>): void {
   const fieldMap: Record<string, string> = {
     name: 'name', queenWorkerId: 'queen_worker_id', goal: 'goal',
-    status: 'status', visibility: 'visibility', autonomyMode: 'autonomy_mode',
+    status: 'status', visibility: 'visibility',
     maxConcurrentTasks: 'max_concurrent_tasks', workerModel: 'worker_model',
     queenCycleGapMs: 'queen_cycle_gap_ms', queenMaxTurns: 'queen_max_turns',
     queenQuietFrom: 'queen_quiet_from', queenQuietUntil: 'queen_quiet_until',

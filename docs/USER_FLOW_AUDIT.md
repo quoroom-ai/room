@@ -1,6 +1,6 @@
 # User Flow Audit (Room App)
 
-Date: 2026-02-22  
+Date: 2026-02-27  
 Scope: `quoroom-ai/room` local server + dashboard (`src/server`, `src/ui`, `e2e`)
 
 ## 1) Usual User Flow (Happy Path)
@@ -10,13 +10,13 @@ This is the most typical keeper path in current code:
 1. Open dashboard (`http://localhost:3700`) and complete token handshake (`GET /api/auth/handshake`).
 2. Create a room (`POST /api/rooms`) from sidebar `+ New Room`.
 3. Open room `Settings` and set:
-   - autonomy mode (`auto` or `semi`)
    - queen model/provider (Claude/Codex/OpenAI API/Anthropic API)
-4. Use `Overview` + `Chat` to observe and interact with queen.
-5. In `semi` mode, create/update Workers, Tasks, Goals, Skills, Watches.
+   - activity controls and governance settings
+4. Use `Overview` + `Clerk` to observe activity and coordinate keeper actions.
+5. Create/update Workers, Tasks, Goals, and Skills.
 6. Track Decisions/Votes and Messages (escalations + room messages).
 7. Monitor Transactions (wallet + billing) and Stations.
-8. Check `Results` (runs/self-mod logs), then pause/restart/archive room as needed.
+8. Review task run history and self-mod audit data, then pause/restart/archive room as needed.
 
 ## 1.1) New Guided Setup Flow (Current UX)
 
@@ -81,7 +81,7 @@ Important:
 ## B. Room Lifecycle
 - Create room.
 - List rooms and select active room.
-- Update room metadata (name, goal, visibility, autonomy mode, activity controls).
+- Update room metadata (name, goal, visibility, activity controls).
 - Pause/restart room.
 - Queen start/stop.
 - Archive/delete room.
@@ -89,7 +89,6 @@ Important:
 ## C. Execution Flows
 - Worker CRUD and default worker selection.
 - Task CRUD + pause/resume + manual run + reset-session + run logs.
-- Watches CRUD + pause/resume.
 - Skills CRUD + auto-activate.
 
 ## D. Governance + Collaboration
@@ -97,11 +96,11 @@ Important:
 - Decisions proposal/vote/resolve + keeper vote.
 - Escalations resolve/reply.
 - Room messages list/read/reply.
-- Queen chat send/reset/history.
+- Clerk chat send/reset/history.
 
 ## E. Knowledge + Audit
 - Memory entity CRUD, observations, relations, search/stats.
-- Results tab: run history/log stream + self-mod audit + revert.
+- Task run history/log stream + self-mod audit + revert.
 
 ## F. Finance + Infra
 - Wallet data, transaction history, balance aggregation, revenue summary.
@@ -128,10 +127,10 @@ E2E currently validates:
 - auth/security basics
 - core CRUD cycles (rooms/workers/tasks/goals/decisions)
 - websocket subscribe + live events
-- UI load/navigation/read-only auto mode behavior
+- UI load/navigation and room management behavior
 - mobile sidebar usability + PWA endpoints
 
-Unit/integration route tests cover most core routes (`rooms/tasks/workers/goals/decisions/memory/skills/watches/settings/stations/chat/messages/runs`).
+Unit/integration route tests cover most core routes (`rooms/tasks/workers/goals/decisions/memory/skills/settings/stations/messages/runs`).
 
 Browser flow automation added:
 - `e2e/setup-flow.test.ts`

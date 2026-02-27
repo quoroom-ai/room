@@ -7,11 +7,9 @@ import { registerTaskRoutes } from './tasks'
 import { registerRunRoutes } from './runs'
 import { registerMemoryRoutes } from './memory'
 import { registerSkillRoutes } from './skills'
-import { registerWatchRoutes } from './watches'
 import { registerSettingRoutes } from './settings'
 import { registerEscalationRoutes } from './escalations'
 import { registerSelfModRoutes } from './self-mod'
-import { registerChatRoutes } from './chat'
 import { registerStatusRoutes } from './status'
 import { registerWalletRoutes } from './wallet'
 import { registerCredentialRoutes } from './credentials'
@@ -30,11 +28,9 @@ export function registerAllRoutes(router: Router): void {
   registerRunRoutes(router)
   registerMemoryRoutes(router)
   registerSkillRoutes(router)
-  registerWatchRoutes(router)
   registerSettingRoutes(router)
   registerEscalationRoutes(router)
   registerSelfModRoutes(router)
-  registerChatRoutes(router)
   registerStatusRoutes(router)
   registerWalletRoutes(router)
   registerCredentialRoutes(router)

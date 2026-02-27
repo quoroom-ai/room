@@ -154,15 +154,15 @@ describe('POST /api/hooks/queen/:token', () => {
     expect((res.data as Record<string, unknown>).roomId).toBe(room.id)
   })
 
-  it('injects a custom message from body into chat', async () => {
+  it('injects a custom message from body into escalations', async () => {
     const room = queries.createRoom(db, 'R')
     const token = tok()
     queries.updateRoom(db, room.id, { webhookToken: token })
 
     await handleWebhookRequest(`/api/hooks/queen/${token}`, { message: 'Hello queen' }, db)
 
-    const messages = queries.listChatMessages(db, room.id)
-    expect(messages.at(-1)?.content).toBe('Hello queen')
+    const escalations = queries.listEscalations(db, room.id)
+    expect(escalations.at(-1)?.question).toBe('Hello queen')
   })
 
   it('defaults message to "Webhook triggered" when body is null', async () => {
@@ -172,8 +172,8 @@ describe('POST /api/hooks/queen/:token', () => {
 
     await handleWebhookRequest(`/api/hooks/queen/${token}`, null, db)
 
-    const messages = queries.listChatMessages(db, room.id)
-    expect(messages.at(-1)?.content).toBe('Webhook triggered')
+    const escalations = queries.listEscalations(db, room.id)
+    expect(escalations.at(-1)?.question).toBe('Webhook triggered')
   })
 
   it('defaults message to "Webhook triggered" when body.message is whitespace', async () => {
@@ -183,8 +183,8 @@ describe('POST /api/hooks/queen/:token', () => {
 
     await handleWebhookRequest(`/api/hooks/queen/${token}`, { message: '   ' }, db)
 
-    const messages = queries.listChatMessages(db, room.id)
-    expect(messages.at(-1)?.content).toBe('Webhook triggered')
+    const escalations = queries.listEscalations(db, room.id)
+    expect(escalations.at(-1)?.question).toBe('Webhook triggered')
   })
 
   it('trims whitespace from a custom message', async () => {
@@ -194,8 +194,8 @@ describe('POST /api/hooks/queen/:token', () => {
 
     await handleWebhookRequest(`/api/hooks/queen/${token}`, { message: '  hi  ' }, db)
 
-    const messages = queries.listChatMessages(db, room.id)
-    expect(messages.at(-1)?.content).toBe('hi')
+    const escalations = queries.listEscalations(db, room.id)
+    expect(escalations.at(-1)?.question).toBe('hi')
   })
 
   it('calls triggerAgent when room has a queen worker', async () => {
@@ -219,14 +219,15 @@ describe('POST /api/hooks/queen/:token', () => {
     expect(mockTriggerAgent).not.toHaveBeenCalled()
   })
 
-  it('inserts chat message with user role', async () => {
+  it('inserts escalation from keeper context', async () => {
     const room = queries.createRoom(db, 'R')
     const token = tok()
     queries.updateRoom(db, room.id, { webhookToken: token })
 
     await handleWebhookRequest(`/api/hooks/queen/${token}`, { message: 'Test' }, db)
 
-    const messages = queries.listChatMessages(db, room.id)
-    expect(messages.at(-1)?.role).toBe('user')
+    const escalations = queries.listEscalations(db, room.id)
+    expect(escalations.at(-1)?.fromAgentId).toBeNull()
+    expect(escalations.at(-1)?.toAgentId).toBeNull()
   })
 })

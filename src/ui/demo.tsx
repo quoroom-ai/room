@@ -24,7 +24,7 @@ const cfg = {
 function r(id: number, name: string, goal: string, model: string, status: 'active' | 'paused' = 'active'): Room {
   return {
     id, name, queenWorkerId: id * 100, goal, status, visibility: 'public',
-    autonomyMode: status === 'paused' ? 'semi' : 'auto', maxConcurrentTasks: 3, workerModel: model,
+    autonomyMode: 'semi', maxConcurrentTasks: 3, workerModel: model,
     queenCycleGapMs: 10000, queenMaxTurns: 20, queenQuietFrom: null, queenQuietUntil: null,
     config: cfg, queenNickname: null, chatSessionId: null,
     referredByCode: null, allowedTools: null, webhookToken: null,

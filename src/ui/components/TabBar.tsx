@@ -1,8 +1,7 @@
-export type Tab = 'swarm' | 'clerk' | 'status' | 'chat' | 'memory' | 'workers' | 'tasks' | 'watches' | 'results' | 'goals' | 'votes' | 'messages' | 'skills' | 'credentials' | 'transactions' | 'stations' | 'room-settings' | 'settings' | 'help'
+export type Tab = 'swarm' | 'clerk' | 'status' | 'memory' | 'workers' | 'tasks' | 'goals' | 'votes' | 'messages' | 'skills' | 'credentials' | 'transactions' | 'stations' | 'room-settings' | 'settings' | 'help'
 
 export const mainTabs: { id: Tab; label: string; advanced?: boolean }[] = [
   { id: 'status', label: 'Overview' },
-  { id: 'chat', label: 'Queen' },
   { id: 'goals', label: 'Goals', advanced: true },
   { id: 'votes', label: 'Votes' },
   { id: 'messages', label: 'Messages' },
@@ -13,8 +12,6 @@ export const mainTabs: { id: Tab; label: string; advanced?: boolean }[] = [
   { id: 'transactions', label: 'Transactions', advanced: true },
   { id: 'stations', label: 'Stations' },
   { id: 'memory', label: 'Memory', advanced: true },
-  { id: 'watches', label: 'Watches', advanced: true },
-  { id: 'results', label: 'Results', advanced: true },
   { id: 'room-settings', label: 'Settings' },
 ]
 
@@ -31,11 +28,6 @@ export const tabIcons: Record<Tab, React.JSX.Element> = {
   status: ( // grid/dashboard
     <svg width={S} height={S} viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth={sw} strokeLinecap="round" strokeLinejoin="round">
       <rect x="2" y="2" width="5" height="5" rx="1" /><rect x="9" y="2" width="5" height="5" rx="1" /><rect x="2" y="9" width="5" height="5" rx="1" /><rect x="9" y="9" width="5" height="5" rx="1" />
-    </svg>
-  ),
-  chat: ( // message bubble
-    <svg width={S} height={S} viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth={sw} strokeLinecap="round" strokeLinejoin="round">
-      <path d="M3 3h10a1 1 0 011 1v6a1 1 0 01-1 1H6l-3 3V4a1 1 0 011-1z" />
     </svg>
   ),
   goals: ( // target
@@ -86,16 +78,6 @@ export const tabIcons: Record<Tab, React.JSX.Element> = {
   memory: ( // brain/database
     <svg width={S} height={S} viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth={sw} strokeLinecap="round" strokeLinejoin="round">
       <ellipse cx="8" cy="4" rx="5" ry="2" /><path d="M3 4v4c0 1.1 2.2 2 5 2s5-.9 5-2V4" /><path d="M3 8v4c0 1.1 2.2 2 5 2s5-.9 5-2V8" />
-    </svg>
-  ),
-  watches: ( // eye
-    <svg width={S} height={S} viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth={sw} strokeLinecap="round" strokeLinejoin="round">
-      <path d="M1 8s3-5 7-5 7 5 7 5-3 5-7 5-7-5-7-5z" /><circle cx="8" cy="8" r="2" />
-    </svg>
-  ),
-  results: ( // terminal
-    <svg width={S} height={S} viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth={sw} strokeLinecap="round" strokeLinejoin="round">
-      <rect x="2" y="2" width="12" height="12" rx="2" /><path d="M5 6l2 2-2 2" /><path d="M9 10h3" />
     </svg>
   ),
   'room-settings': ( // gear

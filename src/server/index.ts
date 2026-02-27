@@ -286,7 +286,6 @@ function normalizeApiPath(pathname: string): string {
     .replace(/^\/api\/tasks\/\d+(?=\/|$)/, '/api/tasks/:id')
     .replace(/^\/api\/runs\/\d+(?=\/|$)/, '/api/runs/:id')
     .replace(/^\/api\/workers\/\d+(?=\/|$)/, '/api/workers/:id')
-    .replace(/^\/api\/watches\/\d+(?=\/|$)/, '/api/watches/:id')
     .replace(/^\/api\/memory\/entities\/\d+(?=\/|$)/, '/api/memory/entities/:id')
 }
 
@@ -493,7 +492,7 @@ export function createApiServer(options: ServerOptions = {}): {
     }
 
     // Auth handshake — local-mode only.
-    // Returns user token (restricted in auto mode, full in semi mode)
+    // Returns keeper user token (full control).
     if (pathname === '/api/auth/handshake' && req.method === 'GET') {
       const handshakeHeaders: Record<string, string> = {
         ...responseHeaders,
@@ -616,7 +615,7 @@ export function createApiServer(options: ServerOptions = {}): {
       if (pathname === '/api/status/update/download' && req.method === 'GET') {
         if (!isAllowedForRole(role, req.method, pathname, db)) {
           res.writeHead(403, responseHeaders)
-          res.end(JSON.stringify({ error: 'Forbidden: auto mode restricts this action' }))
+          res.end(JSON.stringify({ error: 'Forbidden' }))
           return
         }
         const info = getUpdateInfo()
@@ -651,10 +650,10 @@ export function createApiServer(options: ServerOptions = {}): {
           ? undefined
           : await parseBody(req)
 
-        // Role-based access control (context-aware for room-scoped autonomy mode)
+        // Role-based access control.
         if (!isAllowedForRole(role, req.method!, pathname, db, { params: matched.params, query, body })) {
           res.writeHead(403, responseHeaders)
-          res.end(JSON.stringify({ error: 'Forbidden: auto mode restricts this action' }))
+          res.end(JSON.stringify({ error: 'Forbidden' }))
           return
         }
 
@@ -887,7 +886,7 @@ export function startServer(options: ServerOptions = {}): void {
   // Boot health check for auto-update rollback safety
   initBootHealthCheck()
 
-  // Start local runtime loops (task scheduler, watch runner, room message sync).
+  // Start local runtime loops (task scheduler, room message sync).
   startServerRuntime(serverDb)
 
   function listen(): void {

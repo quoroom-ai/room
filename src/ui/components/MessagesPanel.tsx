@@ -20,7 +20,7 @@ const STATUS_COLORS: Record<string, string> = {
 
 interface MessagesPanelProps {
   roomId: number | null
-  autonomyMode: 'auto' | 'semi'
+  autonomyMode: 'semi'
 }
 
 export function MessagesPanel({ roomId, autonomyMode }: MessagesPanelProps): React.JSX.Element {

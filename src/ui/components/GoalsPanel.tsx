@@ -18,7 +18,7 @@ const STATUS_COLORS: Record<string, string> = {
 
 interface GoalsPanelProps {
   roomId: number | null
-  autonomyMode: 'auto' | 'semi'
+  autonomyMode: 'semi'
 }
 
 export function GoalsPanel({ roomId, autonomyMode }: GoalsPanelProps): React.JSX.Element {

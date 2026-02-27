@@ -681,19 +681,6 @@ export function RoomSettingsPanel({ roomId }: RoomSettingsPanelProps): React.JSX
     })
   }
 
-  async function handleSetAutonomy(room: Room, mode: 'auto' | 'semi'): Promise<void> {
-    await withSwitchPending(`autonomy:${room.id}`, async () => {
-      optimistic(room.id, { autonomyMode: mode })
-      try {
-        await api.rooms.update(room.id, { autonomyMode: mode })
-        refresh()
-      } catch (e) {
-        console.error('Failed to update autonomy mode:', e)
-        optimistic(room.id, { autonomyMode: room.autonomyMode })
-      }
-    })
-  }
-
   async function handleChangeMaxTasks(room: Room, delta: number): Promise<void> {
     const next = Math.max(1, Math.min(10, room.maxConcurrentTasks + delta))
     if (next === room.maxConcurrentTasks) return
@@ -970,7 +957,6 @@ export function RoomSettingsPanel({ roomId }: RoomSettingsPanelProps): React.JSX
   }
 
   const room = { ...rawRoom, ...roomOverrides[rawRoom.id] }
-  const autonomyPending = isSwitchPending(`autonomy:${room.id}`)
   const quietHoursPending = isSwitchPending(`quiet-hours:${room.id}`)
   const visibilityPending = isSwitchPending(`visibility:${room.id}`)
   const governancePending = isSwitchPending(`governance:${room.id}`)
@@ -1230,30 +1216,6 @@ export function RoomSettingsPanel({ roomId }: RoomSettingsPanelProps): React.JSX
               </button>
             </div>
             <div className="bg-surface-secondary shadow-sm rounded-lg p-3 divide-y divide-border-primary">
-
-              {/* Autonomy mode */}
-              {row('Control',
-                <div className="flex items-center gap-2">
-                  {autonomyPending && <InlineSpinner />}
-                  <div className="flex rounded-lg overflow-hidden border border-border-primary">
-                    <button
-                      onClick={() => { void handleSetAutonomy(room, 'auto') }}
-                      disabled={autonomyPending}
-                      className={`px-4 py-2 text-sm font-medium transition-colors disabled:opacity-70 disabled:cursor-not-allowed ${
-                        room.autonomyMode === 'auto' ? 'bg-interactive text-text-invert' : 'bg-surface-primary text-text-muted hover:bg-surface-hover'
-                      }`}
-                    >Auto</button>
-                    <button
-                      onClick={() => { void handleSetAutonomy(room, 'semi') }}
-                      disabled={autonomyPending}
-                      className={`px-4 py-2 text-sm font-medium transition-colors disabled:opacity-70 disabled:cursor-not-allowed ${
-                        room.autonomyMode === 'semi' ? 'bg-interactive text-text-invert' : 'bg-surface-primary text-text-muted hover:bg-surface-hover'
-                      }`}
-                    >Semi</button>
-                  </div>
-                </div>,
-                'Auto: agents control everything, UI is read-only. Semi: full UI controls for the keeper.'
-              )}
 
               {/* Queen model */}
               {row('Model',

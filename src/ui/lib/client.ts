@@ -3,13 +3,11 @@ import type {
   Task, CreateTaskInput, TaskRun, ConsoleLogEntry,
   Worker, CreateWorkerInput,
   Entity, Observation, Relation, MemoryStats,
-  Watch,
   Room, CreateRoomInput, RoomActivityEntry,
   Goal, GoalUpdate,
   QuorumDecision,
   Skill,
   Escalation,
-  ChatMessage,
   ClerkMessage,
   SelfModAuditEntry,
   Wallet, WalletTransaction, RevenueSummary, OnChainBalance, CryptoPricing,
@@ -253,22 +251,6 @@ export const api = {
       request<{ ok: true }>('DELETE', `/api/memory/relations/${id}`),
   },
 
-  // ─── Watches ─────────────────────────────────────────────
-  watches: {
-    list: (roomId?: number, status?: string) =>
-      request<Watch[]>('GET', `/api/watches${qs({ roomId, status })}`),
-    get: (id: number) =>
-      request<Watch>('GET', `/api/watches/${id}`),
-    create: (path: string, description?: string, actionPrompt?: string, roomId?: number) =>
-      request<Watch>('POST', '/api/watches', { path, description, actionPrompt, roomId }),
-    delete: (id: number) =>
-      request<{ ok: true }>('DELETE', `/api/watches/${id}`),
-    pause: (id: number) =>
-      request<{ ok: true }>('POST', `/api/watches/${id}/pause`),
-    resume: (id: number) =>
-      request<{ ok: true }>('POST', `/api/watches/${id}/resume`),
-  },
-
   // ─── Settings ────────────────────────────────────────────
   settings: {
     getAll: () =>
@@ -477,16 +459,6 @@ export const api = {
       request<Escalation>('POST', `/api/rooms/${roomId}/escalations`, { fromAgentId, question, toAgentId }),
     resolve: (id: number, answer: string) =>
       request<Escalation>('POST', `/api/escalations/${id}/resolve`, { answer }),
-  },
-
-  // ─── Chat ──────────────────────────────────────────────
-  chat: {
-    messages: (roomId: number) =>
-      request<ChatMessage[]>('GET', `/api/rooms/${roomId}/chat/messages`),
-    send: (roomId: number, message: string) =>
-      request<{ response: string; messages: ChatMessage[] }>('POST', `/api/rooms/${roomId}/chat`, { message }),
-    reset: (roomId: number) =>
-      request<{ ok: true }>('POST', `/api/rooms/${roomId}/chat/reset`),
   },
 
   // ─── Clerk ──────────────────────────────────────────────

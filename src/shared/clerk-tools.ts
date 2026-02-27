@@ -40,7 +40,6 @@ export const CLERK_TOOL_DEFINITIONS: ToolDef[] = [
           goal: { type: 'string', description: 'Room objective' },
           objective: { type: 'string', description: 'Alias for goal' },
           model: { type: 'string', description: 'Optional default room model (claude, codex, openai:..., anthropic:...)' },
-          autonomyMode: { type: 'string', description: 'Optional autonomy mode: auto or semi' },
           visibility: { type: 'string', description: 'Optional visibility: private or public' },
           queenCycleGapMs: { type: 'number', description: 'Optional queen cycle gap in milliseconds' },
           queenMaxTurns: { type: 'number', description: 'Optional queen max turns per cycle' }
@@ -60,7 +59,6 @@ export const CLERK_TOOL_DEFINITIONS: ToolDef[] = [
           roomName: { type: 'string', description: 'Room name (alternative to roomId)' },
           goal: { type: 'string', description: 'Objective text' },
           workerModel: { type: 'string', description: 'Default worker model' },
-          autonomyMode: { type: 'string', description: 'auto or semi' },
           visibility: { type: 'string', description: 'private or public' },
           queenCycleGapMs: { type: 'number', description: 'Queen cycle gap in milliseconds' },
           queenMaxTurns: { type: 'number', description: 'Queen max turns per cycle' },
@@ -463,7 +461,7 @@ export async function executeClerkTool(
         const rooms = queries.listRooms(db, status)
         if (rooms.length === 0) return { content: 'No rooms found.' }
         const lines = rooms.map((room) =>
-          `#${room.id} ${room.name} (${room.status}) mode=${room.autonomyMode} visibility=${room.visibility} goal=${room.goal ?? '-'}`
+          `#${room.id} ${room.name} (${room.status}) visibility=${room.visibility} goal=${room.goal ?? '-'}`
         )
         return { content: lines.join('\n') }
       }
@@ -493,9 +491,6 @@ export async function executeClerkTool(
         if (typeof args.model === 'string' && args.model.trim()) {
           queries.updateWorker(db, result.queen.id, { model: args.model.trim() })
         }
-        if (typeof args.autonomyMode === 'string' && (args.autonomyMode === 'auto' || args.autonomyMode === 'semi')) {
-          updates.autonomyMode = args.autonomyMode
-        }
         if (typeof args.visibility === 'string' && (args.visibility === 'private' || args.visibility === 'public')) {
           updates.visibility = args.visibility
         }
@@ -511,9 +506,6 @@ export async function executeClerkTool(
         const updates: Parameters<typeof queries.updateRoom>[2] = {}
         if (args.goal !== undefined) updates.goal = String(args.goal ?? '').trim() || null
         if (typeof args.workerModel === 'string' && args.workerModel.trim()) updates.workerModel = args.workerModel.trim()
-        if (typeof args.autonomyMode === 'string' && (args.autonomyMode === 'auto' || args.autonomyMode === 'semi')) {
-          updates.autonomyMode = args.autonomyMode
-        }
         if (typeof args.visibility === 'string' && (args.visibility === 'private' || args.visibility === 'public')) {
           updates.visibility = args.visibility
         }

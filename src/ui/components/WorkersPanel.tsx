@@ -9,7 +9,7 @@ import { AutoModeLockModal, AUTO_MODE_LOCKED_BUTTON_CLASS, modeAwareButtonClass,
 
 interface WorkersPanelProps {
   roomId?: number | null
-  autonomyMode: 'auto' | 'semi'
+  autonomyMode: 'semi'
 }
 
 export function WorkersPanel({ roomId, autonomyMode }: WorkersPanelProps): React.JSX.Element {

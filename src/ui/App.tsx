@@ -5,8 +5,6 @@ import { StatusPanel } from './components/StatusPanel'
 import { MemoryPanel } from './components/MemoryPanel'
 import { WorkersPanel } from './components/WorkersPanel'
 import { TasksPanel } from './components/TasksPanel'
-import { WatchesPanel } from './components/WatchesPanel'
-import { ResultsPanel } from './components/ResultsPanel'
 import { SettingsPanel } from './components/SettingsPanel'
 import { HelpPanel } from './components/HelpPanel'
 import { GoalsPanel } from './components/GoalsPanel'
@@ -18,7 +16,6 @@ import { TransactionsPanel } from './components/TransactionsPanel'
 import { StationsPanel } from './components/StationsPanel'
 import { RoomSettingsPanel } from './components/RoomSettingsPanel'
 import { SwarmPanel } from './components/SwarmPanel'
-import { ChatPanel } from './components/ChatPanel'
 import { ClerkPanel } from './components/ClerkPanel'
 import { ConnectPage } from './components/ConnectPage'
 import { WalkthroughModal } from './components/WalkthroughModal'
@@ -44,7 +41,7 @@ const ADVANCED_TABS = new Set<Tab>(
   mainTabs.filter((tab) => tab.advanced).map((tab) => tab.id)
 )
 
-const ALL_TAB_IDS: Tab[] = ['clerk', 'swarm', 'status', 'chat', 'goals', 'votes', 'messages', 'workers', 'tasks', 'skills', 'credentials', 'transactions', 'stations', 'room-settings', 'memory', 'watches', 'results', 'settings', 'help']
+const ALL_TAB_IDS: Tab[] = ['clerk', 'swarm', 'status', 'goals', 'votes', 'messages', 'workers', 'tasks', 'skills', 'credentials', 'transactions', 'stations', 'room-settings', 'memory', 'settings', 'help']
 
 const DEFAULT_PORT = '3700'
 const KEEP_IN_DOCK_TIP_PENDING_KEY = 'quoroom_keep_in_dock_tip_pending'
@@ -125,7 +122,6 @@ function App(): React.JSX.Element {
   })
   const tabRef = useRef(tab)
   const [advancedMode, setAdvancedMode] = useState(false)
-  const [autonomyMode, setAutonomyMode] = useState<'auto' | 'semi'>('auto')
   const [ready, setReady] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [startupRetrying, setStartupRetrying] = useState(false)
@@ -497,11 +493,6 @@ function App(): React.JSX.Element {
     }
   }, [loadRooms, ready])
 
-  useEffect(() => {
-    const room = rooms.find(r => r.id === selectedRoomId)
-    if (room) setAutonomyMode(room.autonomyMode)
-  }, [selectedRoomId, rooms])
-
   function handleTabChange(t: Tab): void {
     setTab(t)
     tabRef.current = t
@@ -583,34 +574,28 @@ function App(): React.JSX.Element {
         return <ClerkPanel setupLaunchKey={clerkSetupLaunchKey} />
       case 'status':
         return <StatusPanel onNavigate={(t) => handleTabChange(t as Tab)} advancedMode={advancedMode} roomId={selectedRoomId} />
-      case 'chat':
-        return <ChatPanel roomId={selectedRoomId} queenNickname={selectedRoom?.queenNickname ?? null} />
       case 'goals':
-        return <GoalsPanel roomId={selectedRoomId} autonomyMode={autonomyMode} />
+        return <GoalsPanel roomId={selectedRoomId} autonomyMode="semi" />
       case 'votes':
-        return <VotesPanel roomId={selectedRoomId} autonomyMode={autonomyMode} />
+        return <VotesPanel roomId={selectedRoomId} autonomyMode="semi" />
       case 'messages':
-        return <MessagesPanel roomId={selectedRoomId} autonomyMode={autonomyMode} />
+        return <MessagesPanel roomId={selectedRoomId} autonomyMode="semi" />
       case 'memory':
         return <MemoryPanel roomId={selectedRoomId} />
       case 'workers':
-        return <WorkersPanel roomId={selectedRoomId} autonomyMode={autonomyMode} />
+        return <WorkersPanel roomId={selectedRoomId} autonomyMode="semi" />
       case 'tasks':
-        return <TasksPanel roomId={selectedRoomId} autonomyMode={autonomyMode} />
+        return <TasksPanel roomId={selectedRoomId} autonomyMode="semi" />
       case 'skills':
-        return <SkillsPanel roomId={selectedRoomId} autonomyMode={autonomyMode} />
+        return <SkillsPanel roomId={selectedRoomId} autonomyMode="semi" />
       case 'credentials':
-        return <CredentialsPanel roomId={selectedRoomId} autonomyMode={autonomyMode} />
+        return <CredentialsPanel roomId={selectedRoomId} autonomyMode="semi" />
       case 'transactions':
         return <TransactionsPanel roomId={selectedRoomId} />
       case 'stations':
-        return <StationsPanel roomId={selectedRoomId} autonomyMode={autonomyMode} queenModel={selectedRoom ? (queenModels[selectedRoom.id] ?? null) : null} workerModel={selectedRoom?.workerModel ?? null} />
+        return <StationsPanel roomId={selectedRoomId} autonomyMode="semi" queenModel={selectedRoom ? (queenModels[selectedRoom.id] ?? null) : null} workerModel={selectedRoom?.workerModel ?? null} />
       case 'room-settings':
         return <RoomSettingsPanel roomId={selectedRoomId} />
-      case 'watches':
-        return <WatchesPanel roomId={selectedRoomId} autonomyMode={autonomyMode} />
-      case 'results':
-        return <ResultsPanel roomId={selectedRoomId} autonomyMode={autonomyMode} />
       case 'settings':
         return <SettingsPanel advancedMode={advancedMode} onAdvancedModeChange={handleAdvancedModeChange} installPrompt={installPrompt} onNavigate={(t) => handleTabChange(t as Tab)} />
       case 'help':

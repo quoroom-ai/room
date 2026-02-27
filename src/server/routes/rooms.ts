@@ -246,12 +246,11 @@ export function registerRoomRoutes(router: Router): void {
     const body = ctx.body as Record<string, unknown> || {}
     const room = queries.getRoom(ctx.db, roomId)
     if (!room) return { status: 404, error: 'Room not found' }
-    const updates: Partial<{ name: string; goal: string | null; status: string; visibility: string; autonomyMode: string; maxConcurrentTasks: number; workerModel: string; queenCycleGapMs: number; queenMaxTurns: number; queenQuietFrom: string | null; queenQuietUntil: string | null; referredByCode: string | null; queenNickname: string; allowedTools: string | null; config: typeof room.config }> = {}
+    const updates: Partial<{ name: string; goal: string | null; status: string; visibility: string; maxConcurrentTasks: number; workerModel: string; queenCycleGapMs: number; queenMaxTurns: number; queenQuietFrom: string | null; queenQuietUntil: string | null; referredByCode: string | null; queenNickname: string; allowedTools: string | null; config: typeof room.config }> = {}
     if (body.name !== undefined) updates.name = body.name as string
     if (body.goal !== undefined) updates.goal = body.goal as string | null
     if (body.status === 'stopped') updates.status = 'stopped'
     if (body.visibility !== undefined) updates.visibility = body.visibility as string
-    if (body.autonomyMode !== undefined) updates.autonomyMode = body.autonomyMode as string
     if (body.maxConcurrentTasks !== undefined) {
       const n = Number(body.maxConcurrentTasks)
       if (!isNaN(n) && n >= 1 && n <= 10) updates.maxConcurrentTasks = n

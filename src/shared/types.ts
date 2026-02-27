@@ -227,7 +227,7 @@ export interface Room {
   goal: string | null
   status: RoomStatus
   visibility: 'private' | 'public'
-  autonomyMode: 'auto' | 'semi'
+  autonomyMode: 'semi'
   maxConcurrentTasks: number
   workerModel: string
   queenCycleGapMs: number

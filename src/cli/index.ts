@@ -6,7 +6,6 @@
  * Usage:
  *   quoroom mcp                # Start MCP server (stdio)
  *   quoroom serve [port]       # Start HTTP/WebSocket API server
- *   quoroom chat [--room <id>] # Chat with the queen (interactive REPL)
  */
 
 const args = process.argv.slice(2)
@@ -26,12 +25,6 @@ switch (command) {
     const port = Number.isFinite(parsedPort) && parsedPort > 0 ? parsedPort : 3700
     const { startServer } = require('../server/index')
     startServer({ port })
-    break
-  }
-
-  case 'chat': {
-    const { startChat } = require('./chat')
-    startChat(args.slice(1))
     break
   }
 
@@ -55,7 +48,6 @@ Quoroom — Autonomous AI Agent Collective
 Usage:
   quoroom mcp           Start MCP server (stdio transport)
   quoroom serve [port]  Start HTTP/WebSocket API server (default: 3700)
-  quoroom chat          Chat with the queen (interactive REPL)
   quoroom update        Check for and apply updates
   quoroom uninstall     Remove Quoroom and all data
   quoroom help          Show this help message

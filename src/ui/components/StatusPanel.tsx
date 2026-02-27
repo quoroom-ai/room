@@ -22,7 +22,6 @@ interface StatusData {
   latestCycle: WorkerCycle | null
   runningRuns: TaskRun[]
   workerCount: number
-  watchCount: number
 }
 
 
@@ -75,12 +74,11 @@ export function StatusPanel({ onNavigate, advancedMode, roomId }: StatusPanelPro
   })
 
   const fetchStatus = useCallback(async (): Promise<StatusData> => {
-    const [stats, tasks, runs, workers, watches, runningRuns, cycles] = await Promise.all([
+    const [stats, tasks, runs, workers, runningRuns, cycles] = await Promise.all([
       api.memory.getStats(),
       api.tasks.list(roomId ?? undefined),
       api.runs.list(1),
       api.workers.list(),
-      api.watches.list(),
       api.runs.list(20, { status: 'running' }),
       roomId ? api.cycles.listByRoom(roomId, 1) : Promise.resolve([]),
     ])
@@ -90,8 +88,7 @@ export function StatusPanel({ onNavigate, advancedMode, roomId }: StatusPanelPro
       latestRun: runs[0] ?? null,
       latestCycle: cycles[0] ?? null,
       runningRuns,
-      workerCount: workers.length,
-      watchCount: watches.length
+      workerCount: workers.length
     }
   }, [roomId])
 
@@ -104,16 +101,15 @@ export function StatusPanel({ onNavigate, advancedMode, roomId }: StatusPanelPro
   const runsEvent = useWebSocket('runs')
   const workersEvent = useWebSocket('workers')
   const memoryEvent = useWebSocket('memory')
-  const watchesEvent = useWebSocket('watches')
 
   useEffect(() => {
-    if (!taskEvent && !runsEvent && !workersEvent && !memoryEvent && !watchesEvent) return
+    if (!taskEvent && !runsEvent && !workersEvent && !memoryEvent) return
     if (refreshStatusTimeoutRef.current) return
     refreshStatusTimeoutRef.current = window.setTimeout(() => {
       refreshStatusTimeoutRef.current = null
       void refreshStatus()
     }, 250)
-  }, [memoryEvent, refreshStatus, runsEvent, taskEvent, watchesEvent, workersEvent])
+  }, [memoryEvent, refreshStatus, runsEvent, taskEvent, workersEvent])
 
   useEffect(() => () => {
     if (refreshStatusTimeoutRef.current) {
@@ -267,15 +263,6 @@ export function StatusPanel({ onNavigate, advancedMode, roomId }: StatusPanelPro
     </button>
   )
 
-  const watchesCard = advancedMode ? (
-    <button key="watches" className={cardClass} onClick={() => onNavigate?.('watches')}>
-      <div className="flex items-center justify-between">
-        <span className="text-sm font-medium text-text-secondary">Watches</span>
-        <span className="text-sm text-text-muted">{data.watchCount} active</span>
-      </div>
-    </button>
-  ) : null
-
   // Show the most recent activity: queen cycle or task run, whichever is newer
   const latestActivity = (() => {
     const run = data.latestRun
@@ -289,7 +276,7 @@ export function StatusPanel({ onNavigate, advancedMode, roomId }: StatusPanelPro
   })()
 
   const lastRunCard = (
-    <button key="lastrun" className={cardClass} onClick={() => onNavigate?.('results')}>
+    <button key="lastrun" className={cardClass} onClick={() => onNavigate?.('tasks')}>
       <div className="flex items-center justify-between mb-1">
         <span className="text-sm font-medium text-text-secondary">Last Activity</span>
         {latestActivity && (
@@ -569,7 +556,6 @@ export function StatusPanel({ onNavigate, advancedMode, roomId }: StatusPanelPro
         {memoryCard}
         {workersCard}
         {tasksCard}
-        {watchesCard}
         {runningSection}
         {lastRunCard}
         {walletCard}
@@ -609,7 +595,7 @@ export function StatusPanel({ onNavigate, advancedMode, roomId }: StatusPanelPro
     </div>
   )
 
-  const cards = [queenCard, memoryCard, workersCard, tasksCard, watchesCard, lastRunCard, walletCard, networkCard, usageCard].filter(Boolean)
+  const cards = [queenCard, memoryCard, workersCard, tasksCard, lastRunCard, walletCard, networkCard, usageCard].filter(Boolean)
 
   return (
     <div ref={containerRef} className="p-4 flex flex-col gap-3 min-h-full overflow-x-hidden">

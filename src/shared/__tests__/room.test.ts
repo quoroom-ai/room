@@ -17,7 +17,7 @@ describe('createRoom', () => {
     expect(result.room.name).toBe('SaaS Builder')
     expect(result.room.status).toBe('active')
     expect(result.room.visibility).toBe('private')
-    expect(result.room.autonomyMode).toBe('auto')
+    expect(result.room.autonomyMode).toBe('semi')
     expect(result.room.maxConcurrentTasks).toBe(3)
     expect(result.room.queenWorkerId).toBe(result.queen.id)
 

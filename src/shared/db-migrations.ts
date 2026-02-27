@@ -140,5 +140,8 @@ export function runMigrations(database: Database.Database, log: (msg: string) =>
     log(`Migrated: reset ${ollamaRooms.length} room worker_model(s) to 'claude'`)
   }
 
+  // Remove auto mode: all rooms operate in semi mode.
+  database.prepare(`UPDATE rooms SET autonomy_mode = 'semi' WHERE autonomy_mode IS NULL OR autonomy_mode != 'semi'`).run()
+
   log('Database schema initialized')
 }
