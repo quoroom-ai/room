@@ -52,12 +52,12 @@ function s(id: number, roomId: number, name: string, status: string, tier: strin
 }
 
 const ROOMS: Room[] = [
-  r(901, 'hustle', 'Make money. Find opportunities, execute, and grow revenue autonomously...', 'claude-sonnet-4-20250514'),
-  r(902, 'trading', 'Trade crypto markets: analyze trends, execute trades, manage risk...', 'claude-opus-4-20250514'),
+  r(901, 'builder', 'Build and ship software. Find opportunities, execute, and deliver autonomously...', 'claude-sonnet-4-20250514'),
+  r(902, 'research', 'Monitor markets, analyze trends, and surface actionable insights...', 'claude-opus-4-20250514'),
   r(903, 'freelance', 'Find freelance dev jobs on Upwork, write proposals, land contracts, deliver code...', 'claude-sonnet-4-20250514'),
-  r(904, 'saas', 'Build and sell micro-SaaS products. Find niches, ship MVPs, acquire users...', 'claude-haiku-4-20250414'),
-  r(905, 'bounties', 'Monitor bounty platforms, pick up bug bounties and coding challenges for pay...', 'claude-sonnet-4-20250514', 'paused'),
-  r(906, 'content', 'Run a content agency: find clients, write copy, invoice, collect payments...', 'claude-sonnet-4-20250514'),
+  r(904, 'saas', 'Build and launch micro-SaaS products. Find niches, ship MVPs, acquire users...', 'claude-haiku-4-20250414'),
+  r(905, 'bounties', 'Monitor bounty platforms, pick up bug bounties and coding challenges...', 'claude-sonnet-4-20250514', 'paused'),
+  r(906, 'content', 'Run a content operation: research topics, write copy, publish, grow the audience...', 'claude-sonnet-4-20250514'),
 ]
 
 const WORKERS: Worker[] = [
@@ -81,18 +81,19 @@ const STATIONS: Record<number, Station[]> = {
   906: [s(8007, 906, 'ci-runner', 'active', 'medium'), s(8008, 906, 'staging', 'pending', 'small')],
 }
 
+// Demo data only — not representative of actual results
 const REVENUE: Record<number, RevenueSummary> = {
-  901: { totalIncome: 2847.50, totalExpenses: 312.40, netProfit: 2535.10, stationCosts: 20, transactionCount: 48 },
-  902: { totalIncome: 15420, totalExpenses: 1240, netProfit: 14180, stationCosts: 50, transactionCount: 156 },
-  903: { totalIncome: 1230, totalExpenses: 180, netProfit: 1050, stationCosts: 15, transactionCount: 22 },
-  904: { totalIncome: 580.25, totalExpenses: 95.50, netProfit: 484.75, stationCosts: 5, transactionCount: 14 },
-  905: { totalIncome: 340, totalExpenses: 42, netProfit: 298, stationCosts: 0, transactionCount: 9 },
-  906: { totalIncome: 920, totalExpenses: 210, netProfit: 710, stationCosts: 50, transactionCount: 31 },
+  901: { totalIncome: 0, totalExpenses: 12.40, netProfit: -12.40, stationCosts: 5, transactionCount: 3 },
+  902: { totalIncome: 0, totalExpenses: 8.20, netProfit: -8.20, stationCosts: 5, transactionCount: 2 },
+  903: { totalIncome: 0, totalExpenses: 6.00, netProfit: -6.00, stationCosts: 5, transactionCount: 1 },
+  904: { totalIncome: 0, totalExpenses: 4.50, netProfit: -4.50, stationCosts: 5, transactionCount: 1 },
+  905: { totalIncome: 0, totalExpenses: 0, netProfit: 0, stationCosts: 0, transactionCount: 0 },
+  906: { totalIncome: 0, totalExpenses: 9.10, netProfit: -9.10, stationCosts: 5, transactionCount: 2 },
 }
 
 const BALANCES: Record<number, OnChainBalance> = {
-  901: { totalBalance: 1842.30, byChain: { ethereum: { usdc: 1842.30, usdt: 0, total: 1842.30 } }, address: '0xdemo1', fetchedAt: now },
-  902: { totalBalance: 8450, byChain: { ethereum: { usdc: 8450, usdt: 0, total: 8450 } }, address: '0xdemo2', fetchedAt: now },
+  901: { totalBalance: 0, byChain: { ethereum: { usdc: 0, usdt: 0, total: 0 } }, address: '0xdemo1', fetchedAt: now },
+  902: { totalBalance: 0, byChain: { ethereum: { usdc: 0, usdt: 0, total: 0 } }, address: '0xdemo2', fetchedAt: now },
 }
 
 const QUEEN_RUNNING: Record<number, boolean> = {
