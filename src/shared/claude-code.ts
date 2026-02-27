@@ -2,6 +2,7 @@ import { spawn, execSync } from 'child_process'
 import { existsSync, readFileSync } from 'fs'
 import { join, dirname } from 'path'
 import { homedir } from 'os'
+import { registerManagedChildProcess } from './process-supervisor'
 
 export interface ConsoleLogEvent {
   entryType: 'tool_call' | 'assistant_text' | 'tool_result' | 'result' | 'error'
@@ -21,6 +22,7 @@ export interface ExecutionOptions {
   resumeSessionId?: string
   systemPrompt?: string
   model?: string
+  abortSignal?: AbortSignal
 }
 
 export interface ExecutionResult {
@@ -172,6 +174,7 @@ export function executeClaudeCode(
     let stdout = ''
     let stderr = ''
     let timedOut = false
+    let aborted = false
     let settled = false
     let lastResultText = ''
     let capturedSessionId: string | null = null
@@ -250,6 +253,7 @@ export function executeClaudeCode(
       })
       return
     }
+    registerManagedChildProcess(proc)
 
     // Guard against failed pipe creation (fd exhaustion)
     if (!proc.stdout || !proc.stderr) {
@@ -332,14 +336,31 @@ export function executeClaudeCode(
       }
     }, timeoutMs)
 
+    const abortSignal = options?.abortSignal
+    const onAbort = () => {
+      if (settled || aborted) return
+      aborted = true
+      try {
+        proc.kill('SIGTERM')
+        setTimeout(() => {
+          try { proc.kill('SIGKILL') } catch { /* ignore */ }
+        }, 5000)
+      } catch { /* process may already be gone */ }
+    }
+    if (abortSignal) {
+      if (abortSignal.aborted) onAbort()
+      else abortSignal.addEventListener('abort', onAbort, { once: true })
+    }
+
     proc.on('close', (code) => {
       if (settled) return
       settled = true
       clearTimeout(timer)
+      if (abortSignal) abortSignal.removeEventListener('abort', onAbort)
       resolve({
         stdout: lastResultText ? lastResultText.trim() : stdout.trim(),
-        stderr: stderr.trim(),
-        exitCode: code ?? 1,
+        stderr: aborted && !stderr.trim() ? 'Execution aborted' : stderr.trim(),
+        exitCode: aborted ? 130 : (code ?? 1),
         durationMs: Date.now() - startTime,
         timedOut,
         sessionId: capturedSessionId
@@ -350,6 +371,7 @@ export function executeClaudeCode(
       if (settled) return
       settled = true
       clearTimeout(timer)
+      if (abortSignal) abortSignal.removeEventListener('abort', onAbort)
       const isNotFound = err.code === 'ENOENT'
       resolve({
         stdout: '',

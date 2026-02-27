@@ -9,6 +9,7 @@ import { getRoomCloudId, fetchReferredRooms, type ReferredRoom } from '../../sha
 import { QUEEN_DEFAULTS_BY_PLAN, CHATGPT_DEFAULTS_BY_PLAN, type ClaudePlan, type ChatGptPlan } from '../../shared/constants'
 import type { ActivityEventType, EscalationStatus } from '../../shared/types'
 import { getModelAuthStatus } from '../../shared/model-provider'
+import { stopRoomRuntime } from '../runtime'
 
 function parseLimit(raw: string | undefined, fallback: number, max: number): number {
   const n = Number(raw)
@@ -371,6 +372,7 @@ export function registerRoomRoutes(router: Router): void {
     if (!room) return { status: 404, error: 'Room not found' }
     if (room.status !== 'active') return { status: 400, error: 'Room is not active' }
     if (!room.queenWorkerId) return { status: 400, error: 'No queen worker' }
+    stopRoomRuntime(ctx.db, roomId, 'Runtime reset before queen start')
     triggerAgent(ctx.db, roomId, room.queenWorkerId, {
       onCycleLogEntry: (entry) => eventBus.emit(`cycle:${entry.cycleId}`, 'cycle:log', entry),
       onCycleLifecycle: (event, cycleId) => eventBus.emit(`room:${roomId}`, `cycle:${event}`, { cycleId, roomId })
@@ -385,7 +387,7 @@ export function registerRoomRoutes(router: Router): void {
     const room = queries.getRoom(ctx.db, roomId)
     if (!room) return { status: 404, error: 'Room not found' }
     if (!room.queenWorkerId) return { status: 400, error: 'No queen worker' }
-    pauseAgent(ctx.db, room.queenWorkerId)
+    stopRoomRuntime(ctx.db, roomId, 'Queen stopped by keeper')
     eventBus.emit(`room:${roomId}`, 'room:queen_stopped', { roomId, running: false })
     emitQueenState(roomId, false)
     return { data: { ok: true, running: false } }

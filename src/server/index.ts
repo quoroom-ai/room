@@ -39,6 +39,7 @@ import { closeBrowser } from '../shared/web-tools'
 import { handleWebhookRequest } from './webhooks'
 import { eventBus } from './event-bus'
 import { inheritShellPath } from './shell-path'
+import { terminateManagedChildProcesses } from '../shared/process-supervisor'
 
 try {
   (process as unknown as { loadEnvFile?: (path?: string) => void }).loadEnvFile?.('.env')
@@ -49,6 +50,8 @@ try {
 const DEFAULT_PORT = 3700
 const DEFAULT_BIND_HOST_LOCAL = '127.0.0.1'
 const DEFAULT_BIND_HOST_CLOUD = '0.0.0.0'
+
+let requestProcessShutdown: (() => void) | null = null
 
 /** Fetch a URL following redirects and pipe the response body to `res`. */
 function streamWithRedirects(
@@ -533,7 +536,10 @@ export function createApiServer(options: ServerOptions = {}): {
       }
       res.writeHead(202, responseHeaders)
       res.end(JSON.stringify({ ok: true, restarting: true }))
-      setTimeout(() => process.exit(0), 120)
+      setTimeout(() => {
+        if (requestProcessShutdown) requestProcessShutdown()
+        else process.exit(0)
+      }, 120)
       return
     }
 
@@ -560,7 +566,10 @@ export function createApiServer(options: ServerOptions = {}): {
       }
       res.writeHead(202, responseHeaders)
       res.end(JSON.stringify({ ok: true, restarting: true, version: readyVersion }))
-      setTimeout(() => process.exit(0), 120)
+      setTimeout(() => {
+        if (requestProcessShutdown) requestProcessShutdown()
+        else process.exit(0)
+      }, 120)
       return
     }
 
@@ -943,28 +952,43 @@ export function startServer(options: ServerOptions = {}): void {
     console.error('[unhandledRejection]', err)
   })
 
-  process.on('SIGINT', () => {
+  let shutdownStarted = false
+  const shutdown = (exitCode: number = 0): void => {
+    if (shutdownStarted) return
+    shutdownStarted = true
+
     console.error('Shutting down...')
     _stopAllLoops()
     stopServerRuntime()
     stopCloudSync()
     stopUpdateChecker()
     closeBrowser().catch(() => { /* ignore */ })
-    server.close()
-    closeServerDatabase()
-    process.exit(0)
-  })
 
-  process.on('SIGTERM', () => {
-    _stopAllLoops()
-    stopServerRuntime()
-    stopCloudSync()
-    stopUpdateChecker()
-    closeBrowser().catch(() => { /* ignore */ })
-    server.close()
-    closeServerDatabase()
-    process.exit(0)
-  })
+    let exited = false
+    const exitNow = () => {
+      if (exited) return
+      exited = true
+      try { closeServerDatabase() } catch { /* ignore */ }
+      process.exit(exitCode)
+    }
+
+    void terminateManagedChildProcesses()
+      .catch(() => { /* best effort */ })
+      .finally(() => {
+        try {
+          server.close(() => exitNow())
+        } catch {
+          exitNow()
+          return
+        }
+        setTimeout(() => exitNow(), 3_000).unref()
+      })
+  }
+
+  requestProcessShutdown = () => shutdown(0)
+
+  process.on('SIGINT', () => shutdown(0))
+  process.on('SIGTERM', () => shutdown(0))
 }
 
 /** @internal exported for testing */

@@ -14,7 +14,8 @@ import { WORKER_ROLE_PRESETS } from './constants'
 
 interface LoopState {
   running: boolean
-  abort: AbortController | null
+  waitAbort: AbortController | null
+  cycleAbort: AbortController | null
 }
 
 function isInQuietHours(from: string, until: string): boolean {
@@ -69,7 +70,7 @@ export async function startAgentLoop(
   const existing = runningLoops.get(workerId)
   if (existing?.running) return
 
-  const loop: LoopState = { running: true, abort: null }
+  const loop: LoopState = { running: true, waitAbort: null, cycleAbort: null }
   runningLoops.set(workerId, loop)
 
   try {
@@ -90,12 +91,12 @@ export async function startAgentLoop(
         const wait = msUntilQuietEnd(currentRoom.queenQuietUntil)
         try {
           const abort = new AbortController()
-          loop.abort = abort
+          loop.waitAbort = abort
           await sleep(wait, abort.signal)
         } catch {
           // Aborted (e.g. quiet hours disabled, or room paused)
         } finally {
-          loop.abort = null
+          loop.waitAbort = null
         }
         continue
       }
@@ -103,7 +104,9 @@ export async function startAgentLoop(
       try {
         // Floor: never less than 50 turns — let agents finish their work
         const effectiveMaxTurns = Math.max(currentWorker.maxTurns ?? currentRoom.queenMaxTurns, 50)
-        await runCycle(db, roomId, currentWorker, effectiveMaxTurns, options)
+        const cycleAbort = new AbortController()
+        loop.cycleAbort = cycleAbort
+        await runCycle(db, roomId, currentWorker, effectiveMaxTurns, options, cycleAbort.signal)
       } catch (err) {
         if (!loop.running) break
 
@@ -119,12 +122,12 @@ export async function startAgentLoop(
 
           try {
             const abort = new AbortController()
-            loop.abort = abort
+            loop.waitAbort = abort
             await sleep(err.info.waitMs, abort.signal)
           } catch {
             // Aborted by triggerAgent — continue immediately
           } finally {
-            loop.abort = null
+            loop.waitAbort = null
           }
 
           if (loop.running) {
@@ -139,6 +142,8 @@ export async function startAgentLoop(
           `Agent cycle error (${currentWorker.name}): ${message.slice(0, 200)}`,
           message, workerId)
         queries.updateAgentState(db, workerId, 'idle')
+      } finally {
+        loop.cycleAbort = null
       }
 
       if (!loop.running) break
@@ -150,15 +155,16 @@ export async function startAgentLoop(
       const gap = freshWorker?.wip ? Math.min(baseGap, MOMENTUM_GAP) : baseGap
       try {
         const abort = new AbortController()
-        loop.abort = abort
+        loop.waitAbort = abort
         await sleep(gap, abort.signal)
       } catch {
         // Aborted by triggerAgent — skip gap, start next cycle immediately
       } finally {
-        loop.abort = null
+        loop.waitAbort = null
       }
     }
   } finally {
+    loop.cycleAbort = null
     runningLoops.delete(workerId)
     try { queries.updateAgentState(db, workerId, 'idle') } catch { /* DB may be closed */ }
   }
@@ -168,7 +174,8 @@ export function pauseAgent(db: Database.Database, workerId: number): void {
   const loop = runningLoops.get(workerId)
   if (loop) {
     loop.running = false
-    if (loop.abort) loop.abort.abort()
+    if (loop.waitAbort) loop.waitAbort.abort()
+    if (loop.cycleAbort) loop.cycleAbort.abort()
     runningLoops.delete(workerId)
   }
   queries.updateAgentState(db, workerId, 'idle')
@@ -191,7 +198,7 @@ export function triggerAgent(db: Database.Database, roomId: number, workerId: nu
   const loop = runningLoops.get(workerId)
   if (loop?.running) {
     // Abort any current wait (gap or rate limit) to start next cycle immediately
-    if (loop.abort) loop.abort.abort()
+    if (loop.waitAbort) loop.waitAbort.abort()
     return
   }
   // Not running — start fresh
@@ -236,7 +243,12 @@ function isCliContextOverflowError(message: string): boolean {
 }
 
 export async function runCycle(
-  db: Database.Database, roomId: number, worker: Worker, maxTurns?: number, options?: AgentLoopOptions
+  db: Database.Database,
+  roomId: number,
+  worker: Worker,
+  maxTurns?: number,
+  options?: AgentLoopOptions,
+  abortSignal?: AbortSignal
 ): Promise<string> {
   queries.logRoomActivity(db, roomId, 'system',
     `Agent cycle started (${worker.name})`, undefined, worker.id)
@@ -569,6 +581,7 @@ At the end of this cycle, call quoroom_save_wip to save your updated position.`)
         const trimmed = msgs.length > MAX_MESSAGES ? msgs.slice(-MAX_MESSAGES) : msgs
         queries.saveAgentSession(db, worker.id, { messagesJson: JSON.stringify(trimmed), model })
       },
+      abortSignal,
       ...apiToolOpts
     })
 
@@ -581,6 +594,16 @@ At the end of this cycle, call quoroom_save_wip to save your updated position.`)
         logBuffer.flush()
         result = await executeWithSession(undefined)
       }
+    }
+
+    if (abortSignal?.aborted) {
+      const canceledMessage = 'Execution aborted'
+      logBuffer.addSynthetic('error', canceledMessage)
+      logBuffer.flush()
+      queries.completeWorkerCycle(db, cycle.id, canceledMessage, result.usage)
+      options?.onCycleLifecycle?.('failed', cycle.id, roomId)
+      queries.updateAgentState(db, worker.id, 'idle')
+      return result.output
     }
 
     // Check for rate limit
@@ -670,7 +693,8 @@ At the end of this cycle, call quoroom_save_wip to save your updated position.`)
 export function _stopAllLoops(): void {
   for (const [, loop] of runningLoops) {
     loop.running = false
-    if (loop.abort) loop.abort.abort()
+    if (loop.waitAbort) loop.waitAbort.abort()
+    if (loop.cycleAbort) loop.cycleAbort.abort()
   }
   runningLoops.clear()
 }

@@ -69,16 +69,25 @@ function Find-ServerProcs {
     })
 }
 
+function Stop-PidTree([int]$pid) {
+  if ($pid -le 4 -or $pid -eq $PID) { return }
+  try {
+    & taskkill /PID $pid /T /F 1>$null 2>$null
+  } catch {
+    try { Stop-Process -Id $pid -Force -EA SilentlyContinue } catch {}
+  }
+}
+
 function Stop-Server {
   foreach ($p in Find-ServerProcs) {
-    try { Stop-Process -Id $p.ProcessId -Force -EA SilentlyContinue } catch {}
+    Stop-PidTree $p.ProcessId
   }
   # Also kill anything owning port 3700 (catches zombie/elevated processes)
   $portOwners = Get-NetTCPConnection -LocalPort 3700 -EA SilentlyContinue |
     Where-Object { $_.OwningProcess -gt 4 -and $_.OwningProcess -ne $PID } |
     Select-Object -ExpandProperty OwningProcess -Unique
   foreach ($portProc in $portOwners) {
-    try { Stop-Process -Id $portProc -Force -EA SilentlyContinue } catch {}
+    Stop-PidTree $portProc
   }
 }
 
@@ -90,7 +99,7 @@ function Clear-Port3700 {
     Select-Object -ExpandProperty OwningProcess -Unique
   foreach ($portProc in $portOwners) {
     Write-Log "Evicting port-3700 owner PID=$portProc"
-    try { Stop-Process -Id $portProc -Force -EA SilentlyContinue } catch {}
+    Stop-PidTree $portProc
   }
   if ($portOwners.Count -gt 0) { Start-Sleep -Milliseconds 600 }
 }

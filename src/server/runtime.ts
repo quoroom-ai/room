@@ -4,9 +4,9 @@ import cron from 'node-cron'
 import type Database from 'better-sqlite3'
 import * as queries from '../shared/db-queries'
 import { APP_NAME } from '../shared/constants'
-import { executeTask, isTaskRunning } from '../shared/task-runner'
+import { executeTask, isTaskRunning, cancelRunningTasksForRoom } from '../shared/task-runner'
 import { startCommentaryEngine, stopCommentaryEngine } from './clerk-commentary'
-import { triggerAgent } from '../shared/agent-loop'
+import { triggerAgent, pauseAgent } from '../shared/agent-loop'
 import {
   ensureCloudRoomToken,
   fetchCloudRoomMessages,
@@ -85,6 +85,14 @@ interface QueueTaskOptions {
   source: 'manual' | 'cron' | 'once' | 'webhook'
 }
 
+export interface RoomRuntimeStopResult {
+  pausedWorkers: number
+  canceledPendingTaskStarts: number
+  canceledRunningTasks: number
+  failedTaskRuns: number
+  failedWorkerCycles: number
+}
+
 function queueTaskExecution(
   db: Database.Database,
   taskId: number,
@@ -146,6 +154,35 @@ export function runTaskNow(
   taskId: number
 ): { started: boolean; reason?: string } {
   return queueTaskExecution(db, taskId, { allowInactive: true, source: 'manual' })
+}
+
+export function stopRoomRuntime(
+  db: Database.Database,
+  roomId: number,
+  reason: string = 'Room runtime stopped'
+): RoomRuntimeStopResult {
+  const workers = queries.listRoomWorkers(db, roomId)
+  for (const worker of workers) {
+    try { pauseAgent(db, worker.id) } catch { /* best effort */ }
+  }
+
+  let canceledPendingTaskStarts = 0
+  const roomTaskIds = new Set(queries.listTasks(db, roomId).map((task) => task.id))
+  for (const taskId of roomTaskIds) {
+    if (pendingTaskStarts.delete(taskId)) canceledPendingTaskStarts++
+  }
+
+  const canceledRunningTasks = cancelRunningTasksForRoom(db, roomId)
+  const failedTaskRuns = queries.failRunningTaskRunsForRoom(db, roomId, reason)
+  const failedWorkerCycles = queries.failRunningWorkerCyclesForRoom(db, roomId, reason)
+
+  return {
+    pausedWorkers: workers.length,
+    canceledPendingTaskStarts,
+    canceledRunningTasks,
+    failedTaskRuns,
+    failedWorkerCycles
+  }
 }
 
 function toSqliteLocalDateTime(date: Date): string {

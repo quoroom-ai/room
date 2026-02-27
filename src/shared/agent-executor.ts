@@ -6,6 +6,7 @@ import { executeClaudeCode } from './claude-code'
 import type { ExecutionOptions, ExecutionResult, ConsoleLogCallback, ProgressCallback } from './claude-code'
 import { execOnCloudStation } from './cloud-sync'
 import type { ToolDef } from './queen-tools'
+import { registerManagedChildProcess } from './process-supervisor'
 
 export interface AgentExecutionOptions {
   model: string // 'claude' | 'codex' | 'openai:gpt-4o-mini' | 'anthropic:claude-3-5-sonnet-latest' | 'gemini:gemini-2.5-flash'
@@ -34,6 +35,7 @@ export interface AgentExecutionOptions {
    * persist the session for the next cycle.
    */
   onSessionUpdate?: (messages: Array<{ role: string; content: string }>) => void
+  abortSignal?: AbortSignal
 }
 
 export interface AgentExecutionResult {
@@ -46,6 +48,14 @@ export interface AgentExecutionResult {
 }
 
 const DEFAULT_HTTP_TIMEOUT_MS = 60_000
+
+function linkAbortSignal(controller: AbortController, external?: AbortSignal): (() => void) | null {
+  if (!external) return null
+  const onAbort = () => controller.abort()
+  if (external.aborted) onAbort()
+  else external.addEventListener('abort', onAbort, { once: true })
+  return () => external.removeEventListener('abort', onAbort)
+}
 
 /**
  * Resolve `codex.cmd` to the underlying `.js` script on Windows, so we can
@@ -113,7 +123,8 @@ async function executeClaude(options: AgentExecutionOptions): Promise<AgentExecu
     onConsoleLog: options.onConsoleLog,
     resumeSessionId: options.resumeSessionId,
     systemPrompt: options.systemPrompt,
-    model: options.model === 'claude' ? undefined : options.model
+    model: options.model === 'claude' ? undefined : options.model,
+    abortSignal: options.abortSignal,
   }
 
   const result: ExecutionResult = await executeClaudeCode(options.prompt, execOpts)
@@ -140,6 +151,7 @@ async function executeCodex(options: AgentExecutionOptions): Promise<AgentExecut
     let stdout = ''
     let stderr = ''
     let timedOut = false
+    let aborted = false
     let settled = false
     let sessionId: string | null = options.resumeSessionId ?? null
     let outputParts: string[] = []
@@ -186,6 +198,7 @@ async function executeCodex(options: AgentExecutionOptions): Promise<AgentExecut
       })
       return
     }
+    registerManagedChildProcess(proc)
 
     if (!proc.stdout || !proc.stderr) {
       resolve({
@@ -236,10 +249,26 @@ async function executeCodex(options: AgentExecutionOptions): Promise<AgentExecut
       setTimeout(() => proc.kill('SIGKILL'), 5000)
     }, timeoutMs)
 
+    const onAbort = () => {
+      if (settled || aborted) return
+      aborted = true
+      try {
+        proc.kill('SIGTERM')
+        setTimeout(() => {
+          try { proc.kill('SIGKILL') } catch { /* ignore */ }
+        }, 5000)
+      } catch { /* process already exited */ }
+    }
+    if (options.abortSignal) {
+      if (options.abortSignal.aborted) onAbort()
+      else options.abortSignal.addEventListener('abort', onAbort, { once: true })
+    }
+
     proc.on('close', (code) => {
       if (settled) return
       settled = true
       clearTimeout(timer)
+      if (options.abortSignal) options.abortSignal.removeEventListener('abort', onAbort)
       if (buffer.trim()) {
         parseCodexEventLine(buffer.trim(), (evt) => {
           if (evt.sessionId) sessionId = evt.sessionId
@@ -254,8 +283,8 @@ async function executeCodex(options: AgentExecutionOptions): Promise<AgentExecut
       }
       const output = outputParts.join('\n\n').trim() || stderr.trim() || stdout.trim() || ''
       resolve({
-        output,
-        exitCode: code ?? (timedOut ? 124 : 1),
+        output: aborted && !output ? 'Execution aborted' : output,
+        exitCode: aborted ? 130 : (code ?? (timedOut ? 124 : 1)),
         durationMs: Date.now() - startTime,
         sessionId,
         timedOut
@@ -266,6 +295,7 @@ async function executeCodex(options: AgentExecutionOptions): Promise<AgentExecut
       if (settled) return
       settled = true
       clearTimeout(timer)
+      if (options.abortSignal) options.abortSignal.removeEventListener('abort', onAbort)
       resolve({
         output: `Error: ${err.message}`,
         exitCode: 1,
@@ -354,6 +384,7 @@ async function executeOpenAiWithTools(options: AgentExecutionOptions): Promise<A
 
   for (let turn = 0; turn < maxTurns; turn++) {
     const controller = new AbortController()
+    const detachAbort = linkAbortSignal(controller, options.abortSignal)
     const timeoutMs = options.timeoutMs ?? 5 * 60 * 1000
     const timer = setTimeout(() => controller.abort(), timeoutMs)
 
@@ -375,6 +406,7 @@ async function executeOpenAiWithTools(options: AgentExecutionOptions): Promise<A
       return { output: `Error: ${msg}`, exitCode: 1, durationMs: Date.now() - startTime, sessionId: null, timedOut, usage: { inputTokens: totalInputTokens, outputTokens: totalOutputTokens } }
     } finally {
       clearTimeout(timer)
+      detachAbort?.()
     }
 
     // Accumulate token usage
@@ -469,6 +501,7 @@ async function executeAnthropicWithTools(options: AgentExecutionOptions): Promis
 
   for (let turn = 0; turn < maxTurns; turn++) {
     const controller = new AbortController()
+    const detachAbort = linkAbortSignal(controller, options.abortSignal)
     const timeoutMs = options.timeoutMs ?? 5 * 60 * 1000
     const timer = setTimeout(() => controller.abort(), timeoutMs)
 
@@ -500,6 +533,7 @@ async function executeAnthropicWithTools(options: AgentExecutionOptions): Promis
       return { output: `Error: ${msg}`, exitCode: 1, durationMs: Date.now() - startTime, sessionId: null, timedOut, usage: { inputTokens: totalInputTokens, outputTokens: totalOutputTokens } }
     } finally {
       clearTimeout(timer)
+      detachAbort?.()
     }
 
     // Accumulate token usage
@@ -562,6 +596,7 @@ async function executeOpenAiApi(options: AgentExecutionOptions): Promise<AgentEx
 
   const startTime = Date.now()
   const controller = new AbortController()
+  const detachAbort = linkAbortSignal(controller, options.abortSignal)
   const timeoutMs = options.timeoutMs ?? DEFAULT_HTTP_TIMEOUT_MS
   const timer = setTimeout(() => controller.abort(), timeoutMs)
   try {
@@ -609,6 +644,7 @@ async function executeOpenAiApi(options: AgentExecutionOptions): Promise<AgentEx
     }
   } finally {
     clearTimeout(timer)
+    detachAbort?.()
   }
 }
 
@@ -621,6 +657,7 @@ async function executeAnthropicApi(options: AgentExecutionOptions): Promise<Agen
   const modelName = parseAnthropicModel(options.model)
   const startTime = Date.now()
   const controller = new AbortController()
+  const detachAbort = linkAbortSignal(controller, options.abortSignal)
   const timeoutMs = options.timeoutMs ?? DEFAULT_HTTP_TIMEOUT_MS
   const timer = setTimeout(() => controller.abort(), timeoutMs)
   try {
@@ -671,6 +708,7 @@ async function executeAnthropicApi(options: AgentExecutionOptions): Promise<Agen
     }
   } finally {
     clearTimeout(timer)
+    detachAbort?.()
   }
 }
 
@@ -886,6 +924,15 @@ export async function executeApiOnStation(
   if (!apiKey) {
     return immediateError('Missing API key for station execution.')
   }
+  if (options.abortSignal?.aborted) {
+    return {
+      output: 'Execution aborted',
+      exitCode: 130,
+      durationMs: Date.now() - startTime,
+      sessionId: null,
+      timedOut: false
+    }
+  }
 
   const isOpenAiCompat = options.model.startsWith('openai:') || options.model.startsWith('gemini:')
   const messages: Array<{ role: string; content: string }> = []
@@ -918,8 +965,28 @@ export async function executeApiOnStation(
   const headerFlags = Object.entries(headers).map(([k, v]) => `-H '${k}: ${v}'`).join(' ')
   const b64 = Buffer.from(body).toString('base64')
   const command = `echo '${b64}' | base64 -d | curl -s --max-time 300 ${headerFlags} -d @- '${url}'`
-
-  const result = await execOnCloudStation(cloudRoomId, stationId, command, 360000)
+  const result = await new Promise<{ stdout: string; stderr: string; exitCode: number } | null>((resolve) => {
+    let settled = false
+    const finish = (value: { stdout: string; stderr: string; exitCode: number } | null) => {
+      if (settled) return
+      settled = true
+      resolve(value)
+    }
+    const onAbort = () => finish({ stdout: '', stderr: 'Execution aborted', exitCode: 130 })
+    if (options.abortSignal) {
+      if (options.abortSignal.aborted) {
+        onAbort()
+        return
+      }
+      options.abortSignal.addEventListener('abort', onAbort, { once: true })
+    }
+    void execOnCloudStation(cloudRoomId, stationId, command, 360000)
+      .then((value) => finish(value))
+      .catch(() => finish(null))
+      .finally(() => {
+        if (options.abortSignal) options.abortSignal.removeEventListener('abort', onAbort)
+      })
+  })
 
   if (!result) {
     return {

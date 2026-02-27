@@ -186,18 +186,77 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
+    func processTreePids(rootPid: Int32) -> [Int32] {
+        let pipe = Pipe()
+        let ps = Process()
+        ps.executableURL = URL(fileURLWithPath: "/bin/ps")
+        ps.arguments = ["-axo", "pid=,ppid="]
+        ps.standardOutput = pipe
+        ps.standardError = FileHandle.nullDevice
+
+        do {
+            try ps.run()
+            ps.waitUntilExit()
+        } catch { return [rootPid] }
+
+        let data = pipe.fileHandleForReading.readDataToEndOfFile()
+        guard let output = String(data: data, encoding: .utf8) else { return [rootPid] }
+
+        var byParent: [Int32: [Int32]] = [:]
+        for rawLine in output.split(separator: "\n") {
+            let parts = rawLine
+                .split(whereSeparator: { $0 == " " || $0 == "\t" })
+                .map(String.init)
+            guard parts.count >= 2,
+                  let pid = Int32(parts[0]),
+                  let ppid = Int32(parts[1]) else { continue }
+            byParent[ppid, default: []].append(pid)
+        }
+
+        var result = Set<Int32>()
+        var stack: [Int32] = [rootPid]
+        while let current = stack.popLast() {
+            if result.contains(current) { continue }
+            result.insert(current)
+            let children = byParent[current] ?? []
+            for child in children where !result.contains(child) {
+                stack.append(child)
+            }
+        }
+        return Array(result)
+    }
+
+    func pidExists(_ pid: Int32) -> Bool {
+        if kill(pid, 0) == 0 { return true }
+        return errno == EPERM
+    }
+
     func killServerOnPort() {
-        let pids = pidsOnPort()
-        guard !pids.isEmpty else { return }
+        let roots = pidsOnPort()
+        guard !roots.isEmpty else { return }
+
+        let selfPid = getpid()
+        var allPids = Set<Int32>()
+        for root in roots {
+            for pid in processTreePids(rootPid: root) where pid != selfPid && pid > 1 {
+                allPids.insert(pid)
+            }
+        }
+        guard !allPids.isEmpty else { return }
+
+        let targets = allPids.sorted()
 
         // Graceful shutdown.
-        for pid in pids { kill(pid, SIGTERM) }
+        for pid in targets { kill(pid, SIGTERM) }
         Thread.sleep(forTimeInterval: 1.0)
 
         // Force-kill anything still lingering.
-        let remaining = pidsOnPort()
-        for pid in remaining { kill(pid, SIGKILL) }
-        if !remaining.isEmpty {
+        var hadRemaining = false
+        for pid in targets where pidExists(pid) {
+            hadRemaining = true
+            kill(pid, SIGKILL)
+        }
+        if hadRemaining {
             Thread.sleep(forTimeInterval: 0.5)
         }
     }

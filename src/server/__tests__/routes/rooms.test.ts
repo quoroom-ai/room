@@ -181,6 +181,64 @@ describe('Room routes', () => {
     })
   })
 
+  describe('POST /api/rooms/:id/queen/stop', () => {
+    it('stops all room workers and fails running room runtime rows', async () => {
+      const createRes = await request(ctx, 'POST', '/api/rooms', { name: 'QueenStopRuntime' })
+      const roomId = (createRes.body as any).room.id
+      const queenId = (createRes.body as any).queen.id as number
+
+      const worker = queries.createWorker(ctx.db, {
+        name: 'helper',
+        systemPrompt: 'Help the queen.',
+        roomId,
+        agentState: 'acting'
+      })
+      queries.updateWorker(ctx.db, queenId, { agentState: 'thinking' })
+
+      queries.createWorkerCycle(ctx.db, queenId, roomId, 'claude')
+      queries.createWorkerCycle(ctx.db, worker.id, roomId, 'claude')
+
+      const task = queries.createTask(ctx.db, {
+        name: 'runtime-task',
+        prompt: 'test',
+        triggerType: 'manual',
+        roomId
+      })
+      queries.createTaskRun(ctx.db, task.id)
+
+      const res = await request(ctx, 'POST', `/api/rooms/${roomId}/queen/stop`)
+      expect(res.status).toBe(200)
+      expect((res.body as any).running).toBe(false)
+
+      const workers = queries.listRoomWorkers(ctx.db, roomId)
+      expect(workers.every((entry) => entry.agentState === 'idle')).toBe(true)
+
+      const runningCycles = ctx.db.prepare(
+        "SELECT COUNT(*) as cnt FROM worker_cycles WHERE room_id = ? AND status = 'running'"
+      ).get(roomId) as { cnt: number }
+      expect(runningCycles.cnt).toBe(0)
+
+      const failedCycles = ctx.db.prepare(
+        "SELECT COUNT(*) as cnt FROM worker_cycles WHERE room_id = ? AND status = 'failed' AND error_message = 'Queen stopped by keeper'"
+      ).get(roomId) as { cnt: number }
+      expect(failedCycles.cnt).toBeGreaterThanOrEqual(2)
+
+      const runningTaskRuns = ctx.db.prepare(
+        `SELECT COUNT(*) as cnt FROM task_runs tr
+         JOIN tasks t ON t.id = tr.task_id
+         WHERE t.room_id = ? AND tr.status = 'running'`
+      ).get(roomId) as { cnt: number }
+      expect(runningTaskRuns.cnt).toBe(0)
+
+      const failedTaskRuns = ctx.db.prepare(
+        `SELECT COUNT(*) as cnt FROM task_runs tr
+         JOIN tasks t ON t.id = tr.task_id
+         WHERE t.room_id = ? AND tr.status = 'failed' AND tr.error_message = 'Queen stopped by keeper'`
+      ).get(roomId) as { cnt: number }
+      expect(failedTaskRuns.cnt).toBeGreaterThanOrEqual(1)
+    })
+  })
+
   describe('POST /api/rooms/:id/pause', () => {
     it('pauses a room', async () => {
       const createRes = await request(ctx, 'POST', '/api/rooms', { name: 'PauseRoom' })

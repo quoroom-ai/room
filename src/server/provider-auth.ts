@@ -2,6 +2,7 @@ import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process'
 import { randomUUID } from 'node:crypto'
 import { eventBus } from './event-bus'
 import { getProviderCliCommand } from './provider-cli'
+import { registerManagedChildProcess } from '../shared/process-supervisor'
 
 export type ProviderName = 'codex' | 'claude'
 export type ProviderAuthStatus = 'starting' | 'running' | 'completed' | 'failed' | 'canceled' | 'timeout'
@@ -319,6 +320,7 @@ export function startProviderAuthSession(provider: ProviderName): {
     // Windows needs shell:true to execute .cmd batch wrappers (claude.cmd, codex.cmd)
     shell: process.platform === 'win32',
   })
+  registerManagedChildProcess(child)
 
   const startedAt = nowIso()
   const session: ProviderAuthSessionInternal = {

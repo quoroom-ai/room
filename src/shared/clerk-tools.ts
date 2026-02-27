@@ -1,11 +1,12 @@
 import type Database from 'better-sqlite3'
 import * as queries from './db-queries'
 import { createRoom, pauseRoom, restartRoom, deleteRoom } from './room'
-import { pauseAgent, triggerAgent } from './agent-loop'
+import { triggerAgent } from './agent-loop'
 import type { ToolDef } from './queen-tools'
 import type { VoteValue } from './types'
 import { getRoomCloudId } from './cloud-sync'
 import { keeperVote } from './quorum'
+import { stopRoomRuntime } from '../server/runtime'
 
 export type ClerkToolArgs = Record<string, unknown>
 
@@ -529,7 +530,7 @@ export async function executeClerkTool(
         const room = resolveRoom(db, args)
         if (!room) return { content: 'Error: room not found.', isError: true }
         pauseRoom(db, room.id)
-        for (const worker of queries.listRoomWorkers(db, room.id)) pauseAgent(db, worker.id)
+        stopRoomRuntime(db, room.id, 'Room paused by keeper')
         return { content: `Paused room "${room.name}" (#${room.id}).` }
       }
 
@@ -544,7 +545,7 @@ export async function executeClerkTool(
       case 'quoroom_delete_room': {
         const room = resolveRoom(db, args)
         if (!room) return { content: 'Error: room not found.', isError: true }
-        for (const worker of queries.listRoomWorkers(db, room.id)) pauseAgent(db, worker.id)
+        stopRoomRuntime(db, room.id, 'Room deleted by keeper')
         deleteRoom(db, room.id)
         return { content: `Deleted room "${room.name}" (#${room.id}).` }
       }
@@ -554,6 +555,7 @@ export async function executeClerkTool(
         if (!room) return { content: 'Error: room not found.', isError: true }
         if (!room.queenWorkerId) return { content: `Error: room "${room.name}" has no queen worker.`, isError: true }
         if (room.status !== 'active') return { content: `Error: room "${room.name}" is not active.`, isError: true }
+        stopRoomRuntime(db, room.id, 'Runtime reset before queen start')
         triggerAgent(db, room.id, room.queenWorkerId)
         return { content: `Started queen in "${room.name}" (#${room.id}).` }
       }
@@ -562,7 +564,7 @@ export async function executeClerkTool(
         const room = resolveRoom(db, args)
         if (!room) return { content: 'Error: room not found.', isError: true }
         if (!room.queenWorkerId) return { content: `Error: room "${room.name}" has no queen worker.`, isError: true }
-        pauseAgent(db, room.queenWorkerId)
+        stopRoomRuntime(db, room.id, 'Queen stopped by keeper')
         return { content: `Stopped queen in "${room.name}" (#${room.id}).` }
       }
 

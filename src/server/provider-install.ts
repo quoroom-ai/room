@@ -4,6 +4,7 @@ import path from 'node:path'
 import { eventBus } from './event-bus'
 import type { ProviderName } from './provider-auth'
 import { probeProviderInstalled } from './provider-cli'
+import { registerManagedChildProcess } from '../shared/process-supervisor'
 
 export type ProviderInstallStatus = 'starting' | 'running' | 'completed' | 'failed' | 'canceled' | 'timeout'
 
@@ -285,6 +286,7 @@ export function startProviderInstallSession(provider: ProviderName): {
     // Windows needs shell:true to execute .cmd batch wrappers (npm.cmd)
     shell: process.platform === 'win32',
   })
+  registerManagedChildProcess(child)
 
   const startedAt = nowIso()
   const session: ProviderInstallSessionInternal = {

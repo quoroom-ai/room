@@ -456,10 +456,11 @@ export function completeTaskRun(db: Database.Database, id: number, result: strin
   const status = errorMessage ? 'failed' : 'completed'
   const durationMs = Date.now() - new Date(run.startedAt).getTime()
 
-  db.prepare(
+  const updated = db.prepare(
     `UPDATE task_runs SET finished_at = datetime('now','localtime'), status = ?, result = ?,
-     result_file = ?, error_message = ?, duration_ms = ? WHERE id = ?`
+     result_file = ?, error_message = ?, duration_ms = ? WHERE id = ? AND status = 'running'`
   ).run(status, result, resultFile ?? null, errorMessage ?? null, durationMs, id)
+  if (updated.changes === 0) return
 
   const task = getTask(db, run.taskId)
   const newErrorCount = errorMessage ? (task?.errorCount ?? 0) + 1 : 0
@@ -568,6 +569,24 @@ export function cleanupStaleRuns(db: Database.Database): number {
           ?
         )
   `).run(DEFAULT_TIMEOUT_MINUTES)
+  return result.changes
+}
+
+export function failRunningTaskRunsForRoom(
+  db: Database.Database,
+  roomId: number,
+  reason: string
+): number {
+  const result = db.prepare(`
+    UPDATE task_runs
+    SET status = 'failed',
+        finished_at = datetime('now','localtime'),
+        error_message = ?
+    WHERE status = 'running'
+      AND task_id IN (
+        SELECT id FROM tasks WHERE room_id = ?
+      )
+  `).run(reason, roomId)
   return result.changes
 }
 
@@ -2388,7 +2407,7 @@ export function completeWorkerCycle(
   const status = errorMessage ? 'failed' : 'completed'
   const durationMs = Date.now() - new Date(cycle.startedAt).getTime()
   db.prepare(
-    "UPDATE worker_cycles SET finished_at = datetime('now','localtime'), status = ?, error_message = ?, duration_ms = ?, input_tokens = ?, output_tokens = ? WHERE id = ?"
+    "UPDATE worker_cycles SET finished_at = datetime('now','localtime'), status = ?, error_message = ?, duration_ms = ?, input_tokens = ?, output_tokens = ? WHERE id = ? AND status = 'running'"
   ).run(status, errorMessage ?? null, durationMs, usage?.inputTokens ?? null, usage?.outputTokens ?? null, cycleId)
 }
 
@@ -2424,6 +2443,17 @@ export function cleanupStaleCycles(db: Database.Database): number {
   const result = db.prepare(
     "UPDATE worker_cycles SET status = 'failed', error_message = 'Server restarted', finished_at = datetime('now','localtime') WHERE status = 'running'"
   ).run()
+  return result.changes
+}
+
+export function failRunningWorkerCyclesForRoom(
+  db: Database.Database,
+  roomId: number,
+  reason: string
+): number {
+  const result = db.prepare(
+    "UPDATE worker_cycles SET status = 'failed', error_message = ?, finished_at = datetime('now','localtime') WHERE room_id = ? AND status = 'running'"
+  ).run(reason, roomId)
   return result.changes
 }
 

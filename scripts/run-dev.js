@@ -109,7 +109,7 @@ function shutdown(code = 0) {
 }
 
 async function main() {
-  await runNpm(['run', 'kill:dev-ports'])
+  await runNpm(['run', 'kill:dev-runtime'])
   const cloudDir = resolve(__dirname, '../../cloud')
   const hasCloudProject = existsSync(cloudDir)
   const roomScript = IS_WIN

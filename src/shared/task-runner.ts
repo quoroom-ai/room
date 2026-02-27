@@ -29,6 +29,7 @@ export interface TaskExecutionResult {
 }
 
 const runningTasks = new Set<number>()
+const taskAbortControllers = new Map<number, AbortController>()
 
 const SESSION_MAX_RUNS = 20
 const CONSOLE_LOG_FLUSH_INTERVAL_MS = 1000
@@ -140,8 +141,19 @@ async function executeWithRateLimitRetry(
   db: Database.Database,
   runId: number,
   taskId: number,
-  onConsoleLogEntry?: (entry: { runId: number; seq: number; entryType: string; content: string }) => void
+  onConsoleLogEntry?: (entry: { runId: number; seq: number; entryType: string; content: string }) => void,
+  abortSignal?: AbortSignal
 ): Promise<ExecutionResult> {
+  if (abortSignal?.aborted) {
+    return {
+      stdout: '',
+      stderr: 'Execution aborted',
+      exitCode: 130,
+      durationMs: 0,
+      timedOut: false,
+      sessionId: null
+    }
+  }
   let result = await executeClaudeCode(prompt, execOptions)
 
   let retries = 0
@@ -172,7 +184,7 @@ async function executeWithRateLimitRetry(
       onConsoleLogEntry?.(entry)
     } catch { /* non-fatal */ }
 
-    await sleep(rateLimitInfo.waitMs)
+    await sleep(rateLimitInfo.waitMs, abortSignal)
 
     queries.updateTaskRunProgress(db, runId, null, `Retrying after rate limit ${retryLabel}`)
 
@@ -188,7 +200,8 @@ async function executeWithRateLimitRetry(
           queries.updateTaskRunProgress(db, runId, progress.fraction, progress.message)
           lastProgressUpdate = now
         }
-      }
+      },
+      abortSignal
     })
     retryConsoleLog.flush()
   }
@@ -198,6 +211,19 @@ async function executeWithRateLimitRetry(
 
 export function isTaskRunning(taskId: number): boolean {
   return runningTasks.has(taskId)
+}
+
+export function cancelRunningTasksForRoom(db: Database.Database, roomId: number): number {
+  let canceled = 0
+  for (const taskId of runningTasks) {
+    const task = queries.getTask(db, taskId)
+    if (!task || task.roomId !== roomId) continue
+    const controller = taskAbortControllers.get(taskId)
+    if (!controller || controller.signal.aborted) continue
+    controller.abort()
+    canceled++
+  }
+  return canceled
 }
 
 export async function executeTask(
@@ -226,11 +252,14 @@ export async function executeTask(
   }
 
   const startTime = Date.now()
+  const taskAbort = new AbortController()
 
   if (task.executor === 'keeper_contact_check') {
     runningTasks.add(taskId)
+    taskAbortControllers.set(taskId, taskAbort)
     const run = queries.createTaskRun(db, taskId)
     try {
+      if (taskAbort.signal.aborted) throw new Error('Execution aborted')
       const contactEmail = queries.getSetting(db, 'contact_email')?.trim() ?? ''
       const emailVerifiedAt = queries.getSetting(db, 'contact_email_verified_at')?.trim() ?? ''
       const telegramId = queries.getSetting(db, 'contact_telegram_id')?.trim() ?? ''
@@ -264,13 +293,16 @@ export async function executeTask(
       return { success: false, output: '', errorMessage: errorMsg, durationMs: Date.now() - startTime }
     } finally {
       runningTasks.delete(taskId)
+      taskAbortControllers.delete(taskId)
     }
   }
 
   if (task.executor === 'keeper_reminder') {
     runningTasks.add(taskId)
+    taskAbortControllers.set(taskId, taskAbort)
     const run = queries.createTaskRun(db, taskId)
     try {
+      if (taskAbort.signal.aborted) throw new Error('Execution aborted')
       const reminderBody = task.prompt.trim() || task.description?.trim() || task.name.trim() || 'Scheduled reminder.'
       const roomName = task.roomId != null
         ? (queries.getRoom(db, task.roomId)?.name ?? `room #${task.roomId}`)
@@ -293,6 +325,7 @@ export async function executeTask(
       return { success: false, output: '', errorMessage: errorMsg, durationMs: Date.now() - startTime }
     } finally {
       runningTasks.delete(taskId)
+      taskAbortControllers.delete(taskId)
     }
   }
 
@@ -336,6 +369,7 @@ export async function executeTask(
   const isStationModel = model?.startsWith('openai:') || model?.startsWith('anthropic:') || model?.startsWith('claude-api:')
   if (isStationModel && task.roomId) {
     runningTasks.add(taskId)
+    taskAbortControllers.set(taskId, taskAbort)
     try {
       const cloudRoomId = getRoomCloudId(task.roomId)
       const stations = await listCloudStations(cloudRoomId)
@@ -365,13 +399,19 @@ export async function executeTask(
           const stationModel = model as string
           const apiKey = resolveApiKeyForModel(db, task.roomId, stationModel)
           const agentResult = await executeApiOnStation(cloudRoomId, station.id, {
-            model: stationModel, prompt: augmentedPrompt, systemPrompt, timeoutMs, apiKey,
+            model: stationModel, prompt: augmentedPrompt, systemPrompt, timeoutMs, apiKey, abortSignal: taskAbort.signal,
           })
 
           const result = agentResultToExecutionResult(agentResult)
+          if (taskAbort.signal.aborted) {
+            const errorMsg = 'Execution aborted'
+            queries.completeTaskRun(db, run.id, result.stdout || errorMsg, undefined, errorMsg)
+            onFailed?.(task, errorMsg)
+            return { success: false, output: result.stdout || '', errorMessage: errorMsg, durationMs: Date.now() - startTime }
+          }
           return finishRun(db, run.id, taskId, task, result, resultsDir, onComplete, onFailed)
         } catch (err) {
-          const errorMsg = err instanceof Error ? err.message : String(err)
+          const errorMsg = taskAbort.signal.aborted ? 'Execution aborted' : (err instanceof Error ? err.message : String(err))
           queries.completeTaskRun(db, run.id, '', undefined, errorMsg)
           onFailed?.(task, errorMsg)
           return { success: false, output: '', errorMessage: errorMsg, durationMs: Date.now() - startTime }
@@ -379,11 +419,12 @@ export async function executeTask(
       }
       // No active stations for API model — fall through to local execution
     } catch (err) {
-      const errorMsg = err instanceof Error ? err.message : String(err)
+      const errorMsg = taskAbort.signal.aborted ? 'Execution aborted' : (err instanceof Error ? err.message : String(err))
       onFailed?.(task, errorMsg)
       return { success: false, output: '', errorMessage: errorMsg, durationMs: Date.now() - startTime }
     } finally {
       runningTasks.delete(taskId)
+      taskAbortControllers.delete(taskId)
     }
   }
 
@@ -391,6 +432,7 @@ export async function executeTask(
   await acquireSlot(getMaxConcurrentTasks(db, task.roomId))
 
   runningTasks.add(taskId)
+  taskAbortControllers.set(taskId, taskAbort)
   const run = queries.createTaskRun(db, taskId)
 
   try {
@@ -464,13 +506,28 @@ export async function executeTask(
           queries.updateTaskRunProgress(db, run.id, progress.fraction, progress.message)
           lastProgressUpdate = now
         }
-      }
+      },
+      abortSignal: taskAbort.signal
     }
-    const result = await executeWithRateLimitRetry(augmentedPrompt, execOptions, db, run.id, taskId, onConsoleLogEntry)
+    const result = await executeWithRateLimitRetry(
+      augmentedPrompt,
+      execOptions,
+      db,
+      run.id,
+      taskId,
+      onConsoleLogEntry,
+      taskAbort.signal
+    )
     consoleLog.flush()
+    if (taskAbort.signal.aborted) {
+      const errorMsg = 'Execution aborted'
+      queries.completeTaskRun(db, run.id, result.stdout || '', undefined, errorMsg)
+      onFailed?.(task, errorMsg)
+      return { success: false, output: result.stdout || '', errorMessage: errorMsg, durationMs: Date.now() - startTime }
+    }
 
     // If resume failed, retry without session
-    if (result.exitCode !== 0 && resumeSessionId) {
+    if (result.exitCode !== 0 && resumeSessionId && !taskAbort.signal.aborted) {
       try {
         queries.clearTaskSession(db, taskId)
       } catch (err) { console.warn('Non-fatal: clear session failed:', err) }
@@ -506,22 +563,38 @@ export async function executeTask(
             queries.updateTaskRunProgress(db, run.id, progress.fraction, progress.message)
             lastProgressUpdate = now
           }
-        }
+        },
+        abortSignal: taskAbort.signal
       }
-      const retryResult = await executeWithRateLimitRetry(retryPrompt, retryExecOptions, db, run.id, taskId, onConsoleLogEntry)
+      const retryResult = await executeWithRateLimitRetry(
+        retryPrompt,
+        retryExecOptions,
+        db,
+        run.id,
+        taskId,
+        onConsoleLogEntry,
+        taskAbort.signal
+      )
       retryConsoleLog.flush()
+      if (taskAbort.signal.aborted) {
+        const errorMsg = 'Execution aborted'
+        queries.completeTaskRun(db, run.id, retryResult.stdout || '', undefined, errorMsg)
+        onFailed?.(task, errorMsg)
+        return { success: false, output: retryResult.stdout || '', errorMessage: errorMsg, durationMs: Date.now() - startTime }
+      }
 
       return finishRun(db, run.id, taskId, task, retryResult, resultsDir, onComplete, onFailed)
     }
 
     return finishRun(db, run.id, taskId, task, result, resultsDir, onComplete, onFailed)
   } catch (err) {
-    const errorMsg = err instanceof Error ? err.message : String(err)
+    const errorMsg = taskAbort.signal.aborted ? 'Execution aborted' : (err instanceof Error ? err.message : String(err))
     queries.completeTaskRun(db, run.id, '', undefined, errorMsg)
     onFailed?.(task, errorMsg)
     return { success: false, output: '', errorMessage: errorMsg, durationMs: Date.now() - startTime }
   } finally {
     runningTasks.delete(taskId)
+    taskAbortControllers.delete(taskId)
     releaseSlot()
   }
 }
