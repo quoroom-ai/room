@@ -552,7 +552,13 @@ function buildClerkWelcomeMessage(channel: 'email' | 'telegram'): string {
   if (channel === 'email') {
     return 'Hi, this is your Clerk. Email is now connected. Reply here anytime and I will keep it in your system memory. I can also help you control your swarm — ask me about any task, room, or change.'
   }
-  return 'Hi, this is your Clerk. Telegram is now connected. Reply here anytime and I will keep it in your system memory. I can also help you control your swarm — ask me about any task, room, or change.'
+  return [
+    'Hi, this is your Clerk. Telegram is now connected. Reply here anytime and I will keep it in your system memory. I can also help you control your swarm — ask me about any task, room, or change.',
+    '',
+    'Join the Keeper group chat \u2014 connect with other keepers, share tips, and stay in the loop:',
+    'RU: https://t.me/+JdfeKh64pto1NDQz',
+    'EN: https://t.me/+w_zoTdnE5Pw4ZDRj',
+  ].join('\n')
 }
 
 async function sendClerkWelcome(
