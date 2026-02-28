@@ -45,13 +45,40 @@ function isTestTag(tag: string): boolean {
   return /-test/i.test(tag)
 }
 
+function parseSemver(tag: string): [number, number, number] | null {
+  const cleaned = tag.trim().replace(/^v/i, '')
+  const match = cleaned.match(/^(\d+)\.(\d+)\.(\d+)(?:[-+].*)?$/)
+  if (!match) return null
+  return [Number(match[1]), Number(match[2]), Number(match[3])]
+}
+
+function compareSemver(a: [number, number, number], b: [number, number, number]): number {
+  for (let i = 0; i < 3; i++) {
+    if (a[i] > b[i]) return 1
+    if (a[i] < b[i]) return -1
+  }
+  return 0
+}
+
 function pickLatestStable(releases: GithubRelease[]): GithubRelease | null {
+  let firstStable: GithubRelease | null = null
+  let bestRelease: GithubRelease | null = null
+  let bestVersion: [number, number, number] | null = null
+
   for (const r of releases) {
     if (r.draft || r.prerelease) continue
     if (isTestTag(r.tag_name)) continue
-    return r
+    if (!firstStable) firstStable = r
+
+    const parsed = parseSemver(r.tag_name)
+    if (!parsed) continue
+
+    if (!bestVersion || compareSemver(parsed, bestVersion) > 0) {
+      bestVersion = parsed
+      bestRelease = r
+    }
   }
-  return null
+  return bestRelease ?? firstStable
 }
 
 function fetchJson(url: string): Promise<unknown> {
@@ -75,7 +102,7 @@ function fetchJson(url: string): Promise<unknown> {
 export async function forceCheck(): Promise<void> {
   try {
     const releases = await fetchJson(
-      'https://api.github.com/repos/quoroom-ai/room/releases?per_page=20'
+      'https://api.github.com/repos/quoroom-ai/room/releases?per_page=100'
     ) as GithubRelease[]
     if (!Array.isArray(releases)) return
 

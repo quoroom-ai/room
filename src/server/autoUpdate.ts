@@ -44,12 +44,10 @@ let status: AutoUpdateStatus = { state: 'idle' }
 let downloadInProgress = false
 
 export function getAutoUpdateStatus(): AutoUpdateStatus {
-  // Also check if an update is already staged
-  if (status.state === 'idle' && fs.existsSync(VERSION_FILE)) {
-    try {
-      const info: UpdateVersionInfo = JSON.parse(fs.readFileSync(VERSION_FILE, 'utf-8'))
-      return { state: 'ready', version: info.version }
-    } catch { /* ignore */ }
+  // Also check if a newer update is already staged
+  if (status.state === 'idle') {
+    const readyVersion = getReadyUpdateVersion()
+    if (readyVersion) return { state: 'ready', version: readyVersion }
   }
   return status
 }

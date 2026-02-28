@@ -858,6 +858,11 @@ export function startServer(options: ServerOptions = {}): void {
   const deploymentMode = getDeploymentMode()
   const bindHost = process.env.QUOROOM_BIND_HOST
     || (deploymentMode === 'cloud' ? DEFAULT_BIND_HOST_CLOUD : DEFAULT_BIND_HOST_LOCAL)
+
+  // Clean stale user-space updates before resolving static UI path.
+  // This prevents serving outdated ~/.quoroom/app/ui after a full installer upgrade.
+  initBootHealthCheck()
+
   // Prefer user-space UI (auto-updated) over bundled UI (from installer)
   if (!options.staticDir) {
     const userUiDir = path.join(USER_APP_DIR, 'ui')
@@ -891,9 +896,6 @@ export function startServer(options: ServerOptions = {}): void {
 
   // Start background update checker (polls GitHub every 4 hours)
   initUpdateChecker()
-
-  // Boot health check for auto-update rollback safety
-  initBootHealthCheck()
 
   // Start local runtime loops (task scheduler, room message sync).
   startServerRuntime(serverDb)

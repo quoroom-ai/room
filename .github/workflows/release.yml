@@ -135,7 +135,36 @@ jobs:
           RUNTIME="$DIR/../runtime/node"
           BUNDLED_CLI="$DIR/../lib/cli.js"
           BUNDLED_MODULES="$DIR/../lib/node_modules"
+          BUNDLED_PKG="$DIR/../lib/package.json"
           CLI="$BUNDLED_CLI"
+          BUNDLED_VERSION="0.0.0"
+
+          if [ -f "$BUNDLED_PKG" ]; then
+            BUNDLED_VERSION="$(sed -n 's/.*"version"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' "$BUNDLED_PKG" | head -n 1)"
+            [ -n "$BUNDLED_VERSION" ] || BUNDLED_VERSION="0.0.0"
+          fi
+
+          semver_gt() {
+            local a b a1 a2 a3 b1 b2 b3
+            a="$1"
+            b="$2"
+            a="${a%%[-+]*}"
+            b="${b%%[-+]*}"
+            IFS=. read -r a1 a2 a3 <<EOF
+$a
+EOF
+            IFS=. read -r b1 b2 b3 <<EOF
+$b
+EOF
+            a1=${a1:-0}; a2=${a2:-0}; a3=${a3:-0}
+            b1=${b1:-0}; b2=${b2:-0}; b3=${b3:-0}
+            [ "$a1" -gt "$b1" ] && return 0
+            [ "$a1" -lt "$b1" ] && return 1
+            [ "$a2" -gt "$b2" ] && return 0
+            [ "$a2" -lt "$b2" ] && return 1
+            [ "$a3" -gt "$b3" ] && return 0
+            return 1
+          }
 
           # Check for user-space auto-update (~/.quoroom/app/)
           USER_APP="$HOME/.quoroom/app"
@@ -144,21 +173,26 @@ jobs:
           CRASH_COUNT_FILE="$USER_APP/.crash_count"
 
           if [ -f "$USER_CLI" ] && [ -f "$USER_APP/version.json" ]; then
-            # Check for crash rollback: if boot marker exists, previous boot crashed
-            if [ -f "$BOOT_MARKER" ]; then
-              COUNT=$(cat "$CRASH_COUNT_FILE" 2>/dev/null || echo "0")
-              COUNT=$((COUNT + 1))
-              echo "$COUNT" > "$CRASH_COUNT_FILE"
-              if [ "$COUNT" -ge 3 ]; then
-                echo "Auto-update crashed 3 times, rolling back to bundled version" >&2
-                rm -rf "$USER_APP"
+            USER_VERSION="$(sed -n 's/.*"version"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' "$USER_APP/version.json" | head -n 1)"
+            if [ -n "$USER_VERSION" ] && semver_gt "$USER_VERSION" "$BUNDLED_VERSION"; then
+              # Check for crash rollback: if boot marker exists, previous boot crashed
+              if [ -f "$BOOT_MARKER" ]; then
+                COUNT=$(cat "$CRASH_COUNT_FILE" 2>/dev/null || echo "0")
+                COUNT=$((COUNT + 1))
+                echo "$COUNT" > "$CRASH_COUNT_FILE"
+                if [ "$COUNT" -ge 3 ]; then
+                  echo "Auto-update crashed 3 times, rolling back to bundled version" >&2
+                  rm -rf "$USER_APP"
+                fi
               fi
-            fi
 
-            # Re-check after potential rollback
-            if [ -f "$USER_CLI" ]; then
-              CLI="$USER_CLI"
-              export NODE_PATH="$BUNDLED_MODULES"
+              # Re-check after potential rollback
+              if [ -f "$USER_CLI" ]; then
+                CLI="$USER_CLI"
+                export NODE_PATH="$BUNDLED_MODULES"
+              fi
+            else
+              rm -rf "$USER_APP"
             fi
           fi
 
@@ -543,7 +577,36 @@ jobs:
           RUNTIME="$DIR/../runtime/node"
           BUNDLED_CLI="$DIR/../lib/cli.js"
           BUNDLED_MODULES="$DIR/../lib/node_modules"
+          BUNDLED_PKG="$DIR/../lib/package.json"
           CLI="$BUNDLED_CLI"
+          BUNDLED_VERSION="0.0.0"
+
+          if [ -f "$BUNDLED_PKG" ]; then
+            BUNDLED_VERSION="$(sed -n 's/.*"version"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' "$BUNDLED_PKG" | head -n 1)"
+            [ -n "$BUNDLED_VERSION" ] || BUNDLED_VERSION="0.0.0"
+          fi
+
+          semver_gt() {
+            local a b a1 a2 a3 b1 b2 b3
+            a="$1"
+            b="$2"
+            a="${a%%[-+]*}"
+            b="${b%%[-+]*}"
+            IFS=. read -r a1 a2 a3 <<EOF
+$a
+EOF
+            IFS=. read -r b1 b2 b3 <<EOF
+$b
+EOF
+            a1=${a1:-0}; a2=${a2:-0}; a3=${a3:-0}
+            b1=${b1:-0}; b2=${b2:-0}; b3=${b3:-0}
+            [ "$a1" -gt "$b1" ] && return 0
+            [ "$a1" -lt "$b1" ] && return 1
+            [ "$a2" -gt "$b2" ] && return 0
+            [ "$a2" -lt "$b2" ] && return 1
+            [ "$a3" -gt "$b3" ] && return 0
+            return 1
+          }
 
           # Check for user-space auto-update (~/.quoroom/app/)
           USER_APP="$HOME/.quoroom/app"
@@ -552,18 +615,23 @@ jobs:
           CRASH_COUNT_FILE="$USER_APP/.crash_count"
 
           if [ -f "$USER_CLI" ] && [ -f "$USER_APP/version.json" ]; then
-            if [ -f "$BOOT_MARKER" ]; then
-              COUNT=$(cat "$CRASH_COUNT_FILE" 2>/dev/null || echo "0")
-              COUNT=$((COUNT + 1))
-              echo "$COUNT" > "$CRASH_COUNT_FILE"
-              if [ "$COUNT" -ge 3 ]; then
-                echo "Auto-update crashed 3 times, rolling back to bundled version" >&2
-                rm -rf "$USER_APP"
+            USER_VERSION="$(sed -n 's/.*"version"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' "$USER_APP/version.json" | head -n 1)"
+            if [ -n "$USER_VERSION" ] && semver_gt "$USER_VERSION" "$BUNDLED_VERSION"; then
+              if [ -f "$BOOT_MARKER" ]; then
+                COUNT=$(cat "$CRASH_COUNT_FILE" 2>/dev/null || echo "0")
+                COUNT=$((COUNT + 1))
+                echo "$COUNT" > "$CRASH_COUNT_FILE"
+                if [ "$COUNT" -ge 3 ]; then
+                  echo "Auto-update crashed 3 times, rolling back to bundled version" >&2
+                  rm -rf "$USER_APP"
+                fi
               fi
-            fi
-            if [ -f "$USER_CLI" ]; then
-              CLI="$USER_CLI"
-              export NODE_PATH="$BUNDLED_MODULES"
+              if [ -f "$USER_CLI" ]; then
+                CLI="$USER_CLI"
+                export NODE_PATH="$BUNDLED_MODULES"
+              fi
+            else
+              rm -rf "$USER_APP"
             fi
           fi
 
@@ -681,12 +749,17 @@ jobs:
           # CMD wrapper — checks for auto-updates, prefer bundled runtime, fallback to system node
           @'
           @echo off
-          setlocal
+          setlocal EnableExtensions EnableDelayedExpansion
           set "RUNTIME=%~dp0\..\runtime\node.exe"
           set "BUNDLED_CLI=%~dp0\..\lib\cli.js"
           set "BUNDLED_MODULES=%~dp0\..\lib\node_modules"
+          set "BUNDLED_PKG=%~dp0\..\lib\package.json"
           set "CLI=%BUNDLED_CLI%"
           set "STATUS=1"
+          set "BUNDLED_VERSION=0.0.0"
+          if exist "%BUNDLED_PKG%" (
+            for /f %%A in ('powershell -NoProfile -ExecutionPolicy Bypass -Command "try { (Get-Content -Raw '%BUNDLED_PKG%' | ConvertFrom-Json).version } catch { '' }"') do set "BUNDLED_VERSION=%%A"
+          )
 
           rem Check for user-space auto-update
           set "USER_APP=%USERPROFILE%\.quoroom\app"
@@ -696,7 +769,15 @@ jobs:
 
           if not exist "%USER_CLI%" goto no_update
           if not exist "%USER_APP%\version.json" goto no_update
+          set "USER_VERSION="
+          for /f %%A in ('powershell -NoProfile -ExecutionPolicy Bypass -Command "try { (Get-Content -Raw '%USER_APP%\version.json' | ConvertFrom-Json).version } catch { '' }"') do set "USER_VERSION=%%A"
+          if not defined USER_VERSION goto no_update
+          call :SemverGt "%USER_VERSION%" "%BUNDLED_VERSION%"
+          if errorlevel 1 goto update_candidate
+          rmdir /s /q "%USER_APP%" 2>NUL
+          goto no_update
 
+          :update_candidate
           if not exist "%BOOT_MARKER%" goto use_update
           rem Previous boot crashed — increment crash counter
           set /a COUNT=0
@@ -738,6 +819,31 @@ jobs:
 
           node "%CLI%" %*
           exit /b %ERRORLEVEL%
+
+          :SemverGt
+          setlocal EnableDelayedExpansion
+          set "A=%~1"
+          set "B=%~2"
+          for /f "tokens=1-3 delims=. -+" %%a in ("!A!") do (
+            set "A1=%%a"
+            set "A2=%%b"
+            set "A3=%%c"
+          )
+          for /f "tokens=1-3 delims=. -+" %%a in ("!B!") do (
+            set "B1=%%a"
+            set "B2=%%b"
+            set "B3=%%c"
+          )
+          for %%v in (A1 A2 A3 B1 B2 B3) do if not defined %%v set "%%v=0"
+          for %%v in (A1 A2 A3 B1 B2 B3) do (
+            for /f "delims=0123456789" %%x in ("!%%v!") do set "%%v=0"
+          )
+          if !A1! GTR !B1! (endlocal & exit /b 1)
+          if !A1! LSS !B1! (endlocal & exit /b 0)
+          if !A2! GTR !B2! (endlocal & exit /b 1)
+          if !A2! LSS !B2! (endlocal & exit /b 0)
+          if !A3! GTR !B3! (endlocal & exit /b 1)
+          endlocal & exit /b 0
           '@ | Set-Content -Path staging/quoroom/bin/quoroom.cmd
 
           # Copy built output
