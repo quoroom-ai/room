@@ -59,14 +59,21 @@ Write-Log "Tray started. OpenWhenReady=$([bool]$OpenWhenReady)"
 
 # Process helpers
 
+function Is-QuoroomProcess([object]$proc) {
+  $exe = if ($proc.ExecutablePath) { $proc.ExecutablePath.ToLowerInvariant() } else { '' }
+  $cmd = if ($proc.CommandLine)    { $proc.CommandLine.ToLowerInvariant()    } else { '' }
+  if ($exe.Contains($installRootLower) -or $cmd.Contains($installRootLower)) { return $true }
+  if ($cmd.Contains('quoroom-tray.ps1') -or $cmd.Contains('quoroom-launch.vbs')) { return $true }
+  if ($cmd.Contains('\quoroom\bin\quoroom.cmd')) { return $true }
+  # Broad sweep: any node.exe with 'quoroom' in its command line (catches orphaned children)
+  if ($proc.Name -eq 'node.exe' -and $cmd.Contains('quoroom')) { return $true }
+  return $false
+}
+
 function Find-ServerProcs {
-  @(Get-CimInstance Win32_Process -Filter "Name='node.exe' OR Name='cmd.exe'" -EA SilentlyContinue |
-    Where-Object {
-      $exe = if ($_.ExecutablePath) { $_.ExecutablePath.ToLowerInvariant() } else { '' }
-      $cmd = if ($_.CommandLine)    { $_.CommandLine.ToLowerInvariant()    } else { '' }
-      $exe.Contains($installRootLower + '\runtime\node.exe') -or
-      ($cmd.Contains($installRootLower) -and ($cmd.Contains(' serve') -or $cmd.Contains('\lib\cli.js')))
-    })
+  $filter = "Name='node.exe' OR Name='cmd.exe' OR Name='powershell.exe' OR Name='pwsh.exe' OR Name='wscript.exe' OR Name='cscript.exe'"
+  @(Get-CimInstance Win32_Process -Filter $filter -EA SilentlyContinue |
+    Where-Object { $_.ProcessId -ne $PID -and (Is-QuoroomProcess $_) })
 }
 
 function Stop-PidTree([int]$pid) {
@@ -79,16 +86,26 @@ function Stop-PidTree([int]$pid) {
 }
 
 function Stop-Server {
-  foreach ($p in Find-ServerProcs) {
-    Stop-PidTree $p.ProcessId
+  for ($attempt = 0; $attempt -lt 3; $attempt++) {
+    # Kill by port ownership first (catches zombie/elevated processes)
+    $portOwners = Get-NetTCPConnection -LocalPort 3700 -EA SilentlyContinue |
+      Where-Object { $_.OwningProcess -gt 4 -and $_.OwningProcess -ne $PID } |
+      Select-Object -ExpandProperty OwningProcess -Unique
+    foreach ($portProc in $portOwners) { Stop-PidTree $portProc }
+
+    # Kill by comprehensive pattern match
+    $targets = Find-ServerProcs
+    if ($targets.Count -eq 0 -and $portOwners.Count -eq 0) { break }
+    foreach ($p in $targets) { Stop-PidTree $p.ProcessId }
+
+    Start-Sleep -Milliseconds 600
   }
-  # Also kill anything owning port 3700 (catches zombie/elevated processes)
-  $portOwners = Get-NetTCPConnection -LocalPort 3700 -EA SilentlyContinue |
+
+  # Final sweep: any remaining port 3700 owners
+  $remaining = Get-NetTCPConnection -LocalPort 3700 -EA SilentlyContinue |
     Where-Object { $_.OwningProcess -gt 4 -and $_.OwningProcess -ne $PID } |
     Select-Object -ExpandProperty OwningProcess -Unique
-  foreach ($portProc in $portOwners) {
-    Stop-PidTree $portProc
-  }
+  foreach ($portProc in $remaining) { Stop-PidTree $portProc }
 }
 
 # On startup: evict anything occupying port 3700 so our server can bind cleanly.
@@ -189,7 +206,7 @@ $restartItem.Add_Click({
   $script:procRunning = $false
   $script:lastStartAt = [DateTime]::MinValue
   $script:startedAt   = [DateTime]::MinValue
-  Start-Sleep -Milliseconds 300
+  Start-Sleep -Milliseconds 600
   Try-StartServer
   Refresh-Ui
 })
@@ -198,6 +215,7 @@ $quitItem.Add_Click({
   $script:quitting = $true
   Refresh-Ui
   Stop-Server
+  Start-Sleep -Milliseconds 800
   [System.Windows.Forms.Application]::Exit()
 })
 

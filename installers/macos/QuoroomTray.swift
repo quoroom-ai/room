@@ -259,6 +259,16 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         if hadRemaining {
             Thread.sleep(forTimeInterval: 0.5)
         }
+
+        // Complementary sweep: catch any orphaned quoroom processes not in the port tree
+        // (e.g. agent subprocesses that detached via setsid before the server was killed).
+        let pkill = Process()
+        pkill.executableURL = URL(fileURLWithPath: "/usr/bin/pkill")
+        pkill.arguments = ["-f", "quoroom serve"]
+        pkill.standardOutput = FileHandle.nullDevice
+        pkill.standardError = FileHandle.nullDevice
+        try? pkill.run()
+        pkill.waitUntilExit()
     }
 
     // MARK: - Menu Actions

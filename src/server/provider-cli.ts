@@ -1,4 +1,7 @@
 import { execFileSync } from 'node:child_process'
+import { readFileSync } from 'node:fs'
+import { join } from 'node:path'
+import { homedir } from 'node:os'
 
 type ProviderName = 'codex' | 'claude'
 
@@ -42,11 +45,18 @@ export function probeProviderInstalled(provider: ProviderName): { installed: boo
 }
 
 export function probeProviderConnected(provider: ProviderName): boolean | null {
-  // Claude Code has no `auth status` subcommand — all interactive commands
-  // require a TTY and hang in headless contexts. Subscription users are
-  // automatically authenticated when installed, so treat installed = connected.
   if (provider === 'claude') {
-    return probeProviderInstalled('claude').installed ? true : null
+    if (!probeProviderInstalled('claude').installed) return null
+    // API key auth — no credentials file needed
+    if (process.env.ANTHROPIC_API_KEY) return true
+    // OAuth auth — check credentials file created by `claude login`
+    const credFile = join(homedir(), '.claude', '.credentials.json')
+    try {
+      const creds = JSON.parse(readFileSync(credFile, 'utf-8'))
+      return creds?.claudeAiOAuth?.accessToken ? true : false
+    } catch {
+      return false
+    }
   }
 
   const cmd = getProviderCliCommand(provider)
