@@ -268,6 +268,12 @@ const MIME_TYPES: Record<string, string> = {
   '.webmanifest': 'application/manifest+json',
 }
 
+const NO_CACHE_RESPONSE_HEADERS: Readonly<Record<string, string>> = {
+  'Cache-Control': 'no-cache, no-store, must-revalidate',
+  'Pragma': 'no-cache',
+  'Expires': '0',
+}
+
 const PROFILE_HTTP = process.env.QUOROOM_PROFILE_HTTP === '1'
 const PROFILE_HTTP_SLOW_MS = Math.max(1, Number.parseInt(process.env.QUOROOM_PROFILE_HTTP_SLOW_MS ?? '300', 10) || 300)
 const PROFILE_HTTP_ENDPOINTS = new Set([
@@ -301,37 +307,6 @@ function maybeLogHttpProfile(method: string, pathname: string, statusCode: numbe
   console.error(`[http-prof] ${method} ${normalized} -> ${statusCode} (${durationMs}ms)${slowMark}`)
 }
 
-function getCacheControl(filePath: string, ext: string): string {
-  const normalized = filePath.replace(/\\/g, '/')
-  const base = path.basename(filePath)
-
-  if (base === 'sw.js') return 'no-cache, no-store, must-revalidate'
-  if (ext === '.html') return 'no-cache, no-store, must-revalidate'
-  if (ext === '.webmanifest') return 'public, max-age=3600'
-  if (base === 'social.png' || base.startsWith('social-')) {
-    // Social preview images rotate; force frequent revalidation.
-    return 'no-cache, max-age=0, must-revalidate'
-  }
-
-  if (normalized.includes('/assets/') && /-[A-Za-z0-9_-]{8,}\./.test(base)) {
-    return 'public, max-age=31536000, immutable'
-  }
-
-  if (
-    base.startsWith('icon-')
-    || base === 'apple-touch-icon.png'
-    || ['.png', '.jpg', '.jpeg', '.svg', '.ico', '.webp', '.woff', '.woff2'].includes(ext)
-  ) {
-    return 'public, max-age=604800'
-  }
-
-  if (ext === '.js' || ext === '.css') {
-    return 'public, max-age=3600'
-  }
-
-  return 'no-cache, max-age=0'
-}
-
 function serveStatic(staticDir: string, pathname: string, res: http.ServerResponse): void {
   // Prevent directory traversal
   const safePath = path.normalize(pathname).replace(/^(\.\.[/\\])+/, '')
@@ -348,7 +323,7 @@ function serveStatic(staticDir: string, pathname: string, res: http.ServerRespon
     if (path.extname(safePath)) {
       res.writeHead(404, {
         'Content-Type': 'text/plain; charset=utf-8',
-        'Cache-Control': 'no-cache, no-store, must-revalidate',
+        ...NO_CACHE_RESPONSE_HEADERS,
       })
       res.end('Not Found')
       return
@@ -360,8 +335,9 @@ function serveStatic(staticDir: string, pathname: string, res: http.ServerRespon
   const contentType = MIME_TYPES[ext] ?? 'application/octet-stream'
   const headers: Record<string, string> = {
     'Content-Type': contentType,
-    'Cache-Control': getCacheControl(filePath, ext),
+    ...NO_CACHE_RESPONSE_HEADERS,
   }
+  if (ext === '.html') headers['Clear-Site-Data'] = '"cache"'
 
   const stream = fs.createReadStream(filePath)
   stream.on('open', () => {
@@ -370,10 +346,26 @@ function serveStatic(staticDir: string, pathname: string, res: http.ServerRespon
   })
   stream.on('error', () => {
     if (!res.headersSent) {
-      res.writeHead(404, { 'Content-Type': 'text/plain' })
+      res.writeHead(404, {
+        'Content-Type': 'text/plain; charset=utf-8',
+        ...NO_CACHE_RESPONSE_HEADERS,
+      })
     }
     res.end('Not Found')
   })
+}
+
+function resolveStaticDirForStart(): string | undefined {
+  const userUiDir = path.join(USER_APP_DIR, 'ui')
+  const bundledUiDir = path.join(__dirname, '../ui')
+  const readyVersion = getReadyUpdateVersion()
+  if (readyVersion && fs.existsSync(path.join(userUiDir, 'index.html'))) {
+    return userUiDir
+  }
+  if (fs.existsSync(bundledUiDir)) {
+    return bundledUiDir
+  }
+  return undefined
 }
 
 // ─── Rate limiting (cloud mode only) ───────────────────────────
@@ -453,7 +445,7 @@ export function createApiServer(options: ServerOptions = {}): {
 
     // CORS preflight
     if (req.method === 'OPTIONS') {
-      const headers: Record<string, string> = {}
+      const headers: Record<string, string> = { ...NO_CACHE_RESPONSE_HEADERS }
       setCorsHeaders(origin, headers)
       res.writeHead(204, headers)
       res.end()
@@ -461,7 +453,8 @@ export function createApiServer(options: ServerOptions = {}): {
     }
 
     const responseHeaders: Record<string, string> = {
-      'Content-Type': 'application/json'
+      'Content-Type': 'application/json',
+      ...NO_CACHE_RESPONSE_HEADERS,
     }
     // Security headers for cloud mode
     if (isCloudDeployment()) {
@@ -499,9 +492,6 @@ export function createApiServer(options: ServerOptions = {}): {
     if (pathname === '/api/auth/handshake' && req.method === 'GET') {
       const handshakeHeaders: Record<string, string> = {
         ...responseHeaders,
-        'Cache-Control': 'no-store, no-cache, must-revalidate, proxy-revalidate',
-        'Pragma': 'no-cache',
-        'Expires': '0',
       }
       if (isCloudDeployment()) {
         res.writeHead(403, handshakeHeaders)
@@ -698,7 +688,10 @@ export function createApiServer(options: ServerOptions = {}): {
     if (options.staticDir) {
       serveStatic(options.staticDir, pathname, res)
     } else {
-      res.writeHead(404, { 'Content-Type': 'text/plain' })
+      res.writeHead(404, {
+        'Content-Type': 'text/plain; charset=utf-8',
+        ...NO_CACHE_RESPONSE_HEADERS,
+      })
       res.end('Not Found')
     }
   })
@@ -865,13 +858,7 @@ export function startServer(options: ServerOptions = {}): void {
 
   // Prefer user-space UI (auto-updated) over bundled UI (from installer)
   if (!options.staticDir) {
-    const userUiDir = path.join(USER_APP_DIR, 'ui')
-    const bundledUiDir = path.join(__dirname, '../ui')
-    if (fs.existsSync(path.join(userUiDir, 'index.html'))) {
-      options.staticDir = userUiDir
-    } else if (fs.existsSync(bundledUiDir)) {
-      options.staticDir = bundledUiDir
-    }
+    options.staticDir = resolveStaticDirForStart()
   }
   const dbPath = process.env.QUOROOM_DB_PATH || path.join(options.dataDir ?? getDataDir(), 'data.db')
   const { server, token, db: serverDb } = createApiServer(options)
@@ -994,4 +981,9 @@ export function startServer(options: ServerOptions = {}): void {
 }
 
 /** @internal exported for testing */
-export { windowsQuote as _windowsQuote, shellQuote as _shellQuote, isLoopbackAddress as _isLoopbackAddress }
+export {
+  windowsQuote as _windowsQuote,
+  shellQuote as _shellQuote,
+  isLoopbackAddress as _isLoopbackAddress,
+  resolveStaticDirForStart as _resolveStaticDirForStart,
+}

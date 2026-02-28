@@ -1,4 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { mkdtempSync, mkdirSync, writeFileSync, existsSync, rmSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 
 let mockExecSync: ReturnType<typeof vi.fn>
 
@@ -93,5 +96,54 @@ describe('extractTarGz', () => {
     // JSON.stringify wraps paths in double quotes
     expect(cmd).toContain('"/path/with spaces/file.tar.gz"')
     expect(cmd).toContain('"/dest with spaces"')
+  })
+})
+
+describe('initBootHealthCheck', () => {
+  it('removes unversioned legacy user app cache', async () => {
+    vi.resetModules()
+    vi.useFakeTimers()
+    const fakeHome = mkdtempSync(join(tmpdir(), 'quoroom-auto-update-home-'))
+    const userAppDir = join(fakeHome, '.quoroom', 'app')
+    mkdirSync(join(userAppDir, 'ui'), { recursive: true })
+    writeFileSync(join(userAppDir, 'ui', 'index.html'), '<html>old</html>')
+
+    try {
+      vi.doMock('node:os', async () => {
+        const actual = await vi.importActual<typeof import('node:os')>('node:os')
+        return { ...actual, homedir: () => fakeHome }
+      })
+      const mod = await import('../autoUpdate')
+      mod.initBootHealthCheck()
+      vi.runAllTimers()
+      expect(existsSync(userAppDir)).toBe(false)
+    } finally {
+      vi.useRealTimers()
+      rmSync(fakeHome, { recursive: true, force: true })
+    }
+  })
+
+  it('keeps versioned user app when version is newer than bundled', async () => {
+    vi.resetModules()
+    vi.useFakeTimers()
+    const fakeHome = mkdtempSync(join(tmpdir(), 'quoroom-auto-update-home-'))
+    const userAppDir = join(fakeHome, '.quoroom', 'app')
+    mkdirSync(userAppDir, { recursive: true })
+    writeFileSync(join(userAppDir, 'version.json'), JSON.stringify({ version: '999.0.0' }))
+
+    try {
+      vi.doMock('node:os', async () => {
+        const actual = await vi.importActual<typeof import('node:os')>('node:os')
+        return { ...actual, homedir: () => fakeHome }
+      })
+      const mod = await import('../autoUpdate')
+      mod.initBootHealthCheck()
+      vi.runAllTimers()
+      expect(existsSync(userAppDir)).toBe(true)
+      expect(existsSync(join(userAppDir, 'version.json'))).toBe(true)
+    } finally {
+      vi.useRealTimers()
+      rmSync(fakeHome, { recursive: true, force: true })
+    }
   })
 })

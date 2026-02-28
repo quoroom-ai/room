@@ -21,11 +21,9 @@ import { ConnectPage } from './components/ConnectPage'
 import { WalkthroughModal } from './components/WalkthroughModal'
 import { UpdateModal } from './components/UpdateModal'
 import { CreateRoomModal } from './components/CreateRoomModal'
-import { KeepInDockModal } from './components/KeepInDockModal'
 import { ContactPromptModal, CONTACT_PROMPT_SEEN_KEY } from './components/ContactPromptModal'
 import { useNotifications } from './hooks/useNotifications'
 import { semverGt } from './lib/releases'
-import { useInstallPrompt } from './hooks/useInstallPrompt'
 import { useDocumentVisible } from './hooks/useDocumentVisible'
 import { api } from './lib/client'
 import { wsClient, type WsMessage } from './lib/ws'
@@ -44,8 +42,6 @@ const ADVANCED_TABS = new Set<Tab>(
 const ALL_TAB_IDS: Tab[] = ['clerk', 'swarm', 'status', 'goals', 'votes', 'messages', 'workers', 'tasks', 'skills', 'credentials', 'transactions', 'stations', 'room-settings', 'memory', 'settings', 'help']
 
 const DEFAULT_PORT = '3700'
-const KEEP_IN_DOCK_TIP_PENDING_KEY = 'quoroom_keep_in_dock_tip_pending'
-const KEEP_IN_DOCK_TIP_SEEN_KEY = 'quoroom_keep_in_dock_tip_seen'
 const isRemoteOrigin = location.hostname !== 'localhost' && location.hostname !== '127.0.0.1'
 const shouldProbeLocalServer = APP_MODE === 'local' && isRemoteOrigin
 
@@ -150,11 +146,8 @@ function App(): React.JSX.Element {
   const [queenModels, setQueenModels] = useState<Record<number, string | null>>({})
 
   useNotifications()
-  const installPrompt = useInstallPrompt()
   const isVisible = useDocumentVisible()
-  const [installDismissed, setInstallDismissed] = useState(() => storageGet('quoroom_install_dismissed') === 'true')
 
-  const [showKeepInDockTip, setShowKeepInDockTip] = useState(false)
   const [showWalkthrough, setShowWalkthrough] = useState(() => !storageGet('quoroom_walkthrough_seen'))
   const [showContactPrompt, setShowContactPrompt] = useState(false)
   const [contactPromptNeeded, setContactPromptNeeded] = useState(false)
@@ -189,26 +182,6 @@ function App(): React.JSX.Element {
       if (!redirected) setGate('connect')
     })
   }, [gate])
-
-  useEffect(() => {
-    if (installPrompt.installSignal <= 0) return
-    if (storageGet(KEEP_IN_DOCK_TIP_SEEN_KEY) === 'true') return
-    storageSet(KEEP_IN_DOCK_TIP_PENDING_KEY, 'true')
-  }, [installPrompt.installSignal])
-
-  useEffect(() => {
-    if (installPrompt.isInstalled) return
-    // Uninstall can leave origin storage behind; reset so reinstall can show tip.
-    storageRemove(KEEP_IN_DOCK_TIP_SEEN_KEY)
-    storageRemove(KEEP_IN_DOCK_TIP_PENDING_KEY)
-  }, [installPrompt.isInstalled])
-
-  useEffect(() => {
-    if (!installPrompt.isInstalled) return
-    if (storageGet(KEEP_IN_DOCK_TIP_SEEN_KEY) === 'true') return
-    if (storageGet(KEEP_IN_DOCK_TIP_PENDING_KEY) !== 'true') return
-    setShowKeepInDockTip(true)
-  }, [installPrompt.isInstalled])
 
   const fetchRoomBadges = useCallback(async (): Promise<void> => {
     if (!ready || expandedRoomId === null) {
@@ -605,9 +578,9 @@ function App(): React.JSX.Element {
       case 'room-settings':
         return <RoomSettingsPanel roomId={selectedRoomId} />
       case 'settings':
-        return <SettingsPanel advancedMode={advancedMode} onAdvancedModeChange={handleAdvancedModeChange} installPrompt={installPrompt} onNavigate={(t) => handleTabChange(t as Tab)} />
+        return <SettingsPanel advancedMode={advancedMode} onAdvancedModeChange={handleAdvancedModeChange} />
       case 'help':
-        return <HelpPanel installPrompt={installPrompt} onStartWalkthrough={() => setShowWalkthrough(true)} />
+        return <HelpPanel onStartWalkthrough={() => setShowWalkthrough(true)} />
       default:
         return <StatusPanel onNavigate={(t) => handleTabChange(t as Tab)} advancedMode={advancedMode} roomId={selectedRoomId} />
     }
@@ -638,12 +611,6 @@ function App(): React.JSX.Element {
       setRestartingServer(false)
       setError('Restart could not be triggered. Run "quoroom serve" in terminal, then Retry.')
     }
-  }
-
-  function handleDismissKeepInDockTip(): void {
-    setShowKeepInDockTip(false)
-    storageSet(KEEP_IN_DOCK_TIP_SEEN_KEY, 'true')
-    storageRemove(KEEP_IN_DOCK_TIP_PENDING_KEY)
   }
 
   if (gate === 'probing') {
@@ -920,43 +887,6 @@ function App(): React.JSX.Element {
           </div>
         )}
 
-        {deploymentMode !== 'cloud' && (installPrompt.canInstall || installPrompt.isManualInstallPlatform) && !installPrompt.isInstalled && !installDismissed && (
-          <div className="flex items-center gap-3 px-4 py-2 bg-brand-50 border-b border-brand-200">
-            <span className="text-sm text-brand-700 flex-1">
-              {installPrompt.canInstall
-                ? 'Install Quoroom as an app for quick access, Dock icon, and badge notifications.'
-                : 'Install Quoroom from your browser menu for quick access, Dock icon, and badge notifications.'}
-            </span>
-            <button
-              onClick={async () => {
-                if (installPrompt.canInstall) {
-                  const accepted = await installPrompt.install()
-                  if (!accepted) {
-                    setInstallDismissed(true)
-                    storageSet('quoroom_install_dismissed', 'true')
-                  }
-                } else {
-                  handleTabChange('help')
-                  setInstallDismissed(true)
-                  storageSet('quoroom_install_dismissed', 'true')
-                }
-              }}
-              className="text-sm px-4 py-1.5 bg-interactive text-text-invert rounded-lg hover:bg-interactive-hover shrink-0 font-medium transition-colors"
-            >
-              {installPrompt.canInstall ? 'Install' : 'How to install'}
-            </button>
-            <button
-              onClick={() => {
-                setInstallDismissed(true)
-                storageSet('quoroom_install_dismissed', 'true')
-              }}
-              className="text-brand-400 hover:text-brand-600 text-lg leading-none shrink-0 transition-colors"
-            >
-              &times;
-            </button>
-          </div>
-        )}
-
         {selectedRoom && tab !== 'swarm' && tab !== 'clerk' && tab !== 'settings' && tab !== 'help' && (() => {
           const running = selectedRoom.status === 'active' && queenRunning[selectedRoom.id]
           const paused = selectedRoom.status === 'paused'
@@ -1009,7 +939,7 @@ function App(): React.JSX.Element {
         />
       )}
       {showWalkthrough && (
-        <WalkthroughModal installPrompt={installPrompt} isCloudMode={deploymentMode === 'cloud'} onNavigateToHelp={() => handleTabChange('help')} onClose={() => {
+        <WalkthroughModal onClose={() => {
           setShowWalkthrough(false)
           handleTabChange('clerk')
           setClerkSetupLaunchKey((prev) => prev + 1)
@@ -1075,9 +1005,6 @@ function App(): React.JSX.Element {
             setUpdateDismissed(true)
           }}
         />
-      )}
-      {showKeepInDockTip && (
-        <KeepInDockModal onDismiss={handleDismissKeepInDockTip} />
       )}
     </div>
   )

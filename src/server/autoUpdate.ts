@@ -61,6 +61,15 @@ export function getAutoUpdateStatus(): AutoUpdateStatus {
  * If the server survives 30s, clears the marker + crash count.
  */
 export function initBootHealthCheck(): void {
+  // Legacy local cache cleanup: unversioned ~/.quoroom/app is invalid and can
+  // serve stale UI after upgrades.
+  if (fs.existsSync(USER_APP_DIR) && !fs.existsSync(VERSION_FILE)) {
+    try {
+      console.error('[auto-update] Removing legacy unversioned user app cache')
+      fs.rmSync(USER_APP_DIR, { recursive: true, force: true })
+    } catch { /* ignore */ }
+  }
+
   // Clean stale user-space updates: if user installed a full .pkg that is
   // equal or newer than the user-space version, delete ~/.quoroom/app/
   // so the wrapper script uses the bundled code and future auto-updates

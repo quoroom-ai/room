@@ -395,22 +395,40 @@ test.describe('UI — Mobile + PWA', () => {
     await openMenu.click()
     await expect(page.getByRole('button', { name: /^Help$/i })).toBeVisible({ timeout: 5_000 })
     await page.getByRole('button', { name: /^Help$/i }).first().click()
-    await expect(page.getByText('Install as App')).toBeVisible({ timeout: 5_000 })
+    await expect(page.getByText('Getting Started')).toBeVisible({ timeout: 5_000 })
+    await expect(page.getByText('Install as App')).toHaveCount(0)
 
-    await page.screenshot({ path: 'e2e/screenshots/ui-20-mobile-help-install.png', fullPage: true })
+    await page.screenshot({ path: 'e2e/screenshots/ui-20-mobile-help.png', fullPage: true })
   })
 
-  test('manifest and service worker endpoints are available', async ({ page }) => {
+  test('PWA endpoints are removed and responses are no-store', async ({ page }) => {
+    const rootRes = await page.request.get(`${base}/`)
+    expect(rootRes.ok()).toBeTruthy()
+    const rootCacheControl = rootRes.headers()['cache-control'] || ''
+    expect(rootCacheControl).toContain('no-cache')
+    expect(rootCacheControl).toContain('no-store')
+    expect(rootRes.headers()['pragma']).toBe('no-cache')
+    expect(rootRes.headers()['expires']).toBe('0')
+
+    const iconRes = await page.request.get(`${base}/favicon.ico`)
+    expect(iconRes.ok()).toBeTruthy()
+    const iconCacheControl = iconRes.headers()['cache-control'] || ''
+    expect(iconCacheControl).toContain('no-cache')
+    expect(iconCacheControl).toContain('no-store')
+
+    const token = getToken()
+    const apiStatusRes = await page.request.get(`${base}/api/status`, {
+      headers: { Authorization: `Bearer ${token}` }
+    })
+    expect(apiStatusRes.ok()).toBeTruthy()
+    const apiCacheControl = apiStatusRes.headers()['cache-control'] || ''
+    expect(apiCacheControl).toContain('no-cache')
+    expect(apiCacheControl).toContain('no-store')
+
     const manifestRes = await page.request.get(`${base}/manifest.webmanifest`)
-    expect(manifestRes.ok()).toBeTruthy()
-    const manifest = await manifestRes.json()
-    expect(manifest.name).toBe('Quoroom')
-    expect(Array.isArray(manifest.icons)).toBeTruthy()
-    expect(manifest.icons.length).toBeGreaterThan(5)
+    expect(manifestRes.status()).toBe(404)
 
     const swRes = await page.request.get(`${base}/sw.js?v=e2e`)
-    expect(swRes.ok()).toBeTruthy()
-    const swCacheControl = swRes.headers()['cache-control'] || ''
-    expect(swCacheControl).toContain('no-cache')
+    expect(swRes.status()).toBe(404)
   })
 })

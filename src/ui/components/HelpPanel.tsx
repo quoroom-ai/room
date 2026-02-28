@@ -1,12 +1,10 @@
-import type { InstallPrompt } from '../hooks/useInstallPrompt'
 import { APP_MODE } from '../lib/auth'
 
 interface HelpPanelProps {
-  installPrompt: InstallPrompt
   onStartWalkthrough?: () => void
 }
 
-export function HelpPanel({ installPrompt, onStartWalkthrough }: HelpPanelProps): React.JSX.Element {
+export function HelpPanel({ onStartWalkthrough }: HelpPanelProps): React.JSX.Element {
   return (
     <div className="p-4 space-y-4">
       {onStartWalkthrough && (
@@ -14,29 +12,26 @@ export function HelpPanel({ installPrompt, onStartWalkthrough }: HelpPanelProps)
           onClick={onStartWalkthrough}
           className="w-full py-2 text-sm font-medium text-brand-700 bg-status-warning-bg hover:bg-status-warning-bg border border-amber-200 rounded-lg transition-colors"
         >
-          Quick Start Guide →
+          Quick Start Guide -&gt;
         </button>
       )}
 
       <div className="grid grid-cols-2 gap-3">
-
-        {/* Getting Started */}
         <div className="flex flex-col">
           <h3 className="text-sm font-semibold text-text-secondary mb-1">Getting Started</h3>
           <div className="bg-surface-secondary shadow-sm rounded-lg p-3 space-y-2 text-sm text-text-secondary leading-relaxed flex-1">
             <p>
-              <span className="font-medium text-text-secondary">Create a Room</span> — a collective of agents working toward a goal. The queen starts coordinating immediately.
+              <span className="font-medium text-text-secondary">Create a Room</span> - a collective of agents working toward a goal. The queen starts coordinating immediately.
             </p>
             <p>
-              <span className="font-medium text-text-secondary">Workers</span> — the queen spawns workers and delegates tasks. They report back and escalate when needed.
+              <span className="font-medium text-text-secondary">Workers</span> - the queen spawns workers and delegates tasks. They report back and escalate when needed.
             </p>
             <p className="text-text-muted text-xs">
-              Example: &quot;Build a micro-SaaS product&quot; — watch the room brainstorm, plan, and execute.
+              Example: &quot;Build a micro-SaaS product&quot; - watch the room brainstorm, plan, and execute.
             </p>
           </div>
         </div>
 
-        {/* How It Works */}
         <div className="flex flex-col">
           <h3 className="text-sm font-semibold text-text-secondary mb-1">How It Works</h3>
           <div className="bg-surface-secondary rounded-lg p-3 space-y-2 text-sm text-text-secondary leading-relaxed flex-1">
@@ -45,8 +40,8 @@ export function HelpPanel({ installPrompt, onStartWalkthrough }: HelpPanelProps)
                 {APP_MODE === 'cloud' ? 'Your private server.' : '100% local.'}
               </span>{' '}
               {APP_MODE === 'cloud'
-                ? 'Database, agents, memory — everything stays on your cloud server.'
-                : 'Database, agents, memory — everything stays on your machine.'}
+                ? 'Database, agents, memory - everything stays on your cloud server.'
+                : 'Database, agents, memory - everything stays on your machine.'}
             </p>
             <p>
               {APP_MODE === 'cloud'
@@ -57,46 +52,44 @@ export function HelpPanel({ installPrompt, onStartWalkthrough }: HelpPanelProps)
             </p>
             <p className="text-xs text-text-muted">
               {APP_MODE === 'cloud'
-                ? 'Cloud server → SQLite → Room Settings model selection'
-                : <><span className="font-mono">quoroom serve</span> → SQLite → Room Settings model selection</>
+                ? 'Cloud server -> SQLite -> Room Settings model selection'
+                : <><span className="font-mono">quoroom serve</span> -&gt; SQLite -&gt; Room Settings model selection</>
               }
             </p>
           </div>
         </div>
 
-        {/* Key Concepts */}
         <div className="flex flex-col">
           <h3 className="text-sm font-semibold text-text-secondary mb-1">Key Concepts</h3>
           <div className="bg-surface-secondary shadow-sm rounded-lg p-3 space-y-2 text-sm text-text-secondary flex-1">
             <div className="flex gap-2">
               <span className="font-medium text-text-secondary shrink-0">Queen</span>
-              <span className="text-text-muted">— strategic brain, configurable model provider</span>
+              <span className="text-text-muted">- strategic brain, configurable model provider</span>
             </div>
             <div className="flex gap-2">
               <span className="font-medium text-text-secondary shrink-0">Worker</span>
-              <span className="text-text-muted">— executor, can inherit queen model or use a separate API model</span>
+              <span className="text-text-muted">- executor, can inherit queen model or use a separate API model</span>
             </div>
             <div className="flex gap-2">
               <span className="font-medium text-text-secondary shrink-0">Goals</span>
-              <span className="text-text-muted">— hierarchical objectives</span>
+              <span className="text-text-muted">- hierarchical objectives</span>
             </div>
             <div className="flex gap-2">
               <span className="font-medium text-text-secondary shrink-0">Skills</span>
-              <span className="text-text-muted">— reusable knowledge</span>
+              <span className="text-text-muted">- reusable knowledge</span>
             </div>
             <div className="flex gap-2">
               <span className="font-medium text-text-secondary shrink-0">Memory</span>
-              <span className="text-text-muted">— persistent knowledge graph</span>
+              <span className="text-text-muted">- persistent knowledge graph</span>
             </div>
           </div>
         </div>
 
-        {/* Quorum Voting */}
         <div className="flex flex-col">
           <h3 className="text-sm font-semibold text-text-secondary mb-1">Quorum Voting</h3>
           <div className="bg-surface-secondary shadow-sm rounded-lg p-3 space-y-2 text-sm text-text-secondary leading-relaxed flex-1">
             <p>
-              Any agent can propose an action. Proposals go to quorum — agents deliberate and vote. Majority wins by default.
+              Any agent can propose an action. Proposals go to quorum - agents deliberate and vote. Majority wins by default.
             </p>
             <p>
               Check the <span className="font-medium text-text-secondary">Votes</span> tab for active proposals and history.
@@ -104,7 +97,6 @@ export function HelpPanel({ installPrompt, onStartWalkthrough }: HelpPanelProps)
           </div>
         </div>
 
-        {/* Token Usage */}
         <div className="flex flex-col">
           <h3 className="text-sm font-semibold text-text-secondary mb-1">Controlling Token Usage</h3>
           <div className="bg-status-warning-bg rounded-lg p-3 space-y-2 text-sm text-text-secondary leading-relaxed flex-1">
@@ -114,19 +106,19 @@ export function HelpPanel({ installPrompt, onStartWalkthrough }: HelpPanelProps)
             <div className="space-y-2">
               <div className="flex gap-2">
                 <span className="font-medium text-brand-700 shrink-0">Cycle gap</span>
-                <span className="text-text-muted">— sleep between cycles. 5–15 min (Pro), 1–5 min (Max).</span>
+                <span className="text-text-muted">- sleep between cycles. 5-15 min (Pro), 1-5 min (Max).</span>
               </div>
               <div className="flex gap-2">
                 <span className="font-medium text-brand-700 shrink-0">Max turns</span>
-                <span className="text-text-muted">— tool calls per cycle. 3–5 for Pro, up to 10 for Max.</span>
+                <span className="text-text-muted">- tool calls per cycle. 3-5 for Pro, up to 10 for Max.</span>
               </div>
               <div className="flex gap-2">
                 <span className="font-medium text-brand-700 shrink-0">Quiet hours</span>
-                <span className="text-text-muted">— block a time window (e.g. 22:00–08:00) so she rests.</span>
+                <span className="text-text-muted">- block a time window (e.g. 22:00-08:00) so she rests.</span>
               </div>
             </div>
             <p className="text-xs text-text-muted pt-1 border-t border-amber-100">
-              <span className="font-medium text-text-secondary">Tip:</span> Set your Claude plan in Preferences — Quoroom applies safe defaults automatically.
+              <span className="font-medium text-text-secondary">Tip:</span> Set your Claude plan in Preferences - Quoroom applies safe defaults automatically.
             </p>
             <p className="text-xs text-text-muted">
               <span className="font-medium text-text-secondary">No token budget?</span>{' '}
@@ -134,50 +126,6 @@ export function HelpPanel({ installPrompt, onStartWalkthrough }: HelpPanelProps)
             </p>
           </div>
         </div>
-
-        {/* Install as App */}
-        <div className="flex flex-col">
-          <h3 className="text-sm font-semibold text-text-secondary mb-1">Install as App</h3>
-          <div className="bg-surface-secondary shadow-sm rounded-lg p-3 space-y-2 text-sm text-text-secondary flex-1">
-            {installPrompt.isInstalled ? (
-              <div className="flex items-center gap-2">
-                <span className="w-1.5 h-1.5 rounded-full bg-status-success" />
-                <span className="text-status-success font-medium">Installed</span>
-              </div>
-            ) : (
-              <>
-                <p className="text-text-muted">Install for Dock icon, badge notifications, and a clean window without browser UI.</p>
-                {installPrompt.canInstall && (
-                  <button
-                    onClick={installPrompt.install}
-                    className="w-full py-1.5 text-sm font-medium text-text-invert bg-interactive hover:bg-interactive-hover rounded-lg transition-colors"
-                  >
-                    Install Quoroom
-                  </button>
-                )}
-                {!installPrompt.canInstall && installPrompt.isManualInstallPlatform && (
-                  <p className="text-xs text-status-warning">
-                    Automatic prompt is unavailable on this browser. Use manual install steps below.
-                  </p>
-                )}
-              </>
-            )}
-            <div className="space-y-0.5 pt-1 border-t border-border-primary">
-              <p className="text-xs text-text-muted font-medium mb-0.5">Manual install:</p>
-              <p className="text-xs text-text-muted"><span className="font-medium text-text-secondary">Chrome/Edge</span> — Menu → Install Quoroom</p>
-              <p className="text-xs text-text-muted"><span className="font-medium text-text-secondary">Safari macOS</span> — File → Add to Dock</p>
-              <p className="text-xs text-text-muted"><span className="font-medium text-text-secondary">Chrome Android</span> — Menu → Add to Home screen</p>
-              <p className="text-xs text-text-muted"><span className="font-medium text-text-secondary">Safari iOS</span> — Share → Add to Home Screen</p>
-            </div>
-            {APP_MODE !== 'cloud' && (
-              <div className="space-y-0.5 pt-1 border-t border-border-primary">
-                <p className="text-xs text-text-muted font-medium mb-0.5">Uninstall:</p>
-                <p className="text-xs text-text-muted">Run <span className="font-mono text-text-secondary">quoroom uninstall</span> in Terminal to remove Quoroom and all data.</p>
-              </div>
-            )}
-          </div>
-        </div>
-
       </div>
 
       <div className="grid grid-cols-3 gap-2">

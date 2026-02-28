@@ -25,58 +25,11 @@ function redirectMisroutedGoogleCallback(): boolean {
 if (redirectMisroutedGoogleCallback()) {
   // Stop booting the local app shell while callback redirect is in progress.
 } else {
-ReactDOM.createRoot(document.getElementById('root')!).render(
-  <React.StrictMode>
-    <ErrorBoundary>
-      <App />
-    </ErrorBoundary>
-  </React.StrictMode>
-)
-}
-
-if ('serviceWorker' in navigator) {
-  const fallbackBuildId = typeof __APP_BUILD_ID__ !== 'undefined' ? __APP_BUILD_ID__ : 'dev'
-  const swBuildId = (import.meta.env.VITE_SW_BUILD_ID || fallbackBuildId).trim()
-  const swUrl = `/sw.js?v=${encodeURIComponent(swBuildId)}`
-  const host = location.hostname
-  const isLocalhost = host === 'localhost' || host === '127.0.0.1' || host === '::1' || host === '[::1]'
-
-  if (isLocalhost) {
-    // Local runtime: always clear SW + caches to avoid stale shell/API mismatches.
-    // This keeps localhost startup deterministic across upgrades.
-    navigator.serviceWorker.getRegistrations().then((regs) => {
-      for (const reg of regs) {
-        void reg.unregister()
-      }
-    }).catch(() => {})
-
-    if ('caches' in window) {
-      caches.keys().then((keys) => Promise.all(keys.map((k) => caches.delete(k)))).catch(() => {})
-    }
-  } else {
-    let refreshing = false
-    const hadController = !!navigator.serviceWorker.controller
-    navigator.serviceWorker.addEventListener('controllerchange', () => {
-      if (!hadController) return // First install — don't reload.
-      if (refreshing) return
-      refreshing = true
-      window.location.reload()
-    })
-
-    navigator.serviceWorker.register(swUrl).then((registration) => {
-      registration.update().catch(() => {})
-      if (registration.waiting) {
-        registration.waiting.postMessage({ type: 'SKIP_WAITING' })
-      }
-      registration.addEventListener('updatefound', () => {
-        const worker = registration.installing
-        if (!worker) return
-        worker.addEventListener('statechange', () => {
-          if (worker.state === 'installed' && navigator.serviceWorker.controller) {
-            worker.postMessage({ type: 'SKIP_WAITING' })
-          }
-        })
-      })
-    }).catch(() => {})
-  }
+  ReactDOM.createRoot(document.getElementById('root')!).render(
+    <React.StrictMode>
+      <ErrorBoundary>
+        <App />
+      </ErrorBoundary>
+    </React.StrictMode>
+  )
 }

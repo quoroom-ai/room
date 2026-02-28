@@ -1,6 +1,5 @@
 import { useState, type ReactNode } from 'react'
 import { APP_MODE } from '../lib/auth'
-import type { InstallPrompt } from '../hooks/useInstallPrompt'
 import { storageSet } from '../lib/storage'
 
 const isCloud = APP_MODE === 'cloud'
@@ -8,11 +7,11 @@ const isCloud = APP_MODE === 'cloud'
 const steps = [
   {
     title: 'You are the Keeper',
-    body: 'Your room is a swarm of AI agents. A Queen is created automatically when you start — pick her brain in Settings: Claude, Codex, OpenAI, or Anthropic API.',
+    body: 'Your room is a swarm of AI agents. A Queen is created automatically when you start - pick her brain in Settings: Claude, Codex, OpenAI, or Anthropic API.',
   },
   {
     title: 'The Queen leads',
-    body: "The Queen strategizes, plans, and assigns work. She's the most powerful agent in the room. Choose her model wisely — smarter models give better results but may cost more.",
+    body: "The Queen strategizes, plans, and assigns work. She's the most powerful agent in the room. Choose her model wisely - smarter models give better results but may cost more.",
   },
   {
     title: 'Workers multiply',
@@ -23,12 +22,12 @@ const steps = [
   {
     title: 'Need more power? Rent stations',
     body: isCloud
-      ? 'Stations add extra compute to your room — workers go to stations while the Queen stays on your server.'
-      : 'Workers can run on rented cloud stations. This offloads compute from your machine — the Queen stays local, workers go remote.',
+      ? 'Stations add extra compute to your room - workers go to stations while the Queen stays on your server.'
+      : 'Workers can run on rented cloud stations. This offloads compute from your machine - the Queen stays local, workers go remote.',
   },
   {
     title: 'Democracy in the swarm',
-    body: "Every important decision is made by vote. Until there are workers, it's just you and the Queen — you both have a say. Add workers and they can outvote you. Use Auto or Semi mode to control what the swarm does.",
+    body: "Every important decision is made by vote. Until there are workers, it's just you and the Queen - you both have a say. Add workers and they can outvote you.",
   },
   {
     title: 'Control everything with Clerk',
@@ -47,12 +46,9 @@ function emphasizeRoleWords(text: string): ReactNode[] {
 
 interface WalkthroughModalProps {
   onClose: () => void
-  installPrompt: InstallPrompt
-  onNavigateToHelp: () => void
-  isCloudMode?: boolean
 }
 
-export function WalkthroughModal({ onClose, installPrompt, onNavigateToHelp, isCloudMode }: WalkthroughModalProps): React.JSX.Element {
+export function WalkthroughModal({ onClose }: WalkthroughModalProps): React.JSX.Element {
   const [step, setStep] = useState(0)
   const isLast = step === steps.length - 1
 
@@ -99,37 +95,10 @@ export function WalkthroughModal({ onClose, installPrompt, onNavigateToHelp, isC
           )}
           <button
             onClick={handleNext}
-            className={isLast && !installPrompt.isInstalled && !isCloudMode
-              ? 'text-sm text-text-muted hover:text-text-secondary transition-colors'
-              : 'px-5 py-2 text-sm font-medium text-text-invert bg-interactive hover:bg-interactive-hover rounded-lg transition-colors'}
+            className="px-5 py-2 text-sm font-medium text-text-invert bg-interactive hover:bg-interactive-hover rounded-lg transition-colors"
           >
-            {isLast && !installPrompt.isInstalled && !isCloudMode ? 'Skip' : isLast ? 'Done' : 'Next'}
+            {isLast ? 'Done' : 'Next'}
           </button>
-          {isLast && !installPrompt.isInstalled && !isCloudMode && (
-            installPrompt.canInstall ? (
-              <button
-                onClick={async () => {
-                  await installPrompt.install()
-                  storageSet('quoroom_walkthrough_seen', '1')
-                  onClose()
-                }}
-                className="px-5 py-2 text-sm font-medium text-text-invert bg-interactive hover:bg-interactive-hover rounded-lg transition-colors"
-              >
-                Install app
-              </button>
-            ) : (
-              <button
-                onClick={() => {
-                  storageSet('quoroom_walkthrough_seen', '1')
-                  onClose()
-                  onNavigateToHelp()
-                }}
-                className="px-5 py-2 text-sm font-medium text-text-invert bg-interactive hover:bg-interactive-hover rounded-lg transition-colors"
-              >
-                Install app
-              </button>
-            )
-          )}
         </div>
       </div>
     </div>

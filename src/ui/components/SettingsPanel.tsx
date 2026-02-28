@@ -5,14 +5,11 @@ import { api } from '../lib/client'
 import { API_BASE, APP_MODE, clearToken, getToken } from '../lib/auth'
 import { storageGet, storageSet } from '../lib/storage'
 import * as notif from '../lib/notifications'
-import type { InstallPrompt } from '../hooks/useInstallPrompt'
 import { semverGt } from '../lib/releases'
 
 interface SettingsPanelProps {
   advancedMode: boolean
   onAdvancedModeChange: (enabled: boolean) => void
-  installPrompt: InstallPrompt
-  onNavigate?: (tab: string) => void
 }
 
 interface UpdateInfo {
@@ -59,7 +56,7 @@ interface ContactStatusState {
   }
 }
 
-export function SettingsPanel({ advancedMode, onAdvancedModeChange, installPrompt, onNavigate }: SettingsPanelProps): React.JSX.Element {
+export function SettingsPanel({ advancedMode, onAdvancedModeChange }: SettingsPanelProps): React.JSX.Element {
   const [containerRef, containerWidth] = useContainerWidth<HTMLDivElement>()
   const wide = containerWidth >= 600
   const [notifications, setNotifications] = useState<boolean | null>(null)
@@ -818,47 +815,6 @@ export function SettingsPanel({ advancedMode, onAdvancedModeChange, installPromp
     </div>
   )
 
-  const appSection = (
-    <div>
-      <h3 className="text-sm font-semibold text-text-primary mb-2">App</h3>
-      <div className="bg-surface-secondary rounded-lg p-3 space-y-1.5 shadow-sm">
-        <div className="flex items-center justify-between text-sm">
-          <span className="text-text-secondary">Installation</span>
-          {installPrompt.isInstalled ? (
-            <span className="flex items-center gap-1.5">
-              <span className="w-2 h-2 rounded-full bg-status-success" />
-              <span className="text-status-success">Installed</span>
-            </span>
-          ) : installPrompt.canInstall ? (
-            <button
-              onClick={installPrompt.install}
-              className="text-sm px-3 py-1 bg-interactive text-text-invert rounded-lg hover:bg-interactive-hover font-medium transition-colors"
-            >
-              Install
-            </button>
-          ) : installPrompt.isManualInstallPlatform ? (
-            <button
-              onClick={() => onNavigate?.('help')}
-              className="text-xs px-2.5 py-1.5 rounded-lg bg-interactive text-text-invert hover:bg-interactive-hover transition-colors"
-            >
-              Manual install &rarr;
-            </button>
-          ) : (
-            <button
-              onClick={() => onNavigate?.('help')}
-              className="text-xs px-2.5 py-1.5 rounded-lg bg-interactive text-text-invert hover:bg-interactive-hover transition-colors"
-            >
-              Help tab &rarr;
-            </button>
-          )}
-        </div>
-        <p className="text-xs text-text-muted leading-tight">
-          Standalone app with Dock/taskbar icon and badge notifications.
-        </p>
-      </div>
-    </div>
-  )
-
   const serverSection = (
     <div>
       <h3 className="text-sm font-semibold text-text-primary mb-2">Server</h3>
@@ -977,7 +933,6 @@ export function SettingsPanel({ advancedMode, onAdvancedModeChange, installPromp
           <div className="space-y-5">
             {referralSection}
             {contactsSection}
-            {appSection}
             {actionsSection}
           </div>
           <div className="space-y-5">
@@ -992,7 +947,6 @@ export function SettingsPanel({ advancedMode, onAdvancedModeChange, installPromp
           {contactsSection}
           {preferencesSection}
           {connectionSection}
-          {appSection}
           {serverSection}
           {actionsSection}
         </div>
