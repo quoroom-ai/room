@@ -178,7 +178,7 @@ async function sendClerkAlert(
   const auth = await getAnyCloudRoomAuth(db)
   if (!auth) return false
 
-  const cloudApiBase = (process.env.QUOROOM_CLOUD_API ?? 'https://quoroom.ai/api').replace(/\/+$/, '')
+  const cloudApiBase = (process.env.QUOROOM_CLOUD_API ?? 'https://quoroom.io/api').replace(/\/+$/, '')
   const res = await fetch(`${cloudApiBase}/contacts/queen-message`, {
     method: 'POST',
     headers: {

@@ -15,7 +15,7 @@ import { mkdirSync, readFileSync, writeFileSync } from 'fs'
 import { getMachineId } from './telemetry'
 
 function getCloudApi(): string {
-  return (process.env.QUOROOM_CLOUD_API ?? 'https://quoroom.ai/api').replace(/\/$/, '')
+  return (process.env.QUOROOM_CLOUD_API ?? 'https://quoroom.io/api').replace(/\/$/, '')
 }
 const TOKEN_FILE_NAME = 'cloud-room-tokens.json'
 

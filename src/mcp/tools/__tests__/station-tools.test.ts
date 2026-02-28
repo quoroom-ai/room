@@ -62,7 +62,7 @@ describe('quoroom_station_create', () => {
     const result = await handler({ roomId, name: 'web-server', tier: 'small' })
     expect(result.isError).toBeUndefined()
     const text = getResponseText(result)
-    expect(text).toContain('https://quoroom.ai/stations?room=')
+    expect(text).toContain('https://quoroom.io/stations?room=')
     expect(text).toContain('mock-cloud-id')
   })
 })

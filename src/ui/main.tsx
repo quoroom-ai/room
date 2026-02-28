@@ -8,7 +8,7 @@ function redirectMisroutedGoogleCallback(): boolean {
   if (location.pathname !== '/api/auth/google/callback') return false
 
   const configuredOrigin = (import.meta.env.VITE_CLOUD_CONTROL_ORIGIN || '').trim()
-  const targetOrigin = configuredOrigin || (location.hostname === 'app.quoroom.ai' ? 'https://quoroom.ai' : '')
+  const targetOrigin = configuredOrigin || (location.hostname === 'app.quoroom.io' ? 'https://quoroom.io' : '')
   if (!targetOrigin) return false
 
   try {

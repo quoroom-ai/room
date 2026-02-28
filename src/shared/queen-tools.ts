@@ -672,7 +672,7 @@ function normalizeClerkOutboundMessage(question: string): string {
 
 async function deliverQueenMessage(db: Database.Database, roomId: number, question: string): Promise<string> {
   try {
-    const cloudApiBase = (process.env.QUOROOM_CLOUD_API ?? 'https://quoroom.ai/api').replace(/\/+$/, '')
+    const cloudApiBase = (process.env.QUOROOM_CLOUD_API ?? 'https://quoroom.io/api').replace(/\/+$/, '')
     const room = queries.getRoom(db, roomId)
     if (!room) return ''
 

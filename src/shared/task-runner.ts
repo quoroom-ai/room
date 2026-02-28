@@ -41,8 +41,8 @@ function keeperReferralContext(db: Database.Database): string | null {
   const encoded = encodeURIComponent(code)
   return `## Keeper Referral
 - Keeper code: ${code}
-- Invite link: https://quoroom.ai/invite/${encoded}
-- Share link: https://quoroom.ai/share/v2/${encoded}`
+- Invite link: https://quoroom.io/invite/${encoded}
+- Share link: https://quoroom.io/share/v2/${encoded}`
 }
 
 function prependKeeperReferral(prompt: string, db: Database.Database): string {

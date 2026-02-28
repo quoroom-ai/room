@@ -10,7 +10,7 @@ import { formatRelativeTime } from '../utils/time'
 import { AutoModeLockModal, AUTO_MODE_LOCKED_BUTTON_CLASS, modeAwareButtonClass, useAutonomyControlGate } from './AutonomyControlGate'
 import type { Wallet } from '@shared/types'
 
-const CLOUD_BASE = (import.meta.env.VITE_CLOUD_URL || 'https://quoroom.ai').replace(/\/$/, '')
+const CLOUD_BASE = (import.meta.env.VITE_CLOUD_URL || 'https://quoroom.io').replace(/\/$/, '')
 const CLOUD_STATIONS_URL = `${CLOUD_BASE}/stations`
 
 const STATUS_COLORS: Record<string, string> = {

@@ -21,8 +21,8 @@ export function registerSettingRoutes(router: Router): void {
     return {
       data: {
         code,
-        inviteUrl: `https://quoroom.ai/invite/${encodeURIComponent(code)}`,
-        shareUrl: `https://quoroom.ai/share/v2/${encodeURIComponent(code)}`
+        inviteUrl: `https://quoroom.io/invite/${encodeURIComponent(code)}`,
+        shareUrl: `https://quoroom.io/share/v2/${encodeURIComponent(code)}`
       }
     }
   })

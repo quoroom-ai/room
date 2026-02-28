@@ -65,13 +65,13 @@ export function extractReferralCodeFromLocation(loc: Pick<Location, 'search' | '
   return codeFromPath(loc.pathname)
 }
 
-export function buildKeeperInviteLink(code: string, origin = 'https://quoroom.ai'): string {
+export function buildKeeperInviteLink(code: string, origin = 'https://quoroom.io'): string {
   const normalized = normalizeReferralCode(code)
   if (!normalized) return origin
   return `${origin}/invite/${encodeURIComponent(normalized)}`
 }
 
-export function buildKeeperShareLink(code: string, shareId = 'v2', origin = 'https://quoroom.ai'): string {
+export function buildKeeperShareLink(code: string, shareId = 'v2', origin = 'https://quoroom.io'): string {
   const normalized = normalizeReferralCode(code)
   if (!normalized) return `${origin}/share/${encodeURIComponent(shareId)}`
   return `${origin}/share/${encodeURIComponent(shareId)}/${encodeURIComponent(normalized)}`

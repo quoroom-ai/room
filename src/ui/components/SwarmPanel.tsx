@@ -366,7 +366,7 @@ function addBrandFooter(svgClone: SVGSVGElement): void {
   sub.textContent = 'RESEARCH'
   g.appendChild(sub)
 
-  // "quoroom.ai" domain on right
+  // "quoroom.io" domain on right
   const domain = document.createElementNS(NS, 'text')
   domain.setAttribute('x', String(w - 20))
   domain.setAttribute('y', String(cy + 4))
@@ -374,7 +374,7 @@ function addBrandFooter(svgClone: SVGSVGElement): void {
   domain.setAttribute('fill', muted)
   domain.setAttribute('font-size', '13')
   domain.setAttribute('font-family', FONT)
-  domain.textContent = 'quoroom.ai'
+  domain.textContent = 'quoroom.io'
   g.appendChild(domain)
 
   svgClone.appendChild(g)
@@ -427,7 +427,7 @@ async function downloadImage(svgEl: SVGSVGElement, hideMoney: boolean): Promise<
 
 async function shareToTwitter(svgEl: SVGSVGElement, hideMoney: boolean): Promise<void> {
   await downloadImage(svgEl, hideMoney)
-  const text = encodeURIComponent('My agent swarm on Quoroom \ud83d\udc1d\n\nhttps://quoroom.ai')
+  const text = encodeURIComponent('My agent swarm on Quoroom \ud83d\udc1d\n\nhttps://quoroom.io')
   window.open(`https://twitter.com/intent/tweet?text=${text}`, '_blank')
 }
 
@@ -440,7 +440,7 @@ async function shareToTikTok(svgEl: SVGSVGElement, hideMoney: boolean): Promise<
   await downloadImage(svgEl, hideMoney)
 }
 
-const INVITE_URL = 'https://quoroom.ai'
+const INVITE_URL = 'https://quoroom.io'
 
 const SHARE_IMAGE_BY_ID: Record<string, string> = {
   '01': '/social-pool-01.png',

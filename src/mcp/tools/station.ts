@@ -20,7 +20,7 @@ import { sendToken } from '../../shared/wallet'
 import { CHAIN_CONFIGS } from '../../shared/constants'
 import { recordPaymentAudit, formatPaymentAuditSuffix } from './payment-audit'
 
-const CLOUD_BASE = 'https://quoroom.ai'
+const CLOUD_BASE = 'https://quoroom.io'
 
 async function bootstrapRoomToken(roomId: number): Promise<void> {
   const db = getMcpDatabase()
@@ -41,7 +41,7 @@ export function registerStationTools(server: McpServer): void {
     'quoroom_station_create',
     {
       title: 'Create Station',
-      description: 'Rent a cloud server (station) for the room via quoroom.ai. '
+      description: 'Rent a cloud server (station) for the room via quoroom.io. '
         + 'Returns a payment URL — open it in a browser to subscribe with Stripe. '
         + 'For crypto payment (USDC or USDT), use quoroom_station_create_crypto instead. '
         + 'The station appears in ~30 seconds after payment. '

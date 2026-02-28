@@ -261,10 +261,10 @@ export const api = {
       if (directCode) {
         const directInviteUrl = typeof direct.inviteUrl === 'string' && direct.inviteUrl.trim()
           ? direct.inviteUrl
-          : `https://quoroom.ai/invite/${encodeURIComponent(directCode)}`
+          : `https://quoroom.io/invite/${encodeURIComponent(directCode)}`
         const directShareUrl = typeof direct.shareUrl === 'string' && direct.shareUrl.trim()
           ? direct.shareUrl
-          : `https://quoroom.ai/share/v2/${encodeURIComponent(directCode)}`
+          : `https://quoroom.io/share/v2/${encodeURIComponent(directCode)}`
         return { code: directCode, inviteUrl: directInviteUrl, shareUrl: directShareUrl }
       }
 
@@ -274,8 +274,8 @@ export const api = {
       const legacyCode = (legacy.value ?? '').trim()
       return {
         code: legacyCode,
-        inviteUrl: legacyCode ? `https://quoroom.ai/invite/${encodeURIComponent(legacyCode)}` : '',
-        shareUrl: legacyCode ? `https://quoroom.ai/share/v2/${encodeURIComponent(legacyCode)}` : ''
+        inviteUrl: legacyCode ? `https://quoroom.io/invite/${encodeURIComponent(legacyCode)}` : '',
+        shareUrl: legacyCode ? `https://quoroom.io/share/v2/${encodeURIComponent(legacyCode)}` : ''
       }
     },
     get: (key: string) =>

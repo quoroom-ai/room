@@ -7,7 +7,7 @@ import { getRoomCloudId, getStoredCloudRoomToken, ensureCloudRoomToken } from '.
 import { insertClerkMessageAndEmit } from './clerk-message-events'
 
 function getCloudApiBase(): string {
-  return (process.env.QUOROOM_CLOUD_API ?? 'https://quoroom.ai/api').replace(/\/+$/, '')
+  return (process.env.QUOROOM_CLOUD_API ?? 'https://quoroom.io/api').replace(/\/+$/, '')
 }
 
 function getSettingTrimmed(db: Parameters<typeof queries.getSetting>[0], key: string): string {

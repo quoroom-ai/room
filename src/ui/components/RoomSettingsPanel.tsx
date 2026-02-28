@@ -1729,7 +1729,7 @@ export function RoomSettingsPanel({ roomId }: RoomSettingsPanelProps): React.JSX
               <div className="flex items-center justify-between text-sm py-1">
                 <div>
                   <span className="text-text-secondary">Public room</span>
-                  <p className="text-xs text-text-muted mt-0.5 leading-tight">Visible on the public leaderboard at quoroom.ai. Shows objective, balances, and activity only.</p>
+                  <p className="text-xs text-text-muted mt-0.5 leading-tight">Visible on the public leaderboard at quoroom.io. Shows objective, balances, and activity only.</p>
                 </div>
                 <button
                   onClick={() => { void handleToggleVisibility(room) }}

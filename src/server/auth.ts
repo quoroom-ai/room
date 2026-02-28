@@ -40,7 +40,7 @@ let agentToken: string | null = null
 let userToken: string | null = null
 
 const AUTH_TOKENS_FILE = 'auth.tokens.json'
-const DEFAULT_CLOUD_ALLOWED_ORIGINS = ['https://app.quoroom.ai', 'https://quoroom.ai', 'https://www.quoroom.ai']
+const DEFAULT_CLOUD_ALLOWED_ORIGINS = ['https://app.quoroom.io', 'https://quoroom.io', 'https://www.quoroom.io']
 
 function isValidToken(value: unknown): value is string {
   return typeof value === 'string' && /^[a-f0-9]{64}$/i.test(value)

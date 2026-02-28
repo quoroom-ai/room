@@ -139,7 +139,7 @@ function hashesEqualHex(a: string, b: string): boolean {
 }
 
 function getCloudApiBase(): string {
-  return (process.env.QUOROOM_CLOUD_API ?? 'https://quoroom.ai/api').replace(/\/+$/, '')
+  return (process.env.QUOROOM_CLOUD_API ?? 'https://quoroom.io/api').replace(/\/+$/, '')
 }
 
 function getTelegramBotUsername(): string {

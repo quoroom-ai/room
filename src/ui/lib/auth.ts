@@ -229,7 +229,7 @@ function decodeJwtPayload(token: string): Record<string, unknown> | null {
 }
 
 function getCloudControlOrigin(): string {
-  return (import.meta.env.VITE_CLOUD_CONTROL_ORIGIN || 'https://quoroom.ai').replace(/\/+$/, '')
+  return (import.meta.env.VITE_CLOUD_CONTROL_ORIGIN || 'https://quoroom.io').replace(/\/+$/, '')
 }
 
 async function refreshCloudToken(currentToken: string): Promise<string | null> {
