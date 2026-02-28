@@ -325,14 +325,15 @@ test.describe('UI — Interaction', () => {
     const advancedRow = page.locator('text=Advanced mode').locator('..')
     await advancedRow.locator('button').first().click()
 
-    // Now results tab should appear
-    await expect(page.locator('button').filter({ hasText: /^Results$/i })).toBeVisible({ timeout: 5000 })
+    // Advanced mode should reveal the Memory tab.
+    const memoryTab = page.locator('button').filter({ hasText: /^Memory$/i }).first()
+    await expect(memoryTab).toBeVisible({ timeout: 5000 })
 
     await page.screenshot({ path: 'e2e/screenshots/ui-12-advanced-mode.png', fullPage: true })
 
-    // Navigate to Results tab
-    await page.locator('button').filter({ hasText: /^Results$/i }).first().click()
-    await page.screenshot({ path: 'e2e/screenshots/ui-13-results-panel.png', fullPage: true })
+    // Navigate to Memory tab
+    await memoryTab.click()
+    await page.screenshot({ path: 'e2e/screenshots/ui-13-memory-panel.png', fullPage: true })
   })
 })
 

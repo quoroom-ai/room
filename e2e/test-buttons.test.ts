@@ -1,5 +1,6 @@
 /**
- * E2E: Test that room toggle buttons (Auto/Semi) actually work.
+ * E2E: Room autonomy mode behavior in UI/API.
+ * Auto/Semi switching was removed; rooms now run in semi mode only.
  */
 
 import { test, expect, type Page } from '@playwright/test'
@@ -50,7 +51,7 @@ test.afterEach(async ({ page }) => {
   }
 })
 
-test('Room toggle buttons update room settings', async ({ page }) => {
+test('Room settings reflects always-semi autonomy mode', async ({ page }) => {
   // Suppress walkthrough modal
   await page.addInitScript(() => {
     localStorage.setItem('quoroom_walkthrough_seen', 'true')
@@ -85,28 +86,11 @@ test('Room toggle buttons update room settings', async ({ page }) => {
   await settingsTab.waitFor({ timeout: 5000 })
   await settingsTab.click()
 
-  // Find the "Semi" button and click it, waiting for the PATCH response
-  const semiBtn = page.locator('button').filter({ hasText: /^Semi$/i }).first()
-  await expect(semiBtn).toBeVisible({ timeout: 15000 })
+  // Auto/Semi toggle no longer exists in room settings.
+  await expect(page.locator('button').filter({ hasText: /^Semi$/i })).toHaveCount(0)
+  await expect(page.locator('button').filter({ hasText: /^Auto$/i })).toHaveCount(0)
 
-  const [patchRes] = await Promise.all([
-    page.waitForResponse(res => res.url().includes('/api/rooms') && res.request().method() === 'PATCH', { timeout: 10000 }),
-    semiBtn.click()
-  ])
-  expect(patchRes.status()).toBe(200)
-
-  // Verify via API that the room was updated
-  const roomAfter = await getRoomWithRetry(page, roomId)
-  expect(roomAfter?.autonomyMode).toBe('semi')
-
-  // Click "Auto" to reset
-  const autoBtn = page.locator('button').filter({ hasText: /^Auto$/i }).first()
-  await Promise.all([
-    page.waitForResponse(res => res.url().includes('/api/rooms') && res.request().method() === 'PATCH', { timeout: 10000 }),
-    autoBtn.click()
-  ])
-
-  // Verify reset
-  const roomReset = await getRoomWithRetry(page, roomId)
-  expect(roomReset?.autonomyMode).toBe('auto')
+  // Verify via API that room mode is always semi.
+  const room = await getRoomWithRetry(page, roomId)
+  expect(room?.autonomyMode).toBe('semi')
 })
