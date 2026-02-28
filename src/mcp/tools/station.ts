@@ -22,6 +22,9 @@ import { recordPaymentAudit, formatPaymentAuditSuffix } from './payment-audit'
 
 const CLOUD_BASE = 'https://quoroom.io'
 
+const CLOUD_ONLY = { content: [{ type: 'text' as const, text: 'Station rental is only available for cloud swarms on quoroom.io.' }] }
+const isCloudMode = (): boolean => process.env.QUOROOM_DEPLOYMENT_MODE === 'cloud'
+
 async function bootstrapRoomToken(roomId: number): Promise<void> {
   const db = getMcpDatabase()
   const room = queries.getRoom(db, roomId)
@@ -56,6 +59,7 @@ export function registerStationTools(server: McpServer): void {
       }
     },
     async ({ roomId }) => {
+      if (!isCloudMode()) return CLOUD_ONLY
       await bootstrapRoomToken(roomId)
       const cloudRoomId = getRoomCloudId(roomId)
       const url = `${CLOUD_BASE}/stations?room=${encodeURIComponent(cloudRoomId)}`
@@ -80,6 +84,7 @@ export function registerStationTools(server: McpServer): void {
       }
     },
     async ({ roomId, status }) => {
+      if (!isCloudMode()) return CLOUD_ONLY
       await bootstrapRoomToken(roomId)
       const cloudRoomId = getRoomCloudId(roomId)
       const stations = await listCloudStations(cloudRoomId)
@@ -106,6 +111,7 @@ export function registerStationTools(server: McpServer): void {
       }
     },
     async ({ roomId, id }) => {
+      if (!isCloudMode()) return CLOUD_ONLY
       await bootstrapRoomToken(roomId)
       const cloudRoomId = getRoomCloudId(roomId)
       await startCloudStation(cloudRoomId, id)
@@ -124,6 +130,7 @@ export function registerStationTools(server: McpServer): void {
       }
     },
     async ({ roomId, id }) => {
+      if (!isCloudMode()) return CLOUD_ONLY
       await bootstrapRoomToken(roomId)
       const cloudRoomId = getRoomCloudId(roomId)
       await stopCloudStation(cloudRoomId, id)
@@ -143,6 +150,7 @@ export function registerStationTools(server: McpServer): void {
       }
     },
     async ({ roomId, id }) => {
+      if (!isCloudMode()) return CLOUD_ONLY
       await bootstrapRoomToken(roomId)
       const cloudRoomId = getRoomCloudId(roomId)
       await deleteCloudStation(cloudRoomId, id)
@@ -168,6 +176,7 @@ export function registerStationTools(server: McpServer): void {
       }
     },
     async ({ roomId, id }) => {
+      if (!isCloudMode()) return CLOUD_ONLY
       await bootstrapRoomToken(roomId)
       const cloudRoomId = getRoomCloudId(roomId)
       await cancelCloudStation(cloudRoomId, id)
@@ -192,6 +201,7 @@ export function registerStationTools(server: McpServer): void {
       }
     },
     async ({ roomId, id, command }) => {
+      if (!isCloudMode()) return CLOUD_ONLY
       await bootstrapRoomToken(roomId)
       const cloudRoomId = getRoomCloudId(roomId)
       const result = await execOnCloudStation(cloudRoomId, id, command)
@@ -222,6 +232,7 @@ export function registerStationTools(server: McpServer): void {
       }
     },
     async ({ roomId, id, lines }) => {
+      if (!isCloudMode()) return CLOUD_ONLY
       await bootstrapRoomToken(roomId)
       const cloudRoomId = getRoomCloudId(roomId)
       const logs = await getCloudStationLogs(cloudRoomId, id, lines)
@@ -246,6 +257,7 @@ export function registerStationTools(server: McpServer): void {
       }
     },
     async ({ roomId, id }) => {
+      if (!isCloudMode()) return CLOUD_ONLY
       await bootstrapRoomToken(roomId)
       const cloudRoomId = getRoomCloudId(roomId)
       const stations = await listCloudStations(cloudRoomId)
@@ -295,6 +307,7 @@ export function registerStationTools(server: McpServer): void {
       }
     },
     async ({ roomId, name, tier, encryptionKey, chain, token }) => {
+      if (!isCloudMode()) return CLOUD_ONLY
       const selectedChain = chain ?? 'base'
       const selectedToken = token ?? 'usdc'
 
@@ -386,6 +399,7 @@ export function registerStationTools(server: McpServer): void {
       }
     },
     async ({ roomId, id, encryptionKey, chain, token }) => {
+      if (!isCloudMode()) return CLOUD_ONLY
       const selectedChain = chain ?? 'base'
       const selectedToken = token ?? 'usdc'
 

@@ -169,6 +169,7 @@ function App(): React.JSX.Element {
     assets: { mac: string | null; windows: string | null; linux: string | null }
     readyUpdateVersion: string | null
   } | null>(null)
+  const [deploymentMode, setDeploymentMode] = useState<'local' | 'cloud'>('local')
   const [devDbBanner, setDevDbBanner] = useState<{ dbPath: string; dataDir?: string } | null>(null)
   const [localModeBanner, setLocalModeBanner] = useState<{ port: string; dbPath: string; dataDir?: string } | null>(null)
   const [localModeDismissed, setLocalModeDismissed] = useState(() => storageGet('quoroom_local_mode_dismissed') === 'true')
@@ -379,14 +380,20 @@ function App(): React.JSX.Element {
     if (gate !== 'app' || !ready) return
     function checkStatus(): void {
       api.status.getParts(['storage', 'update']).then((status) => {
-        const isDevDb = (status.deploymentMode ?? 'local') === 'local' && isDevDbPath(status.dbPath)
+        const mode = (status.deploymentMode ?? 'local') as 'local' | 'cloud'
+        setDeploymentMode(mode)
+        if (mode === 'local' && tabRef.current === 'stations') {
+          setTab('status')
+        }
+
+        const isDevDb = mode === 'local' && isDevDbPath(status.dbPath)
         if (isDevDb) {
           setDevDbBanner({ dbPath: status.dbPath, dataDir: status.dataDir })
         } else {
           setDevDbBanner(null)
         }
 
-        const isLocal = (status.deploymentMode ?? 'local') === 'local'
+        const isLocal = mode === 'local'
         if (isLocal && status.dbPath) {
           setLocalModeBanner({ port: location.port || DEFAULT_PORT, dbPath: status.dbPath, dataDir: status.dataDir })
         } else {
@@ -593,6 +600,7 @@ function App(): React.JSX.Element {
       case 'transactions':
         return <TransactionsPanel roomId={selectedRoomId} />
       case 'stations':
+        if (deploymentMode !== 'cloud') return null
         return <StationsPanel roomId={selectedRoomId} autonomyMode="semi" queenModel={selectedRoom ? (queenModels[selectedRoom.id] ?? null) : null} workerModel={selectedRoom?.workerModel ?? null} />
       case 'room-settings':
         return <RoomSettingsPanel roomId={selectedRoomId} />
@@ -698,7 +706,8 @@ function App(): React.JSX.Element {
     )
   }
 
-  const visibleTabs = advancedMode ? mainTabs : mainTabs.filter(t => !t.advanced)
+  const visibleTabs = (advancedMode ? mainTabs : mainTabs.filter(t => !t.advanced))
+    .filter(t => t.id !== 'stations' || deploymentMode === 'cloud')
 
   return (
     <div className="flex h-screen bg-surface-primary">

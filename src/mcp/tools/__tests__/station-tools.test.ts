@@ -43,6 +43,7 @@ let roomId: number
 beforeEach(async () => {
   toolHandlers.clear()
   db = initTestDb()
+  process.env.QUOROOM_DEPLOYMENT_MODE = 'cloud'
 
   const room = queries.createRoom(db, 'Station Test Room', 'deploy things')
   roomId = room.id
@@ -54,6 +55,7 @@ beforeEach(async () => {
 afterEach(() => {
   db.close()
   vi.clearAllMocks()
+  delete process.env.QUOROOM_DEPLOYMENT_MODE
 })
 
 describe('quoroom_station_create', () => {
