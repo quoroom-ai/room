@@ -920,7 +920,7 @@ function App(): React.JSX.Element {
           </div>
         )}
 
-        {(installPrompt.canInstall || installPrompt.isManualInstallPlatform) && !installPrompt.isInstalled && !installDismissed && (
+        {deploymentMode !== 'cloud' && (installPrompt.canInstall || installPrompt.isManualInstallPlatform) && !installPrompt.isInstalled && !installDismissed && (
           <div className="flex items-center gap-3 px-4 py-2 bg-brand-50 border-b border-brand-200">
             <span className="text-sm text-brand-700 flex-1">
               {installPrompt.canInstall
@@ -1009,7 +1009,7 @@ function App(): React.JSX.Element {
         />
       )}
       {showWalkthrough && (
-        <WalkthroughModal installPrompt={installPrompt} onNavigateToHelp={() => handleTabChange('help')} onClose={() => {
+        <WalkthroughModal installPrompt={installPrompt} isCloudMode={deploymentMode === 'cloud'} onNavigateToHelp={() => handleTabChange('help')} onClose={() => {
           setShowWalkthrough(false)
           handleTabChange('clerk')
           setClerkSetupLaunchKey((prev) => prev + 1)

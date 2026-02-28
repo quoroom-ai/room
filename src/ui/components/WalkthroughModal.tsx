@@ -49,9 +49,10 @@ interface WalkthroughModalProps {
   onClose: () => void
   installPrompt: InstallPrompt
   onNavigateToHelp: () => void
+  isCloudMode?: boolean
 }
 
-export function WalkthroughModal({ onClose, installPrompt, onNavigateToHelp }: WalkthroughModalProps): React.JSX.Element {
+export function WalkthroughModal({ onClose, installPrompt, onNavigateToHelp, isCloudMode }: WalkthroughModalProps): React.JSX.Element {
   const [step, setStep] = useState(0)
   const isLast = step === steps.length - 1
 
@@ -98,13 +99,13 @@ export function WalkthroughModal({ onClose, installPrompt, onNavigateToHelp }: W
           )}
           <button
             onClick={handleNext}
-            className={isLast && !installPrompt.isInstalled
+            className={isLast && !installPrompt.isInstalled && !isCloudMode
               ? 'text-sm text-text-muted hover:text-text-secondary transition-colors'
               : 'px-5 py-2 text-sm font-medium text-text-invert bg-interactive hover:bg-interactive-hover rounded-lg transition-colors'}
           >
-            {isLast && !installPrompt.isInstalled ? 'Skip' : isLast ? 'Done' : 'Next'}
+            {isLast && !installPrompt.isInstalled && !isCloudMode ? 'Skip' : isLast ? 'Done' : 'Next'}
           </button>
-          {isLast && !installPrompt.isInstalled && (
+          {isLast && !installPrompt.isInstalled && !isCloudMode && (
             installPrompt.canInstall ? (
               <button
                 onClick={async () => {
