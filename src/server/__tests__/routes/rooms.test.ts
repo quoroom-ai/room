@@ -54,7 +54,7 @@ describe('Room routes', () => {
       expect(res.status).toBe(201)
       const data = res.body as any
       expect(data.room.queenCycleGapMs).toBe(30_000)   // max plan → 30s
-      expect(data.room.queenMaxTurns).toBe(30)
+      expect(data.room.queenMaxTurns).toBe(50)
     })
 
     it('uses none plan defaults when no plan set', async () => {
@@ -63,7 +63,7 @@ describe('Room routes', () => {
       expect(res.status).toBe(201)
       const data = res.body as any
       expect(data.room.queenCycleGapMs).toBe(600_000)  // none plan → 10 min
-      expect(data.room.queenMaxTurns).toBe(30)
+      expect(data.room.queenMaxTurns).toBe(50)
     })
   })
 

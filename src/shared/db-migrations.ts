@@ -13,6 +13,15 @@ function upsertSetting(database: Database.Database, key: string, value: string):
 export function runMigrations(database: Database.Database, log: (msg: string) => void = console.log): void {
   database.exec(SCHEMA)
 
+  // Upgrade legacy room fallback (3 turns) to the new default (50 turns)
+  const legacyQueenTurnsUpdated = database
+    .prepare(`UPDATE rooms SET queen_max_turns = 50 WHERE queen_max_turns = 3`)
+    .run()
+    .changes
+  if (legacyQueenTurnsUpdated > 0) {
+    log(`Migrated: updated ${legacyQueenTurnsUpdated} room(s) queen_max_turns from 3 to 50`)
+  }
+
   // Keeper-level referral code (global, one per keeper)
   if (!database.prepare('SELECT value FROM settings WHERE key = ?').get('keeper_referral_code')) {
     const code = randomBytes(6).toString('base64url').slice(0, 10)

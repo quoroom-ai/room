@@ -1076,7 +1076,7 @@ function mapRoomRow(row: Record<string, unknown>): Room {
     maxConcurrentTasks: (row.max_concurrent_tasks as number) ?? 3,
     workerModel: (row.worker_model as string) ?? 'claude',
     queenCycleGapMs: (row.queen_cycle_gap_ms as number) ?? 1_800_000,
-    queenMaxTurns: (row.queen_max_turns as number) ?? 3,
+    queenMaxTurns: (row.queen_max_turns as number) ?? 50,
     queenQuietFrom: (row.queen_quiet_from as string | null) ?? null,
     queenQuietUntil: (row.queen_quiet_until as string | null) ?? null,
     config,

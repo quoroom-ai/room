@@ -51,7 +51,7 @@ CREATE TABLE IF NOT EXISTS rooms (
     max_concurrent_tasks INTEGER NOT NULL DEFAULT 3,
     worker_model TEXT NOT NULL DEFAULT 'claude',
     queen_cycle_gap_ms INTEGER NOT NULL DEFAULT 1800000,
-    queen_max_turns INTEGER NOT NULL DEFAULT 3,
+    queen_max_turns INTEGER NOT NULL DEFAULT 50,
     queen_quiet_from TEXT,
     queen_quiet_until TEXT,
     config TEXT,

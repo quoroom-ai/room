@@ -183,18 +183,18 @@ export const ERC8004_REPUTATION_REGISTRY = {
 }
 
 export const QUEEN_DEFAULTS_BY_PLAN = {
-  none: { queenCycleGapMs: 10 * 60 * 1000, queenMaxTurns: 30 }, // 10 min gap, 30 turns
-  pro:  { queenCycleGapMs:  5 * 60 * 1000, queenMaxTurns: 30 }, // 5 min gap, 30 turns
-  max:  { queenCycleGapMs:      30 * 1000, queenMaxTurns: 30 }, // 30s gap, 30 turns
-  api:  { queenCycleGapMs:  2 * 60 * 1000, queenMaxTurns: 30 }, // 2 min gap, 30 turns
+  none: { queenCycleGapMs: 10 * 60 * 1000, queenMaxTurns: 50 }, // 10 min gap, 50 turns
+  pro:  { queenCycleGapMs:  5 * 60 * 1000, queenMaxTurns: 50 }, // 5 min gap, 50 turns
+  max:  { queenCycleGapMs:      30 * 1000, queenMaxTurns: 50 }, // 30s gap, 50 turns
+  api:  { queenCycleGapMs:  2 * 60 * 1000, queenMaxTurns: 50 }, // 2 min gap, 50 turns
 } as const
 export type ClaudePlan = keyof typeof QUEEN_DEFAULTS_BY_PLAN
 
 export const CHATGPT_DEFAULTS_BY_PLAN = {
-  none: { queenCycleGapMs: 10 * 60 * 1000, queenMaxTurns: 30 }, // 10 min gap, 30 turns
-  plus: { queenCycleGapMs:  5 * 60 * 1000, queenMaxTurns: 30 }, // 5 min gap, 30 turns
-  pro:  { queenCycleGapMs:  2 * 60 * 1000, queenMaxTurns: 30 }, // 2 min gap, 30 turns
-  api:  { queenCycleGapMs:  2 * 60 * 1000, queenMaxTurns: 30 }, // 2 min gap, 30 turns
+  none: { queenCycleGapMs: 10 * 60 * 1000, queenMaxTurns: 50 }, // 10 min gap, 50 turns
+  plus: { queenCycleGapMs:  5 * 60 * 1000, queenMaxTurns: 50 }, // 5 min gap, 50 turns
+  pro:  { queenCycleGapMs:  2 * 60 * 1000, queenMaxTurns: 50 }, // 2 min gap, 50 turns
+  api:  { queenCycleGapMs:  2 * 60 * 1000, queenMaxTurns: 50 }, // 2 min gap, 50 turns
 } as const
 export type ChatGptPlan = keyof typeof CHATGPT_DEFAULTS_BY_PLAN
 

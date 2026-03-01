@@ -419,7 +419,7 @@ describe('quoroom_create_room', () => {
     await handler({ name: 'planroom' })
     const room = queries.listRooms(db).find(r => r.name === 'planroom')!
     expect(room.queenCycleGapMs).toBe(30_000)   // max plan → 30s
-    expect(room.queenMaxTurns).toBe(30)
+    expect(room.queenMaxTurns).toBe(50)
   })
 
   it('falls back to none plan defaults when no plan set', async () => {
@@ -427,7 +427,7 @@ describe('quoroom_create_room', () => {
     await handler({ name: 'noplan' })
     const room = queries.listRooms(db).find(r => r.name === 'noplan')!
     expect(room.queenCycleGapMs).toBe(600_000)  // none plan → 10 min
-    expect(room.queenMaxTurns).toBe(30)
+    expect(room.queenMaxTurns).toBe(50)
   })
 })
 
