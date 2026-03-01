@@ -76,36 +76,103 @@ function Find-ServerProcs {
     Where-Object { $_.ProcessId -ne $PID -and (Is-QuoroomProcess $_) })
 }
 
+function Test-PidAlive([int]$pid) {
+  if ($pid -le 4) { return $false }
+  return $null -ne (Get-Process -Id $pid -EA SilentlyContinue)
+}
+
 function Stop-PidTree([int]$pid) {
-  if ($pid -le 4 -or $pid -eq $PID) { return }
+  if ($pid -le 4 -or $pid -eq $PID) { return $true }
+  if (-not (Test-PidAlive $pid)) { return $true }
+
+  Write-Log "Stopping PID=$pid"
+
   try {
     & taskkill /PID $pid /T /F 1>$null 2>$null
-  } catch {
-    try { Stop-Process -Id $pid -Force -EA SilentlyContinue } catch {}
-  }
+  } catch {}
+  if (-not (Test-PidAlive $pid)) { return $true }
+
+  try { Stop-Process -Id $pid -Force -EA SilentlyContinue } catch {}
+  if (-not (Test-PidAlive $pid)) { return $true }
+
+  # Fallback path for cases where taskkill/Stop-Process report access denied
+  # but WMI termination still succeeds for the same user/session.
+  try {
+    $wmicOut = & wmic process where "processid=$pid" call terminate 2>$null | Out-String
+    if ($wmicOut -and ($wmicOut -match 'ReturnValue\s*=\s*0')) {
+      Write-Log "WMIC terminate succeeded for PID=$pid"
+    }
+  } catch {}
+  if (-not (Test-PidAlive $pid)) { return $true }
+
+  Write-Log "Failed to stop PID=$pid (access denied or protected process)"
+  return $false
+}
+
+function Show-StopFailure([string]$message) {
+  try {
+    $notify.BalloonTipTitle = 'Quoroom'
+    $notify.BalloonTipText = $message
+    $notify.ShowBalloonTip(5000)
+  } catch {}
 }
 
 function Stop-Server {
+  $failedPids = @()
+
   for ($attempt = 0; $attempt -lt 3; $attempt++) {
     # Kill by port ownership first (catches zombie/elevated processes)
-    $portOwners = Get-NetTCPConnection -LocalPort 3700 -EA SilentlyContinue |
+    $portOwners = @(
+      Get-NetTCPConnection -LocalPort 3700 -EA SilentlyContinue |
       Where-Object { $_.OwningProcess -gt 4 -and $_.OwningProcess -ne $PID } |
       Select-Object -ExpandProperty OwningProcess -Unique
-    foreach ($portProc in $portOwners) { Stop-PidTree $portProc }
+    )
 
     # Kill by comprehensive pattern match
-    $targets = Find-ServerProcs
+    $targets = @(Find-ServerProcs)
     if ($targets.Count -eq 0 -and $portOwners.Count -eq 0) { break }
-    foreach ($p in $targets) { Stop-PidTree $p.ProcessId }
+
+    $toStop = New-Object System.Collections.Generic.HashSet[int]
+    foreach ($portProc in $portOwners) { [void]$toStop.Add([int]$portProc) }
+    foreach ($p in $targets) { [void]$toStop.Add([int]$p.ProcessId) }
+    foreach ($targetPid in $toStop) {
+      if (-not (Stop-PidTree $targetPid)) {
+        $failedPids += $targetPid
+      }
+    }
 
     Start-Sleep -Milliseconds 600
   }
 
   # Final sweep: any remaining port 3700 owners
-  $remaining = Get-NetTCPConnection -LocalPort 3700 -EA SilentlyContinue |
+  $remaining = @(
+    Get-NetTCPConnection -LocalPort 3700 -EA SilentlyContinue |
     Where-Object { $_.OwningProcess -gt 4 -and $_.OwningProcess -ne $PID } |
     Select-Object -ExpandProperty OwningProcess -Unique
-  foreach ($portProc in $remaining) { Stop-PidTree $portProc }
+  )
+  foreach ($portProc in $remaining) {
+    if (-not (Stop-PidTree $portProc)) {
+      $failedPids += [int]$portProc
+    }
+  }
+
+  $remainingAfter = @(
+    Get-NetTCPConnection -LocalPort 3700 -EA SilentlyContinue |
+    Where-Object { $_.OwningProcess -gt 4 -and $_.OwningProcess -ne $PID } |
+    Select-Object -ExpandProperty OwningProcess -Unique
+  )
+  if ($remainingAfter.Count -gt 0) {
+    $ids = (($remainingAfter | ForEach-Object { [int]$_ }) | Sort-Object -Unique) -join ','
+    Write-Log "Stop-Server failed; port 3700 still owned by PID(s): $ids"
+    if ($failedPids.Count -gt 0) {
+      $f = (($failedPids | Sort-Object -Unique) -join ',')
+      Write-Log "Failed stop attempts for PID(s): $f"
+    }
+    return $false
+  }
+
+  Write-Log "Stop-Server succeeded"
+  return $true
 }
 
 # On startup: evict anything occupying port 3700 so our server can bind cleanly.
@@ -202,7 +269,13 @@ $restartItem.Add_Click({
   $script:pendingOpen = $true
   $script:openAfter   = [DateTime]::MaxValue
   Refresh-Ui
-  Stop-Server
+  if (-not (Stop-Server)) {
+    $script:state = 'offline'
+    $script:pendingOpen = $false
+    Show-StopFailure 'Could not stop existing server process. Try running Quoroom as Administrator.'
+    Refresh-Ui
+    return
+  }
   $script:procRunning = $false
   $script:lastStartAt = [DateTime]::MinValue
   $script:startedAt   = [DateTime]::MinValue
@@ -214,7 +287,12 @@ $restartItem.Add_Click({
 $quitItem.Add_Click({
   $script:quitting = $true
   Refresh-Ui
-  Stop-Server
+  if (-not (Stop-Server)) {
+    $script:quitting = $false
+    Show-StopFailure 'Server is still running on port 3700. Run Quoroom as Administrator, then stop again.'
+    Refresh-Ui
+    return
+  }
   Start-Sleep -Milliseconds 800
   [System.Windows.Forms.Application]::Exit()
 })
