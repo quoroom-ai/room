@@ -65,6 +65,24 @@ describe('Server integration', () => {
     })
   })
 
+  describe('Cloud update behavior', () => {
+    it('blocks installer download route in cloud deployment', async () => {
+      const prevDeployment = process.env.QUOROOM_DEPLOYMENT_MODE
+      process.env.QUOROOM_DEPLOYMENT_MODE = 'cloud'
+      let cloudCtx: TestContext | null = null
+      try {
+        cloudCtx = await createTestServer()
+        const res = await requestAsUser(cloudCtx, 'GET', '/api/status/update/download')
+        expect(res.status).toBe(409)
+        expect((res.body as { error?: string }).error).toContain('cloud deployment')
+      } finally {
+        cloudCtx?.close()
+        if (prevDeployment === undefined) delete process.env.QUOROOM_DEPLOYMENT_MODE
+        else process.env.QUOROOM_DEPLOYMENT_MODE = prevDeployment
+      }
+    })
+  })
+
   describe('Role-based access', () => {
     it('agent can create resources', async () => {
       const res = await request(ctx, 'POST', '/api/rooms', { name: 'testroom' })

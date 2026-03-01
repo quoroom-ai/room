@@ -1,5 +1,5 @@
 /**
- * Background update checker — polls GitHub releases every 4 hours.
+ * Background update checker — polls GitHub releases (default every 4 hours).
  * Caches the result in memory; the status route reads it via getUpdateInfo().
  * When a lightweight update bundle is available, triggers auto-download.
  */
@@ -7,7 +7,7 @@
 import https from 'node:https'
 import { checkAndApplyUpdate, getAutoUpdateStatus, getReadyUpdateVersion } from './autoUpdate'
 
-const CHECK_INTERVAL = 4 * 60 * 60 * 1000  // 4 hours
+const DEFAULT_CHECK_INTERVAL = 4 * 60 * 60 * 1000  // 4 hours
 const INITIAL_DELAY  = 15_000               // 15s after startup
 
 interface GithubReleaseAsset {
@@ -36,6 +36,13 @@ export interface UpdateInfo {
 }
 
 export { getAutoUpdateStatus, getReadyUpdateVersion }
+
+export interface UpdateCheckerOptions {
+  /** Poll interval in milliseconds (defaults to 4 hours). */
+  pollIntervalMs?: number
+  /** Called when a new ready update version appears. */
+  onReadyUpdate?: (version: string) => void
+}
 
 let cached: UpdateInfo | null = null
 let initTimer: ReturnType<typeof setTimeout> | null = null
@@ -99,7 +106,7 @@ function fetchJson(url: string): Promise<unknown> {
   })
 }
 
-export async function forceCheck(): Promise<void> {
+export async function forceCheck(options: Pick<UpdateCheckerOptions, 'onReadyUpdate'> = {}): Promise<void> {
   try {
     const releases = await fetchJson(
       'https://api.github.com/repos/quoroom-ai/room/releases?per_page=100'
@@ -126,20 +133,34 @@ export async function forceCheck(): Promise<void> {
 
     // If a lightweight update bundle is available, trigger background auto-download
     if (updateBundle && latestVersion) {
-      void checkAndApplyUpdate(updateBundle, latestVersion).catch(() => {
+      const beforeReadyVersion = getReadyUpdateVersion()
+      await checkAndApplyUpdate(updateBundle, latestVersion).catch(() => {
         // Non-critical — auto-update failure doesn't affect normal operation
       })
+      const afterReadyVersion = getReadyUpdateVersion()
+      if (options.onReadyUpdate && afterReadyVersion && afterReadyVersion !== beforeReadyVersion) {
+        try {
+          options.onReadyUpdate(afterReadyVersion)
+        } catch {
+          // Non-critical — callback failures should not impact checker loop
+        }
+      }
     }
   } catch {
     // Non-critical — silently ignore network/parse errors
   }
 }
 
-export function initUpdateChecker(): void {
+export function initUpdateChecker(options: UpdateCheckerOptions = {}): void {
   if (process.env.NODE_ENV === 'test') return
+  const pollEvery = Number.isFinite(options.pollIntervalMs) && (options.pollIntervalMs ?? 0) > 0
+    ? Number(options.pollIntervalMs)
+    : DEFAULT_CHECK_INTERVAL
   initTimer = setTimeout(() => {
-    void forceCheck()
-    pollInterval = setInterval(() => { void forceCheck() }, CHECK_INTERVAL)
+    void forceCheck({ onReadyUpdate: options.onReadyUpdate })
+    pollInterval = setInterval(() => {
+      void forceCheck({ onReadyUpdate: options.onReadyUpdate })
+    }, pollEvery)
   }, INITIAL_DELAY)
 }
 

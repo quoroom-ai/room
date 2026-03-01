@@ -252,6 +252,18 @@ function scheduleSelfRestart(): boolean {
   }
 }
 
+function createCloudReadyUpdateHandler(triggerShutdown: () => void): (version: string) => void {
+  let queued = false
+  return (version: string) => {
+    if (queued) return
+    queued = true
+    console.error(`[auto-update] Cloud update v${version} is ready. Restarting to apply.`)
+    setTimeout(() => {
+      triggerShutdown()
+    }, 120)
+  }
+}
+
 const MIME_TYPES: Record<string, string> = {
   '.html': 'text/html; charset=utf-8',
   '.js': 'application/javascript; charset=utf-8',
@@ -612,6 +624,13 @@ export function createApiServer(options: ServerOptions = {}): {
 
       // Binary streaming download — must be handled before router (not JSON)
       if (pathname === '/api/status/update/download' && req.method === 'GET') {
+        if (isCloudDeployment()) {
+          res.writeHead(409, responseHeaders)
+          res.end(JSON.stringify({
+            error: 'Installer download is disabled in cloud deployment. Updates are applied automatically.'
+          }))
+          return
+        }
         if (!isAllowedForRole(role, req.method, pathname, db)) {
           res.writeHead(403, responseHeaders)
           res.end(JSON.stringify({ error: 'Forbidden' }))
@@ -882,7 +901,18 @@ export function startServer(options: ServerOptions = {}): void {
   initCloudSync(serverDb)
 
   // Start background update checker (polls GitHub every 4 hours)
-  initUpdateChecker()
+  if (deploymentMode === 'cloud') {
+    const onReadyUpdate = createCloudReadyUpdateHandler(() => {
+      if (requestProcessShutdown) requestProcessShutdown()
+      else process.exit(0)
+    })
+    initUpdateChecker({
+      pollIntervalMs: 15 * 60 * 1000,
+      onReadyUpdate,
+    })
+  } else {
+    initUpdateChecker()
+  }
 
   // Start local runtime loops (task scheduler, room message sync).
   startServerRuntime(serverDb)
@@ -985,5 +1015,6 @@ export {
   windowsQuote as _windowsQuote,
   shellQuote as _shellQuote,
   isLoopbackAddress as _isLoopbackAddress,
+  createCloudReadyUpdateHandler as _createCloudReadyUpdateHandler,
   resolveStaticDirForStart as _resolveStaticDirForStart,
 }

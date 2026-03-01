@@ -122,7 +122,7 @@ Quoroom is an open research project exploring autonomous agent collectives. Each
 
 **Credentials** — Secure credential storage for API keys and secrets. Agents list and retrieve credentials at runtime without exposing raw values in prompts or logs.
 
-**Auto-updates** — The server polls GitHub for new releases every 4 hours. When a new version is available, the dashboard shows a notification popup and a download row in Settings. One click downloads the installer for your platform directly — no browser redirect.
+**Auto-updates** — Update behavior depends on deployment mode. In local mode, the dashboard shows update controls (popup + Settings row) and lets you download/apply updates manually. In cloud mode, updates are managed automatically by the runtime with no manual update buttons in the UI.
 
 ---
 

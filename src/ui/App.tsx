@@ -26,6 +26,7 @@ import { useNotifications } from './hooks/useNotifications'
 import { semverGt } from './lib/releases'
 import { useDocumentVisible } from './hooks/useDocumentVisible'
 import { api } from './lib/client'
+import { shouldShowManualUpdateControls, shouldShowUpdateModal } from './lib/update-visibility'
 import { wsClient, type WsMessage } from './lib/ws'
 import {
   ROOM_BADGE_EVENT_TYPES,
@@ -355,6 +356,9 @@ function App(): React.JSX.Element {
       api.status.getParts(['storage', 'update']).then((status) => {
         const mode = (status.deploymentMode ?? 'local') as 'local' | 'cloud'
         setDeploymentMode(mode)
+        if (!shouldShowManualUpdateControls(mode)) {
+          setServerUpdateInfo(null)
+        }
         if (mode === 'local' && tabRef.current === 'stations') {
           setTab('status')
         }
@@ -372,6 +376,8 @@ function App(): React.JSX.Element {
         } else {
           setLocalModeBanner(null)
         }
+
+        if (!shouldShowManualUpdateControls(mode)) return
 
         const ui = status.updateInfo
         if (!ui) return
@@ -958,7 +964,7 @@ function App(): React.JSX.Element {
           }}
         />
       )}
-      {serverUpdateInfo && !updateDismissed && (
+      {shouldShowUpdateModal(deploymentMode, !!serverUpdateInfo, updateDismissed) && serverUpdateInfo && (
         <UpdateModal
           version={serverUpdateInfo.latestVersion}
           currentVersion={serverUpdateInfo.currentVersion}

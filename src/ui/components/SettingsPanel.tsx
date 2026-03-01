@@ -6,6 +6,7 @@ import { API_BASE, APP_MODE, clearToken, getToken } from '../lib/auth'
 import { storageGet, storageSet } from '../lib/storage'
 import * as notif from '../lib/notifications'
 import { semverGt } from '../lib/releases'
+import { shouldShowManualUpdateControls } from '../lib/update-visibility'
 
 interface SettingsPanelProps {
   advancedMode: boolean
@@ -21,6 +22,7 @@ interface UpdateInfo {
 interface ServerStatus {
   version: string
   uptime: number
+  deploymentMode?: 'local' | 'cloud'
   dataDir?: string
   dbPath?: string
   claude?: { available: boolean; version?: string }
@@ -79,6 +81,8 @@ export function SettingsPanel({ advancedMode, onAdvancedModeChange }: SettingsPa
   const [emailCode, setEmailCode] = useState('')
   const [telegramDeepLink, setTelegramDeepLink] = useState<string | null>(null)
   const { theme, setTheme } = useTheme()
+  const deploymentMode = APP_MODE === 'cloud' || serverStatus?.deploymentMode === 'cloud' ? 'cloud' : 'local'
+  const showManualUpdateControls = shouldShowManualUpdateControls(deploymentMode)
 
   async function handleCheckForUpdates(): Promise<void> {
     setUpdateChecking(true)
@@ -823,7 +827,7 @@ export function SettingsPanel({ advancedMode, onAdvancedModeChange }: SettingsPa
           <span className="font-medium text-text-secondary">Version</span>
           <div className="flex items-center gap-2">
             <span className="text-text-muted">{serverStatus?.version ?? '...'}</span>
-            {(() => {
+            {showManualUpdateControls && (() => {
               const ui = serverStatus?.updateInfo
               const hasUpdate = ui && serverStatus && semverGt(ui.latestVersion, serverStatus.version)
               if (hasUpdate) return null
@@ -840,7 +844,7 @@ export function SettingsPanel({ advancedMode, onAdvancedModeChange }: SettingsPa
             })()}
           </div>
         </div>
-        {(() => {
+        {showManualUpdateControls && (() => {
           const ui = serverStatus?.updateInfo
           if (!ui || !serverStatus) return null
           if (!semverGt(ui.latestVersion, serverStatus.version)) return null

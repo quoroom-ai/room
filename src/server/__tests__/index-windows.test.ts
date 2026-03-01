@@ -7,6 +7,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 let windowsQuote: (arg: string) => string
 let shellQuote: (arg: string) => string
 let isLoopbackAddress: (address: string | undefined) => boolean
+let createCloudReadyUpdateHandler: (triggerShutdown: () => void) => (version: string) => void
 
 // The server index has heavy side-effects. We import only the test-exported helpers
 // by mocking out every heavy dependency to prevent the module from initializing
@@ -28,6 +29,7 @@ beforeEach(async () => {
   windowsQuote = mod._windowsQuote
   shellQuote = mod._shellQuote
   isLoopbackAddress = mod._isLoopbackAddress
+  createCloudReadyUpdateHandler = mod._createCloudReadyUpdateHandler
 })
 
 describe('windowsQuote', () => {
@@ -88,5 +90,24 @@ describe('isLoopbackAddress', () => {
 
   it('returns false for undefined', () => {
     expect(isLoopbackAddress(undefined)).toBe(false)
+  })
+})
+
+describe('createCloudReadyUpdateHandler', () => {
+  it('triggers shutdown only once even when called multiple times', async () => {
+    vi.useFakeTimers()
+    try {
+      const shutdown = vi.fn()
+      const onReady = createCloudReadyUpdateHandler(shutdown)
+      onReady('1.2.3')
+      onReady('1.2.3')
+      onReady('1.2.4')
+
+      expect(shutdown).not.toHaveBeenCalled()
+      await vi.advanceTimersByTimeAsync(120)
+      expect(shutdown).toHaveBeenCalledTimes(1)
+    } finally {
+      vi.useRealTimers()
+    }
   })
 })
