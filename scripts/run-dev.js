@@ -4,6 +4,7 @@ const { resolve } = require('path')
 
 const IS_WIN = process.platform === 'win32'
 const isolated = process.argv.includes('--isolated')
+const withCloud = process.argv.includes('--with-cloud')
 
 const children = new Map()
 let shuttingDown = false
@@ -64,9 +65,10 @@ function terminateProcessTree(pid) {
   }
 }
 
-function startScript(scriptName, env = {}) {
-  const child = spawnNpm(['run', scriptName], { env })
+function startScript(scriptName, options = {}) {
+  const child = spawnNpm(['run', scriptName], { env: options.env ?? {} })
   children.set(scriptName, child)
+  const allowCleanExit = options.allowCleanExit === true
 
   child.on('error', () => {
     if (!shuttingDown) shutdown(1)
@@ -83,8 +85,10 @@ function startScript(scriptName, env = {}) {
     const cleanExit = code === 0
     if (!cleanExit) {
       console.error(`[dev] "${scriptName}" exited with code ${code ?? 'null'}${signal ? ` (signal: ${signal})` : ''}`)
-    } else {
+    } else if (!allowCleanExit) {
       console.error(`[dev] "${scriptName}" exited unexpectedly.`)
+    } else {
+      return
     }
     shutdown(code && code > 0 ? code : 1)
   })
@@ -117,21 +121,24 @@ async function main() {
     : (isolated ? 'dev:room:isolated' : 'dev:room')
   const cloudScript = IS_WIN ? 'dev:cloud:win' : 'dev:cloud'
 
-  startScript('dev:links')
+  if (withCloud && !hasCloudProject) {
+    throw new Error(`[dev] Cloud project not found at ${cloudDir}`)
+  }
+
+  startScript('dev:links', {
+    allowCleanExit: true,
+    env: {
+      QUOROOM_DEV_EXPECT_CLOUD: withCloud ? '1' : '0',
+      QUOROOM_DEV_EXPECT_UI: isolated ? '1' : '0',
+    },
+  })
   startScript(roomScript)
   if (isolated) {
-    if (hasCloudProject) {
-      startScript(cloudScript)
-    } else {
-      console.warn(`[dev] Skipping cloud: missing project at ${cloudDir}`)
-    }
-    startScript('dev:ui', { VITE_API_PORT: '4700' })
-  } else {
-    if (hasCloudProject) {
-      startScript(cloudScript)
-    } else {
-      console.warn(`[dev] Skipping cloud: missing project at ${cloudDir}`)
-    }
+    startScript('dev:ui', { env: { VITE_API_PORT: '4700' } })
+  }
+
+  if (withCloud) {
+    startScript(cloudScript)
   }
 }
 

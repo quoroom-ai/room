@@ -457,6 +457,11 @@ npm install              # Install dependencies
 npm run build            # Typecheck + bundle MCP server + build UI
 npm run build:mcp        # Bundle MCP server only (esbuild)
 npm run build:ui         # Build UI SPA only (Vite)
+npm run dev              # Local-only dev (links + room)
+npm run dev:with-cloud   # Local dev + cloud (requires ../cloud)
+npm run dev:isolated     # Isolated local dev (room :4700 + UI, no cloud)
+npm run dev:isolated:with-cloud # Isolated local dev + cloud
+npm run dev:cloud        # Cloud-only (runs ../cloud on :3715)
 npm run dev:ui           # UI dev server with hot reload
 npm run typecheck        # Type-check only (tsc --noEmit)
 npm test                 # Run all tests (vitest, fork pool)
@@ -464,7 +469,10 @@ npm run test:watch       # Watch mode
 npm run test:e2e         # End-to-end tests (Playwright)
 
 # Windows
+npm run dev:win              # Local-only dev (same as npm run dev)
+npm run dev:with-cloud:win   # Local dev + cloud (requires ../cloud)
 npm run dev:isolated:win    # Windows equivalent of dev:isolated
+npm run dev:isolated:with-cloud:win # Windows isolated + cloud
 npm run build:windows:local # Local Windows build (PowerShell)
 ```
 

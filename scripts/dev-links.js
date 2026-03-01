@@ -2,10 +2,12 @@
 
 const net = require('net')
 
-const TARGETS = [
-  { host: '127.0.0.1', port: 3715 },
-  { host: '127.0.0.1', port: 4700 },
-]
+const expectCloud = process.env.QUOROOM_DEV_EXPECT_CLOUD === '1'
+const expectUi = process.env.QUOROOM_DEV_EXPECT_UI === '1'
+
+const TARGETS = [{ host: '127.0.0.1', port: 4700 }]
+if (expectCloud) TARGETS.push({ host: '127.0.0.1', port: 3715 })
+if (expectUi) TARGETS.push({ host: '127.0.0.1', port: 5173 })
 
 const MAX_WAIT_MS = 180000
 const RETRY_MS = 500
@@ -41,10 +43,14 @@ async function allReady() {
 
 function printLinks() {
   console.log('\n[dev] Services ready')
-  console.log('Cloud landing:   http://127.0.0.1:3715/')
-  console.log('Cloud dashboard: http://127.0.0.1:3715/app')
+  if (expectCloud) {
+    console.log('Cloud landing:   http://127.0.0.1:3715/')
+    console.log('Cloud dashboard: http://127.0.0.1:3715/app')
+  }
   console.log('Local dashboard: http://localhost:4700')
-  console.log('Vite dev (HMR):  http://localhost:5173')
+  if (expectUi) {
+    console.log('Vite dev (HMR):  http://localhost:5173')
+  }
   console.log('')
 }
 
