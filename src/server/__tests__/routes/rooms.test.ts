@@ -181,12 +181,33 @@ describe('Room routes', () => {
     })
   })
 
-  describe('POST /api/rooms/:id/queen/stop', () => {
+  describe('POST /api/rooms/:id/start', () => {
+    it('starts runtime and re-activates a paused room', async () => {
+      const createRes = await request(ctx, 'POST', '/api/rooms', { name: 'RoomStartRuntime' })
+      const roomId = (createRes.body as any).room.id as number
+      const queenId = (createRes.body as any).queen.id as number
+
+      await request(ctx, 'PATCH', `/api/workers/${queenId}`, { model: 'openai:gpt-4o-mini' })
+      await request(ctx, 'POST', `/api/rooms/${roomId}/pause`)
+      const startRes = await request(ctx, 'POST', `/api/rooms/${roomId}/start`)
+      expect(startRes.status).toBe(200)
+      expect((startRes.body as any).running).toBe(true)
+
+      const roomRes = await request(ctx, 'GET', `/api/rooms/${roomId}`)
+      expect(roomRes.status).toBe(200)
+      expect((roomRes.body as any).status).toBe('active')
+
+      await request(ctx, 'POST', `/api/rooms/${roomId}/stop`)
+    })
+  })
+
+  describe('POST /api/rooms/:id/stop', () => {
     it('stops all room workers and fails running room runtime rows', async () => {
-      const createRes = await request(ctx, 'POST', '/api/rooms', { name: 'QueenStopRuntime' })
+      const createRes = await request(ctx, 'POST', '/api/rooms', { name: 'RoomStopRuntime' })
       const roomId = (createRes.body as any).room.id
       const queenId = (createRes.body as any).queen.id as number
 
+      await request(ctx, 'PATCH', `/api/workers/${queenId}`, { model: 'openai:gpt-4o-mini' })
       const worker = queries.createWorker(ctx.db, {
         name: 'helper',
         systemPrompt: 'Help the queen.',
@@ -206,7 +227,10 @@ describe('Room routes', () => {
       })
       queries.createTaskRun(ctx.db, task.id)
 
-      const res = await request(ctx, 'POST', `/api/rooms/${roomId}/queen/stop`)
+      const startRes = await request(ctx, 'POST', `/api/rooms/${roomId}/start`)
+      expect(startRes.status).toBe(200)
+
+      const res = await request(ctx, 'POST', `/api/rooms/${roomId}/stop`)
       expect(res.status).toBe(200)
       expect((res.body as any).running).toBe(false)
 
@@ -219,9 +243,9 @@ describe('Room routes', () => {
       expect(runningCycles.cnt).toBe(0)
 
       const failedCycles = ctx.db.prepare(
-        "SELECT COUNT(*) as cnt FROM worker_cycles WHERE room_id = ? AND status = 'failed' AND error_message = 'Queen stopped by keeper'"
+        "SELECT COUNT(*) as cnt FROM worker_cycles WHERE room_id = ? AND status = 'failed' AND error_message = 'Room stopped by keeper'"
       ).get(roomId) as { cnt: number }
-      expect(failedCycles.cnt).toBeGreaterThanOrEqual(2)
+      expect(failedCycles.cnt).toBeGreaterThanOrEqual(1)
 
       const runningTaskRuns = ctx.db.prepare(
         `SELECT COUNT(*) as cnt FROM task_runs tr
@@ -233,9 +257,31 @@ describe('Room routes', () => {
       const failedTaskRuns = ctx.db.prepare(
         `SELECT COUNT(*) as cnt FROM task_runs tr
          JOIN tasks t ON t.id = tr.task_id
-         WHERE t.room_id = ? AND tr.status = 'failed' AND tr.error_message = 'Queen stopped by keeper'`
+         WHERE t.room_id = ? AND tr.status = 'failed'`
       ).get(roomId) as { cnt: number }
       expect(failedTaskRuns.cnt).toBeGreaterThanOrEqual(1)
+
+      const roomRes = await request(ctx, 'GET', `/api/rooms/${roomId}`)
+      expect(roomRes.status).toBe(200)
+      expect((roomRes.body as any).status).toBe('paused')
+    })
+  })
+
+  describe('POST /api/rooms/:id/queen/start', () => {
+    it('returns 410 because endpoint is deprecated', async () => {
+      const createRes = await request(ctx, 'POST', '/api/rooms', { name: 'LegacyQueenStart' })
+      const roomId = (createRes.body as any).room.id
+      const res = await request(ctx, 'POST', `/api/rooms/${roomId}/queen/start`)
+      expect(res.status).toBe(410)
+    })
+  })
+
+  describe('POST /api/rooms/:id/queen/stop', () => {
+    it('returns 410 because endpoint is deprecated', async () => {
+      const createRes = await request(ctx, 'POST', '/api/rooms', { name: 'LegacyQueenStop' })
+      const roomId = (createRes.body as any).room.id
+      const res = await request(ctx, 'POST', `/api/rooms/${roomId}/queen/stop`)
+      expect(res.status).toBe(410)
     })
   })
 

@@ -6,7 +6,7 @@ import * as queries from '../shared/db-queries'
 import { APP_NAME } from '../shared/constants'
 import { executeTask, isTaskRunning, cancelRunningTasksForRoom } from '../shared/task-runner'
 import { startCommentaryEngine, stopCommentaryEngine } from './clerk-commentary'
-import { triggerAgent, pauseAgent } from '../shared/agent-loop'
+import { clearRoomLaunchState, pauseAgent } from '../shared/agent-loop'
 import {
   ensureCloudRoomToken,
   fetchCloudRoomMessages,
@@ -330,6 +330,11 @@ async function syncCloudRoomMessages(db: Database.Database): Promise<void> {
 
 export function startServerRuntime(db: Database.Database): void {
   stopServerRuntime()
+  clearRoomLaunchState()
+
+  // Cleanup stale cycles from previous server run, but do not auto-resume agents.
+  const cleanedCycles = queries.cleanupStaleCycles(db)
+  if (cleanedCycles > 0) console.log(`Cleaned up ${cleanedCycles} stale worker cycles`)
 
   ensureClerkContactCheckTasks(db)
   refreshCronJobs(db)
@@ -364,35 +369,8 @@ export function startServerRuntime(db: Database.Database): void {
     queueClerkAlertRelay(db)
   }, CLERK_ALERT_RELAY_MS)
 
-  resumeActiveQueens(db)
-
   // Start clerk commentary engine
   startCommentaryEngine(db)
-}
-
-function makeCycleCallbacks() {
-  return {
-    onCycleLogEntry: (entry: { cycleId: number; seq: number; entryType: string; content: string }) => {
-      eventBus.emit(`cycle:${entry.cycleId}`, 'cycle:log', entry)
-    },
-    onCycleLifecycle: (event: 'created' | 'completed' | 'failed', cycleId: number, roomId: number) => {
-      eventBus.emit(`room:${roomId}`, `cycle:${event}`, { cycleId, roomId })
-    }
-  }
-}
-
-function resumeActiveQueens(db: Database.Database): void {
-  // Cleanup stale cycles from previous server run
-  const cleaned = queries.cleanupStaleCycles(db)
-  if (cleaned > 0) console.log(`Cleaned up ${cleaned} stale worker cycles`)
-
-  const rooms = queries.listRooms(db, 'active')
-  const callbacks = makeCycleCallbacks()
-  for (const room of rooms) {
-    if (!room.queenWorkerId) continue
-    console.log(`Auto-resuming queen for room "${room.name}" (#${room.id})`)
-    triggerAgent(db, room.id, room.queenWorkerId, callbacks)
-  }
 }
 
 export function stopServerRuntime(): void {

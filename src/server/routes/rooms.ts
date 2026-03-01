@@ -3,7 +3,7 @@ import type { Router } from '../router'
 import { createRoom, pauseRoom, restartRoom, deleteRoom, getRoomStatus } from '../../shared/room'
 import * as queries from '../../shared/db-queries'
 import { eventBus } from '../event-bus'
-import { triggerAgent, pauseAgent, isAgentRunning } from '../../shared/agent-loop'
+import { triggerAgent, isAgentRunning, setRoomLaunchEnabled } from '../../shared/agent-loop'
 import { initCloudSync } from '../cloud'
 import { getRoomCloudId, fetchReferredRooms, type ReferredRoom } from '../../shared/cloud-sync'
 import { QUEEN_DEFAULTS_BY_PLAN, CHATGPT_DEFAULTS_BY_PLAN, type ClaudePlan, type ChatGptPlan } from '../../shared/constants'
@@ -34,6 +34,17 @@ function emitQueenState(roomId: number, running: boolean): void {
     running,
     updatedAt: new Date().toISOString(),
   })
+}
+
+function makeCycleCallbacks(roomId: number) {
+  return {
+    onCycleLogEntry: (entry: { cycleId: number; seq: number; entryType: string; content: string }) => {
+      eventBus.emit(`cycle:${entry.cycleId}`, 'cycle:log', entry)
+    },
+    onCycleLifecycle: (event: 'created' | 'completed' | 'failed', cycleId: number, _roomId: number) => {
+      eventBus.emit(`room:${roomId}`, `cycle:${event}`, { cycleId, roomId })
+    }
+  }
 }
 
 function getLocalReferredRooms(db: Database.Database, roomId: number): ReferredRoom[] {
@@ -296,11 +307,8 @@ export function registerRoomRoutes(router: Router): void {
 
     // Archive: pause all agents and log
     if (updates.status === 'stopped') {
-      const workers = queries.listRoomWorkers(ctx.db, roomId)
-      for (const w of workers) {
-        queries.updateAgentState(ctx.db, w.id, 'idle')
-        pauseAgent(ctx.db, w.id)
-      }
+      setRoomLaunchEnabled(roomId, false)
+      stopRoomRuntime(ctx.db, roomId, 'Room archived')
       queries.logRoomActivity(ctx.db, roomId, 'system', 'Room archived')
     }
 
@@ -320,11 +328,11 @@ export function registerRoomRoutes(router: Router): void {
     const roomId = Number(ctx.params.id)
     try {
       pauseRoom(ctx.db, roomId)
-      const workers = queries.listRoomWorkers(ctx.db, roomId)
-      for (const w of workers) {
-        pauseAgent(ctx.db, w.id)
-      }
+      setRoomLaunchEnabled(roomId, false)
+      stopRoomRuntime(ctx.db, roomId, 'Room stopped by keeper')
       eventBus.emit(`room:${roomId}`, 'room:paused', { roomId })
+      eventBus.emit(`room:${roomId}`, 'room:queen_stopped', { roomId, running: false })
+      emitQueenState(roomId, false)
       emitRoomsUpdated('room_paused', { roomId })
       return { data: { ok: true } }
     } catch (e) {
@@ -332,10 +340,55 @@ export function registerRoomRoutes(router: Router): void {
     }
   })
 
+  router.post('/api/rooms/:id/start', (ctx) => {
+    const roomId = Number(ctx.params.id)
+    const room = queries.getRoom(ctx.db, roomId)
+    if (!room) return { status: 404, error: 'Room not found' }
+    if (room.status === 'stopped') return { status: 400, error: 'Room is stopped' }
+    if (!room.queenWorkerId) return { status: 400, error: 'No queen worker' }
+
+    if (room.status !== 'active') {
+      queries.updateRoom(ctx.db, roomId, { status: 'active' })
+    }
+
+    setRoomLaunchEnabled(roomId, true)
+    stopRoomRuntime(ctx.db, roomId, 'Runtime reset before room start')
+    triggerAgent(ctx.db, roomId, room.queenWorkerId, {
+      ...makeCycleCallbacks(roomId),
+      allowColdStart: true
+    })
+
+    eventBus.emit(`room:${roomId}`, 'room:started', { roomId })
+    eventBus.emit(`room:${roomId}`, 'room:queen_started', { roomId, running: true })
+    emitQueenState(roomId, true)
+    emitRoomsUpdated('room_started', { roomId })
+    return { data: { ok: true, running: true } }
+  })
+
+  router.post('/api/rooms/:id/stop', (ctx) => {
+    const roomId = Number(ctx.params.id)
+    const room = queries.getRoom(ctx.db, roomId)
+    if (!room) return { status: 404, error: 'Room not found' }
+
+    setRoomLaunchEnabled(roomId, false)
+    stopRoomRuntime(ctx.db, roomId, 'Room stopped by keeper')
+    if (room.status !== 'stopped') {
+      queries.updateRoom(ctx.db, roomId, { status: 'paused' })
+    }
+
+    eventBus.emit(`room:${roomId}`, 'room:stopped', { roomId })
+    eventBus.emit(`room:${roomId}`, 'room:paused', { roomId })
+    eventBus.emit(`room:${roomId}`, 'room:queen_stopped', { roomId, running: false })
+    emitQueenState(roomId, false)
+    emitRoomsUpdated('room_paused', { roomId })
+    return { data: { ok: true, running: false } }
+  })
+
   router.post('/api/rooms/:id/restart', (ctx) => {
     const roomId = Number(ctx.params.id)
     const { goal } = ctx.body as Record<string, unknown> || {}
     try {
+      setRoomLaunchEnabled(roomId, false)
       restartRoom(ctx.db, roomId, goal as string | undefined)
       eventBus.emit(`room:${roomId}`, 'room:restarted', { roomId })
       emitRoomsUpdated('room_restarted', { roomId })
@@ -366,31 +419,12 @@ export function registerRoomRoutes(router: Router): void {
     }
   })
 
-  router.post('/api/rooms/:id/queen/start', (ctx) => {
-    const roomId = Number(ctx.params.id)
-    const room = queries.getRoom(ctx.db, roomId)
-    if (!room) return { status: 404, error: 'Room not found' }
-    if (room.status !== 'active') return { status: 400, error: 'Room is not active' }
-    if (!room.queenWorkerId) return { status: 400, error: 'No queen worker' }
-    stopRoomRuntime(ctx.db, roomId, 'Runtime reset before queen start')
-    triggerAgent(ctx.db, roomId, room.queenWorkerId, {
-      onCycleLogEntry: (entry) => eventBus.emit(`cycle:${entry.cycleId}`, 'cycle:log', entry),
-      onCycleLifecycle: (event, cycleId) => eventBus.emit(`room:${roomId}`, `cycle:${event}`, { cycleId, roomId })
-    })
-    eventBus.emit(`room:${roomId}`, 'room:queen_started', { roomId, running: true })
-    emitQueenState(roomId, true)
-    return { data: { ok: true, running: true } }
+  router.post('/api/rooms/:id/queen/start', (_ctx) => {
+    return { status: 410, error: 'Deprecated. Use POST /api/rooms/:id/start' }
   })
 
-  router.post('/api/rooms/:id/queen/stop', (ctx) => {
-    const roomId = Number(ctx.params.id)
-    const room = queries.getRoom(ctx.db, roomId)
-    if (!room) return { status: 404, error: 'Room not found' }
-    if (!room.queenWorkerId) return { status: 400, error: 'No queen worker' }
-    stopRoomRuntime(ctx.db, roomId, 'Queen stopped by keeper')
-    eventBus.emit(`room:${roomId}`, 'room:queen_stopped', { roomId, running: false })
-    emitQueenState(roomId, false)
-    return { data: { ok: true, running: false } }
+  router.post('/api/rooms/:id/queen/stop', (_ctx) => {
+    return { status: 410, error: 'Deprecated. Use POST /api/rooms/:id/stop' }
   })
 
   // Worker cycles (agent loop output)
@@ -424,11 +458,8 @@ export function registerRoomRoutes(router: Router): void {
   router.delete('/api/rooms/:id', (ctx) => {
     const roomId = Number(ctx.params.id)
     try {
-      // Stop all agent loops before deleting workers from DB
-      const workers = queries.listRoomWorkers(ctx.db, roomId)
-      for (const w of workers) {
-        pauseAgent(ctx.db, w.id)
-      }
+      setRoomLaunchEnabled(roomId, false)
+      stopRoomRuntime(ctx.db, roomId, 'Room deleted')
       deleteRoom(ctx.db, roomId)
       eventBus.emit(`room:${roomId}`, 'room:deleted', { roomId })
       emitRoomsUpdated('room_deleted', { roomId })

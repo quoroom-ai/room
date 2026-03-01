@@ -18,7 +18,17 @@ vi.mock('../rate-limit', async () => {
   }
 })
 
-import { runCycle, startAgentLoop, pauseAgent, triggerAgent, getAgentState, isAgentRunning, _stopAllLoops, RateLimitError } from '../agent-loop'
+import {
+  runCycle,
+  startAgentLoop,
+  pauseAgent,
+  triggerAgent,
+  getAgentState,
+  isAgentRunning,
+  _stopAllLoops,
+  RateLimitError,
+  setRoomLaunchEnabled,
+} from '../agent-loop'
 import { executeAgent } from '../agent-executor'
 import { sleep } from '../rate-limit'
 
@@ -405,11 +415,64 @@ describe('triggerAgent', () => {
     expect(callCount).toBe(2)
   })
 
-  it('starts loop if not running', () => {
+  it('does not cold-start when room launch is disabled', async () => {
+    let callCount = 0
+    mockExecuteAgent.mockImplementation(async () => {
+      callCount++
+      pauseAgent(db, queenId)
+      return {
+        output: 'done',
+        exitCode: 0,
+        durationMs: 100,
+        sessionId: null,
+        timedOut: false
+      }
+    })
+
     expect(isAgentRunning(queenId)).toBe(false)
-    // triggerAgent on non-running agent should start the loop
     triggerAgent(db, roomId, queenId)
-    // It fires async, so just verify it doesn't throw
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    expect(callCount).toBe(0)
+    expect(isAgentRunning(queenId)).toBe(false)
+  })
+
+  it('cold-starts when allowColdStart is true', async () => {
+    let callCount = 0
+    mockExecuteAgent.mockImplementation(async () => {
+      callCount++
+      pauseAgent(db, queenId)
+      return {
+        output: 'started',
+        exitCode: 0,
+        durationMs: 100,
+        sessionId: null,
+        timedOut: false
+      }
+    })
+
+    triggerAgent(db, roomId, queenId, { allowColdStart: true })
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    expect(callCount).toBe(1)
+  })
+
+  it('cold-starts when room launch is enabled', async () => {
+    let callCount = 0
+    mockExecuteAgent.mockImplementation(async () => {
+      callCount++
+      pauseAgent(db, queenId)
+      return {
+        output: 'started',
+        exitCode: 0,
+        durationMs: 100,
+        sessionId: null,
+        timedOut: false
+      }
+    })
+
+    setRoomLaunchEnabled(roomId, true)
+    triggerAgent(db, roomId, queenId)
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    expect(callCount).toBe(1)
   })
 })
 

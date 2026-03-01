@@ -928,7 +928,7 @@ export function RoomSettingsPanel({ roomId }: RoomSettingsPanelProps): React.JSX
     await withSwitchPending(`queen-running:${targetRoomId}`, async () => {
       setQueenRunning(prev => ({ ...prev, [targetRoomId]: true }))
       try {
-        await api.rooms.queenStart(targetRoomId)
+        await api.rooms.start(targetRoomId)
       } catch {
         setQueenRunning(prev => ({ ...prev, [targetRoomId]: false }))
       }
@@ -939,7 +939,7 @@ export function RoomSettingsPanel({ roomId }: RoomSettingsPanelProps): React.JSX
     await withSwitchPending(`queen-running:${targetRoomId}`, async () => {
       setQueenRunning(prev => ({ ...prev, [targetRoomId]: false }))
       try {
-        await api.rooms.queenStop(targetRoomId)
+        await api.rooms.stop(targetRoomId)
       } catch {
         setQueenRunning(prev => ({ ...prev, [targetRoomId]: true }))
       }
@@ -1117,11 +1117,11 @@ export function RoomSettingsPanel({ roomId }: RoomSettingsPanelProps): React.JSX
     setArchiveError(null)
     const issues: string[] = []
     try {
-      // Stop the queen first so no new jobs are created during archival.
+      // Stop room runtime first so no new jobs are created during archival.
       try {
-        await api.rooms.queenStop(room.id)
+        await api.rooms.stop(room.id)
       } catch (err) {
-        issues.push(`Failed to stop queen: ${getErrorMessage(err)}`)
+        issues.push(`Failed to stop room runtime: ${getErrorMessage(err)}`)
       }
 
       // Delete all cloud stations to prevent lingering spend.
@@ -1595,10 +1595,10 @@ export function RoomSettingsPanel({ roomId }: RoomSettingsPanelProps): React.JSX
                 'Email address the keeper can reply to. Replies route back to this room.'
               )}
 
-              {/* Queen start/stop */}
+              {/* Room runtime start/stop */}
               <div className="pt-2 flex gap-2 items-center">
-                {room.status === 'active' && (
-                  !Object.prototype.hasOwnProperty.call(queenRunning, room.id) ? (
+                {room.status !== 'stopped' && (
+                  room.status === 'active' && !Object.prototype.hasOwnProperty.call(queenRunning, room.id) ? (
                     <button
                       disabled
                       className="text-sm px-2.5 py-1.5 rounded-lg border border-border-primary text-text-muted opacity-70 cursor-not-allowed"
@@ -1608,16 +1608,16 @@ export function RoomSettingsPanel({ roomId }: RoomSettingsPanelProps): React.JSX
                       onClick={() => { void handleQueenStop(room.id) }}
                       disabled={queenRunningPending}
                       className="text-sm px-2.5 py-1.5 rounded-lg border text-orange-600 border-orange-200 hover:border-orange-300 transition-colors disabled:opacity-70 disabled:cursor-not-allowed"
-                    >Stop Queen</button>
+                    >Stop Room</button>
                   ) : (
                     <button
                       onClick={() => { void handleQueenStart(room.id) }}
                       disabled={queenRunningPending}
                       className="text-sm px-2.5 py-1.5 rounded-lg border text-status-success border-green-200 hover:border-green-300 transition-colors disabled:opacity-70 disabled:cursor-not-allowed"
-                    >Start Queen</button>
+                    >Start Room</button>
                   )
                 )}
-                {room.status === 'active' && queenRunningPending && <InlineSpinner />}
+                {room.status !== 'stopped' && queenRunningPending && <InlineSpinner />}
               </div>
             </div>
           </div>

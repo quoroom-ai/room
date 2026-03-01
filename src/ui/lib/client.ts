@@ -363,6 +363,10 @@ export const api = {
       request<Room>('POST', '/api/rooms', body),
     update: (id: number, body: Record<string, unknown>) =>
       request<Room>('PATCH', `/api/rooms/${id}`, body),
+    start: (id: number) =>
+      request<{ ok: true; running: boolean }>('POST', `/api/rooms/${id}/start`),
+    stop: (id: number) =>
+      request<{ ok: true; running: boolean }>('POST', `/api/rooms/${id}/stop`),
     pause: (id: number) =>
       request<{ ok: true }>('POST', `/api/rooms/${id}/pause`),
     restart: (id: number, goal?: string) =>
@@ -386,10 +390,6 @@ export const api = {
           ready: boolean
         }
       }>('GET', `/api/rooms/${id}/queen`),
-    queenStart: (id: number) =>
-      request<{ ok: true; running: boolean }>('POST', `/api/rooms/${id}/queen/start`),
-    queenStop: (id: number) =>
-      request<{ ok: true; running: boolean }>('POST', `/api/rooms/${id}/queen/stop`),
     cloudId: (id: number) =>
       request<{ cloudId: string }>('GET', `/api/rooms/${id}/cloud-id`).then(d => d.cloudId),
     network: (id: number) =>

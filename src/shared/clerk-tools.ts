@@ -551,13 +551,10 @@ export async function executeClerkTool(
       }
 
       case 'quoroom_start_queen': {
-        const room = resolveRoom(db, args)
-        if (!room) return { content: 'Error: room not found.', isError: true }
-        if (!room.queenWorkerId) return { content: `Error: room "${room.name}" has no queen worker.`, isError: true }
-        if (room.status !== 'active') return { content: `Error: room "${room.name}" is not active.`, isError: true }
-        stopRoomRuntime(db, room.id, 'Runtime reset before queen start')
-        triggerAgent(db, room.id, room.queenWorkerId)
-        return { content: `Started queen in "${room.name}" (#${room.id}).` }
+        return {
+          content: 'Error: direct queen start is disabled. Start the room manually from the Room controls.',
+          isError: true
+        }
       }
 
       case 'quoroom_stop_queen': {

@@ -42,10 +42,12 @@ function msUntilQuietEnd(until: string): number {
 }
 
 const runningLoops = new Map<number, LoopState>()
+const launchedRoomIds = new Set<number>()
 
 export interface AgentLoopOptions {
   onCycleLogEntry?: CycleLogEntryCallback
   onCycleLifecycle?: (event: 'created' | 'completed' | 'failed', cycleId: number, roomId: number) => void
+  allowColdStart?: boolean
 }
 
 export class RateLimitError extends Error {
@@ -194,11 +196,31 @@ export function resumeAgent(db: Database.Database, roomId: number, workerId: num
   })
 }
 
+export function setRoomLaunchEnabled(roomId: number, enabled: boolean): void {
+  if (enabled) {
+    launchedRoomIds.add(roomId)
+    return
+  }
+  launchedRoomIds.delete(roomId)
+}
+
+export function isRoomLaunchEnabled(roomId: number): boolean {
+  return launchedRoomIds.has(roomId)
+}
+
+export function clearRoomLaunchState(): void {
+  launchedRoomIds.clear()
+}
+
 export function triggerAgent(db: Database.Database, roomId: number, workerId: number, options?: AgentLoopOptions): void {
   const loop = runningLoops.get(workerId)
   if (loop?.running) {
     // Abort any current wait (gap or rate limit) to start next cycle immediately
     if (loop.waitAbort) loop.waitAbort.abort()
+    return
+  }
+  const canColdStart = options?.allowColdStart === true || isRoomLaunchEnabled(roomId)
+  if (!canColdStart) {
     return
   }
   // Not running — start fresh
@@ -697,4 +719,5 @@ export function _stopAllLoops(): void {
     if (loop.cycleAbort) loop.cycleAbort.abort()
   }
   runningLoops.clear()
+  clearRoomLaunchState()
 }

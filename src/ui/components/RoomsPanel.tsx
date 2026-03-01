@@ -89,18 +89,14 @@ export function RoomsPanel({ selectedRoomId, onSelectRoom }: RoomsPanelProps): R
     refresh()
   }
 
-  async function handlePause(roomId: number): Promise<void> {
+  async function handleStop(roomId: number): Promise<void> {
     if (confirmStopId !== roomId) {
       setConfirmStopId(roomId)
       return
     }
-    await api.rooms.pause(roomId)
+    await api.rooms.stop(roomId)
     setConfirmStopId(null)
-    refresh()
-  }
-
-  async function handleRestart(roomId: number): Promise<void> {
-    await api.rooms.restart(roomId)
+    setQueenRunning(prev => ({ ...prev, [roomId]: false }))
     refresh()
   }
 
@@ -115,14 +111,9 @@ export function RoomsPanel({ selectedRoomId, onSelectRoom }: RoomsPanelProps): R
     refresh()
   }
 
-  async function handleQueenStart(roomId: number): Promise<void> {
-    await api.rooms.queenStart(roomId)
+  async function handleRoomStart(roomId: number): Promise<void> {
+    await api.rooms.start(roomId)
     setQueenRunning(prev => ({ ...prev, [roomId]: true }))
-  }
-
-  async function handleQueenStop(roomId: number): Promise<void> {
-    await api.rooms.queenStop(roomId)
-    setQueenRunning(prev => ({ ...prev, [roomId]: false }))
   }
 
   return (
@@ -279,36 +270,30 @@ export function RoomsPanel({ selectedRoomId, onSelectRoom }: RoomsPanelProps): R
                     <>
                       {queenRunning[room.id] ? (
                         <button
-                          onClick={() => handleQueenStop(room.id)}
-                          className="text-sm px-2.5 py-1.5 rounded-lg border text-orange-600 border-orange-200 hover:border-orange-300 transition-colors"
+                          onClick={() => handleStop(room.id)}
+                          className={`text-sm px-2.5 py-1.5 rounded-lg border transition-colors ${
+                            confirmStopId === room.id
+                              ? 'text-red-600 border-red-300 bg-red-50 hover:bg-red-100'
+                              : 'text-orange-600 border-orange-200 hover:border-orange-300'
+                          }`}
                         >
-                          Stop Queen
+                          {confirmStopId === room.id ? 'Confirm Stop' : 'Stop Room'}
                         </button>
                       ) : (
                         <button
-                          onClick={() => handleQueenStart(room.id)}
+                          onClick={() => handleRoomStart(room.id)}
                           className="text-sm px-2.5 py-1.5 rounded-lg border text-status-success border-green-200 hover:border-green-300 transition-colors"
                         >
-                          Start Queen
+                          Start Room
                         </button>
                       )}
-                      <button
-                        onClick={() => handlePause(room.id)}
-                        className={`text-sm px-2.5 py-1.5 rounded-lg border transition-colors ${
-                          confirmStopId === room.id
-                            ? 'text-red-600 border-red-300 bg-red-50 hover:bg-red-100'
-                            : 'text-text-muted border-border-primary hover:border-border-primary hover:text-text-secondary'
-                        }`}
-                      >
-                        {confirmStopId === room.id ? 'Confirm Pause' : 'Pause'}
-                      </button>
                     </>
                   ) : room.status === 'paused' ? (
                     <button
-                      onClick={() => handleRestart(room.id)}
+                      onClick={() => handleRoomStart(room.id)}
                       className="text-sm px-2.5 py-1.5 rounded-lg border text-interactive border-border-primary hover:border-interactive transition-colors"
                     >
-                      Restart
+                      Start Room
                     </button>
                   ) : null}
 

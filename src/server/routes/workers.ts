@@ -2,7 +2,7 @@ import type { Router } from '../router'
 import type { AgentState } from '../../shared/types'
 import * as queries from '../../shared/db-queries'
 import { eventBus } from '../event-bus'
-import { triggerAgent, pauseAgent } from '../../shared/agent-loop'
+import { triggerAgent, pauseAgent, isRoomLaunchEnabled } from '../../shared/agent-loop'
 
 export function registerWorkerRoutes(router: Router): void {
   router.post('/api/workers', (ctx) => {
@@ -66,6 +66,9 @@ export function registerWorkerRoutes(router: Router): void {
     const room = queries.getRoom(ctx.db, worker.roomId)
     if (!room) return { status: 404, error: 'Room not found' }
     if (room.status !== 'active') return { status: 400, error: 'Room is not active' }
+    if (!isRoomLaunchEnabled(worker.roomId)) {
+      return { status: 409, error: 'Room runtime is not started. Start the room first.' }
+    }
     triggerAgent(ctx.db, worker.roomId, id, {
       onCycleLogEntry: (entry) => eventBus.emit(`cycle:${entry.cycleId}`, 'cycle:log', entry),
       onCycleLifecycle: (event, cycleId) => eventBus.emit(`room:${worker.roomId}`, `cycle:${event}`, { cycleId, roomId: worker.roomId })

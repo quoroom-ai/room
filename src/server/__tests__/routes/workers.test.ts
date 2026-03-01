@@ -123,6 +123,33 @@ describe('Worker routes', () => {
     })
   })
 
+  describe('POST /api/workers/:id/start', () => {
+    it('returns 409 when room runtime is not started', async () => {
+      const roomRes = await request(ctx, 'POST', '/api/rooms', { name: 'WorkerGateRoom' })
+      const queenId = (roomRes.body as any).queen.id as number
+
+      const res = await request(ctx, 'POST', `/api/workers/${queenId}/start`)
+      expect(res.status).toBe(409)
+      expect((res.body as any).error).toMatch(/start the room first/i)
+    })
+
+    it('starts worker after room start', async () => {
+      const roomRes = await request(ctx, 'POST', '/api/rooms', { name: 'WorkerStartRoom' })
+      const roomId = (roomRes.body as any).room.id as number
+      const queenId = (roomRes.body as any).queen.id as number
+
+      await request(ctx, 'PATCH', `/api/workers/${queenId}`, { model: 'openai:gpt-4o-mini' })
+      const startRoom = await request(ctx, 'POST', `/api/rooms/${roomId}/start`)
+      expect(startRoom.status).toBe(200)
+
+      const res = await request(ctx, 'POST', `/api/workers/${queenId}/start`)
+      expect(res.status).toBe(200)
+      expect((res.body as any).running).toBe(true)
+
+      await request(ctx, 'POST', `/api/rooms/${roomId}/stop`)
+    })
+  })
+
   describe('GET /api/rooms/:roomId/workers', () => {
     it('lists workers for a room', async () => {
       const roomRes = await request(ctx, 'POST', '/api/rooms', { name: 'WorkerRoom' })
