@@ -1,4 +1,6 @@
 import { createHash } from 'crypto'
+import { homedir } from 'os'
+import { join } from 'path'
 import type Database from 'better-sqlite3'
 
 let pipeline: ((text: string | string[]) => Promise<{ tolist: () => number[][] }>) | null = null
@@ -48,7 +50,9 @@ export async function initEngine(): Promise<void> {
   pipelineLoading = true
   try {
     // Dynamic import — @huggingface/transformers is optional
-    const { pipeline: createPipeline } = await import('@huggingface/transformers')
+    const { pipeline: createPipeline, env } = await import('@huggingface/transformers')
+    // Use user home dir to avoid EPERM on system-wide installs (e.g. C:\Program Files on Windows)
+    env.cacheDir = join(homedir(), '.quoroom', 'cache')
     const pipe = await createPipeline('feature-extraction', MODEL_NAME, {
       dtype: 'fp32',
       revision: 'main'
