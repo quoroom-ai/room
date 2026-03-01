@@ -119,34 +119,10 @@ jobs:
               echo "::error::Failed to verify runtime versions (HTTP $http_code)"
               exit 1
             fi
-            BODY="$body" node - <<'NODE'
-            const body = process.env.BODY || '{}'
-            let payload
-            try {
-              payload = JSON.parse(body)
-            } catch (error) {
-              console.error('Invalid JSON from runtime-versions response:', error.message)
-              process.exit(3)
-            }
-            const behind = Number(payload.behind || 0)
-            const unknown = Number(payload.unknown || 0)
-            if (unknown > 0) {
-              const unknownIds = Array.isArray(payload.instances)
-                ? payload.instances.filter((item) => item && !item.runtimeVersion).map((item) => item.id)
-                : []
-              console.error(`Runtime version unavailable on ${unknown} machine(s): ${unknownIds.join(', ')}`)
-              process.exit(2)
-            }
-            if (behind > 0) {
-              const lagging = Array.isArray(payload.instances)
-                ? payload.instances.filter((item) => item && item.isBehind).map((item) => item.id)
-                : []
-              console.error(`Runtime version drift detected on ${behind} machine(s): ${lagging.join(', ')}`)
-              process.exit(2)
-            }
-            process.exit(0)
-            NODE
+            set +e
+            BODY="$body" node -e "const body = process.env.BODY || '{}'; let payload; try { payload = JSON.parse(body); } catch (error) { console.error('Invalid JSON from runtime-versions response:', error.message); process.exit(3); } const behind = Number(payload.behind || 0); const unknown = Number(payload.unknown || 0); if (unknown > 0) { const unknownIds = Array.isArray(payload.instances) ? payload.instances.filter((item) => item && !item.runtimeVersion).map((item) => item.id) : []; console.error(\`Runtime version unavailable on \${unknown} machine(s): \${unknownIds.join(', ')}\`); process.exit(2); } if (behind > 0) { const lagging = Array.isArray(payload.instances) ? payload.instances.filter((item) => item && item.isBehind).map((item) => item.id) : []; console.error(\`Runtime version drift detected on \${behind} machine(s): \${lagging.join(', ')}\`); process.exit(2); } process.exit(0);"
             check_status=$?
+            set -e
             if [ "$check_status" -eq 0 ]; then
               echo "Runtime convergence confirmed."
               exit 0
