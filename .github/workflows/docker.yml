@@ -96,39 +96,72 @@ jobs:
             exit 0
           fi
           echo "Checking active runtime versions..."
-          response=$(curl -s -w "\n%{http_code}" \
-            "$CLOUD_API_URL/api/cloud/ops/runtime-versions" \
-            -H "Authorization: Bearer $CLOUD_ADMIN_TOKEN")
-          http_code=$(echo "$response" | tail -1)
-          body=$(echo "$response" | head -n -1)
-          echo "HTTP $http_code: $body"
-          if [ "$http_code" -ge 400 ]; then
-            echo "::error::Failed to verify runtime versions (HTTP $http_code)"
+          max_attempts=12
+          sleep_seconds=15
+          for attempt in $(seq 1 "$max_attempts"); do
+            echo "Runtime convergence check attempt ${attempt}/${max_attempts}"
+            response=$(curl -s --max-time 60 -w "\n%{http_code}" \
+              "$CLOUD_API_URL/api/cloud/ops/runtime-versions" \
+              -H "Authorization: Bearer $CLOUD_ADMIN_TOKEN")
+            http_code=$(echo "$response" | tail -1)
+            body=$(echo "$response" | head -n -1)
+            echo "HTTP $http_code: $body"
+            if [ "$http_code" -ge 500 ]; then
+              if [ "$attempt" -lt "$max_attempts" ]; then
+                echo "Transient server error from cloud API, retrying in ${sleep_seconds}s..."
+                sleep "$sleep_seconds"
+                continue
+              fi
+              echo "::error::Failed to verify runtime versions after retries (HTTP $http_code)"
+              exit 1
+            fi
+            if [ "$http_code" -ge 400 ]; then
+              echo "::error::Failed to verify runtime versions (HTTP $http_code)"
+              exit 1
+            fi
+            BODY="$body" node - <<'NODE'
+            const body = process.env.BODY || '{}'
+            let payload
+            try {
+              payload = JSON.parse(body)
+            } catch (error) {
+              console.error('Invalid JSON from runtime-versions response:', error.message)
+              process.exit(3)
+            }
+            const behind = Number(payload.behind || 0)
+            const unknown = Number(payload.unknown || 0)
+            if (unknown > 0) {
+              const unknownIds = Array.isArray(payload.instances)
+                ? payload.instances.filter((item) => item && !item.runtimeVersion).map((item) => item.id)
+                : []
+              console.error(`Runtime version unavailable on ${unknown} machine(s): ${unknownIds.join(', ')}`)
+              process.exit(2)
+            }
+            if (behind > 0) {
+              const lagging = Array.isArray(payload.instances)
+                ? payload.instances.filter((item) => item && item.isBehind).map((item) => item.id)
+                : []
+              console.error(`Runtime version drift detected on ${behind} machine(s): ${lagging.join(', ')}`)
+              process.exit(2)
+            }
+            process.exit(0)
+            NODE
+            check_status=$?
+            if [ "$check_status" -eq 0 ]; then
+              echo "Runtime convergence confirmed."
+              exit 0
+            fi
+            if [ "$check_status" -eq 2 ] || [ "$check_status" -eq 3 ]; then
+              if [ "$attempt" -lt "$max_attempts" ]; then
+                echo "Runtime convergence not reached yet, retrying in ${sleep_seconds}s..."
+                sleep "$sleep_seconds"
+                continue
+              fi
+              echo "::error::Runtime convergence not reached after retries"
+              exit 1
+            fi
+            echo "::error::Unexpected runtime convergence checker failure (exit $check_status)"
             exit 1
-          fi
-          BODY="$body" node - <<'NODE'
-          const body = process.env.BODY || '{}'
-          let payload
-          try {
-            payload = JSON.parse(body)
-          } catch (error) {
-            console.error('Invalid JSON from runtime-versions response:', error.message)
-            process.exit(1)
-          }
-          const behind = Number(payload.behind || 0)
-          const unknown = Number(payload.unknown || 0)
-          if (unknown > 0) {
-            const unknownIds = Array.isArray(payload.instances)
-              ? payload.instances.filter((item) => item && !item.runtimeVersion).map((item) => item.id)
-              : []
-            console.error(`Runtime version unavailable on ${unknown} machine(s): ${unknownIds.join(', ')}`)
-            process.exit(1)
-          }
-          if (behind > 0) {
-            const lagging = Array.isArray(payload.instances)
-              ? payload.instances.filter((item) => item && item.isBehind).map((item) => item.id)
-              : []
-            console.error(`Runtime version drift detected on ${behind} machine(s): ${lagging.join(', ')}`)
-            process.exit(1)
-          }
-          NODE
+          done
+          echo "::error::Runtime convergence loop exited unexpectedly"
+          exit 1
