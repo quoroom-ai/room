@@ -114,6 +114,96 @@ describe('runCycle', () => {
     expect(callArgs.prompt).toContain('How should I proceed?')
   })
 
+  it('includes queen controller contract in queen prompt', async () => {
+    const worker = queries.getWorker(db, queenId)!
+    await runCycle(db, roomId, worker)
+
+    const callArgs = mockExecuteAgent.mock.calls[0][0]
+    expect(callArgs.prompt).toContain('Queen Controller Contract (Model B)')
+    expect(callArgs.prompt).toContain('quoroom_delegate_task')
+  })
+
+  it('does not inject queen controller contract for non-queen workers', async () => {
+    const w2 = queries.createWorker(db, { name: 'Executor', systemPrompt: 'execute', roomId })
+    mockExecuteAgent.mockClear()
+    await runCycle(db, roomId, w2)
+
+    const callArgs = mockExecuteAgent.mock.calls[0][0]
+    expect(callArgs.prompt).not.toContain('Queen Controller Contract (Model B)')
+  })
+
+  it('auto-creates one executor worker when queen is alone', async () => {
+    expect(queries.listRoomWorkers(db, roomId).length).toBe(1)
+    const worker = queries.getWorker(db, queenId)!
+    await runCycle(db, roomId, worker)
+
+    const roomWorkers = queries.listRoomWorkers(db, roomId)
+    const nonQueen = roomWorkers.filter(w => w.id !== queenId)
+    expect(nonQueen).toHaveLength(1)
+    expect(nonQueen[0].role).toBe('executor')
+    expect(nonQueen[0].name).toMatch(/^executor-\d+$/)
+  })
+
+  it('does not create duplicate auto executors across cycles', async () => {
+    const worker = queries.getWorker(db, queenId)!
+    await runCycle(db, roomId, worker)
+    await runCycle(db, roomId, worker)
+
+    const nonQueen = queries.listRoomWorkers(db, roomId).filter(w => w.id !== queenId)
+    expect(nonQueen).toHaveLength(1)
+  })
+
+  it('auto-created executor inherits codex model when room follows queen model', async () => {
+    queries.updateRoom(db, roomId, { workerModel: 'queen' } as Parameters<typeof queries.updateRoom>[2])
+    queries.updateWorker(db, queenId, { model: 'codex' } as Parameters<typeof queries.updateWorker>[2])
+
+    const worker = queries.getWorker(db, queenId)!
+    await runCycle(db, roomId, worker)
+
+    const nonQueen = queries.listRoomWorkers(db, roomId).filter(w => w.id !== queenId)
+    expect(nonQueen).toHaveLength(1)
+    expect(nonQueen[0].model).toBe('codex')
+  })
+
+  it('logs soft policy deviation and stores corrective WIP when queen executes web tools', async () => {
+    queries.updateWorker(db, queenId, { model: 'openai:gpt-4o-mini' } as Parameters<typeof queries.updateWorker>[2])
+    queries.createCredential(db, roomId, 'openai_api_key', 'api_key', 'sk-test-key')
+    mockExecuteAgent.mockImplementationOnce(async (opts: any) => {
+      if (opts.onConsoleLog) {
+        opts.onConsoleLog({ entryType: 'tool_call', content: '→ quoroom_web_search({"query":"market size"})' })
+      }
+      return {
+        output: 'Execution completed.',
+        exitCode: 0,
+        durationMs: 200,
+        sessionId: null,
+        timedOut: false
+      }
+    })
+
+    const worker = queries.getWorker(db, queenId)!
+    const output = await runCycle(db, roomId, worker)
+
+    expect(output).toContain('Execution completed')
+    const activity = queries.getRoomActivity(db, roomId)
+    expect(activity.some(a => a.summary.includes('Queen policy deviation'))).toBe(true)
+    const updated = queries.getWorker(db, queenId)!
+    expect(updated.wip).toContain('Queen control-plane mode: delegate execution tasks to workers')
+    expect(updated.wip).toContain('quoroom_delegate_task')
+  })
+
+  it('keeps worker objection path visible in worker prompt context', async () => {
+    const w2 = queries.createWorker(db, { name: 'Worker', systemPrompt: 'execute tasks', roomId })
+    queries.createAnnouncement(db, roomId, queenId, 'Ship new pricing?', 'strategy',
+      new Date(Date.now() + 600000).toISOString())
+
+    mockExecuteAgent.mockClear()
+    await runCycle(db, roomId, w2)
+    const callArgs = mockExecuteAgent.mock.calls[0][0]
+    expect(callArgs.prompt).toContain('Announced Decisions')
+    expect(callArgs.prompt).toContain('object with quoroom_object if you disagree')
+  })
+
   it('uses worker model for execution', async () => {
     queries.updateWorker(db, queenId, { model: 'openai:gpt-4o-mini' } as Parameters<typeof queries.updateWorker>[2])
     queries.createCredential(db, roomId, 'openai_api_key', 'api_key', 'sk-test-key')

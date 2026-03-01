@@ -4,6 +4,7 @@ import { join } from 'path'
 import Database from 'better-sqlite3'
 import { initTestDb } from '../../../shared/__tests__/helpers/test-db'
 import * as queries from '../../../shared/db-queries'
+import { checkExpiredDecisions } from '../../../shared/quorum'
 
 // Capture tool handlers by mocking McpServer
 type ToolHandler = (params: Record<string, unknown>) => Promise<{
@@ -565,6 +566,27 @@ describe('quoroom_propose', () => {
 })
 
 describe('quoroom_vote', () => {
+  it('records objection when voting no on an announced decision', async () => {
+    await toolHandlers.get('quoroom_create_room')!({ name: 'ObjRoom', goal: 'test' })
+    const rooms = queries.listRooms(db)
+    const roomId = rooms[0].id
+    const queenId = rooms[0].queenWorkerId!
+    const worker = queries.createWorker(db, { name: 'Worker A', systemPrompt: 'w', roomId })
+
+    await toolHandlers.get('quoroom_propose')!({
+      roomId, proposerId: queenId,
+      proposal: 'Switch infra provider', decisionType: 'strategy'
+    })
+    const decision = queries.listDecisions(db, roomId, 'announced')[0]
+
+    const handler = toolHandlers.get('quoroom_vote')!
+    const result = await handler({
+      decisionId: decision.id, workerId: worker.id, vote: 'no', reasoning: 'Too risky now'
+    })
+    expect(getResponseText(result)).toContain('Objection recorded')
+    expect(queries.getDecision(db, decision.id)!.status).toBe('objected')
+  })
+
   it('casts a vote and resolves decision', async () => {
     await toolHandlers.get('quoroom_create_room')!({ name: 'VR', goal: 'test' })
     const rooms = queries.listRooms(db)
@@ -581,6 +603,34 @@ describe('quoroom_vote', () => {
     })
     const text = getResponseText(result)
     expect(text).toContain('Vote')
+  })
+
+  it('keeps announced decisions effective when no objection is raised before expiry sweep', async () => {
+    await toolHandlers.get('quoroom_create_room')!({ name: 'EffRoom', goal: 'test' })
+    const rooms = queries.listRooms(db)
+    const roomId = rooms[0].id
+    const queenId = rooms[0].queenWorkerId!
+
+    await toolHandlers.get('quoroom_propose')!({
+      roomId, proposerId: queenId,
+      proposal: 'Adopt weekly delivery cadence', decisionType: 'strategy'
+    })
+    const decision = queries.listDecisions(db, roomId, 'announced')[0]
+    const past = new Date(Date.now() - 60_000)
+    const localTimeStr = [
+      past.getFullYear(),
+      String(past.getMonth() + 1).padStart(2, '0'),
+      String(past.getDate()).padStart(2, '0')
+    ].join('-') + ' ' + [
+      String(past.getHours()).padStart(2, '0'),
+      String(past.getMinutes()).padStart(2, '0'),
+      String(past.getSeconds()).padStart(2, '0')
+    ].join(':')
+    db.prepare('UPDATE quorum_decisions SET effective_at = ? WHERE id = ?').run(localTimeStr, decision.id)
+
+    const updatedCount = checkExpiredDecisions(db)
+    expect(updatedCount).toBe(1)
+    expect(queries.getDecision(db, decision.id)!.status).toBe('effective')
   })
 
   it('returns error for invalid decision', async () => {

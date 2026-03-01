@@ -282,6 +282,28 @@ describe('checkExpiredDecisions', () => {
     const count = checkExpiredDecisions(db)
     expect(count).toBe(2)
   })
+
+  it('does not auto-effect decisions that were objected', () => {
+    const past = new Date(Date.now() - 60000)
+    const localTimeStr = [
+      past.getFullYear(),
+      String(past.getMonth() + 1).padStart(2, '0'),
+      String(past.getDate()).padStart(2, '0')
+    ].join('-') + ' ' + [
+      String(past.getHours()).padStart(2, '0'),
+      String(past.getMinutes()).padStart(2, '0'),
+      String(past.getSeconds()).padStart(2, '0')
+    ].join(':')
+
+    const decision = queries.createAnnouncement(
+      db, roomId, queenId, 'Will be objected before expiry sweep', 'strategy', localTimeStr
+    )
+    object(db, decision.id, worker1Id, 'Too risky')
+
+    const count = checkExpiredDecisions(db)
+    expect(count).toBe(0)
+    expect(queries.getDecision(db, decision.id)!.status).toBe('objected')
+  })
 })
 
 describe('keeperVote', () => {

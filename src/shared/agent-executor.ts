@@ -108,8 +108,10 @@ export async function executeAgent(options: AgentExecutionOptions): Promise<Agen
     }
     return executeAnthropicApi(options)
   }
-  // Default: Claude Code CLI
-  return executeClaude(options)
+  if (model === 'claude' || model.startsWith('claude-')) {
+    return executeClaude(options)
+  }
+  throw new Error(`Unsupported model "${model}". Configure an explicit supported model (claude, codex, openai:*, anthropic:*, gemini:*).`)
 }
 
 async function executeClaude(options: AgentExecutionOptions): Promise<AgentExecutionResult> {

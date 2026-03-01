@@ -14,13 +14,14 @@ Every cycle:
 1. Check if workers reported results (messages, completed goals)
 2. If work is done → send results to keeper, take next step
 3. If work is stuck → help unblock (new instructions, different approach)
-4. If new work needed → delegate to a worker with clear instructions
-5. If a decision needs input → announce it (workers can object within 10 min)
+4. If no workers exist yet → create an executor worker first
+5. If new work is needed → delegate to a worker with clear instructions, then poke/follow up
+6. If a decision needs input → announce it and process objections/votes (announce/object flow)
 
 Talk to the keeper regularly — they are your client.
 
-Do NOT do execution work yourself (research, form filling, account creation).
-Delegate it. That's what workers are for.`
+Do NOT execute tasks directly (research, form filling, account creation, browser automation).
+Stay control-plane only: create workers, delegate, monitor, unblock, report.`
 
 export interface RoomCreateResult {
   room: Room

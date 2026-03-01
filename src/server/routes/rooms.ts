@@ -442,8 +442,8 @@ export function registerRoomRoutes(router: Router): void {
     // Include model mode so UI knows if tokens are tracked
     const room = queries.getRoom(ctx.db, roomId)
     const queenWorker = room?.queenWorkerId ? queries.getWorker(ctx.db, room.queenWorkerId) : null
-    const model = queenWorker?.model ?? room?.workerModel ?? 'claude'
-    const isApiModel = model.startsWith('openai') || model.startsWith('anthropic') || model.startsWith('claude-api')
+    const model = queenWorker?.model ?? room?.workerModel ?? null
+    const isApiModel = !!model && (model.startsWith('openai') || model.startsWith('anthropic') || model.startsWith('claude-api'))
     return { data: { total, today, isApiModel } }
   })
 

@@ -198,7 +198,7 @@ const TOOL_WEB_SEARCH: ToolDef = {
   type: 'function',
   function: {
     name: 'quoroom_web_search',
-    description: 'Search the web. Returns top 5 results.',
+    description: 'Search the web. Returns top 5 results. Queen should delegate this to workers first in control-plane mode.',
     parameters: {
       type: 'object',
       properties: {
@@ -213,7 +213,7 @@ const TOOL_WEB_FETCH: ToolDef = {
   type: 'function',
   function: {
     name: 'quoroom_web_fetch',
-    description: 'Fetch any URL and return its content as clean markdown.',
+    description: 'Fetch any URL and return its content as clean markdown. Queen should delegate this to workers first in control-plane mode.',
     parameters: {
       type: 'object',
       properties: {
@@ -228,7 +228,7 @@ const TOOL_BROWSER: ToolDef = {
   type: 'function',
   function: {
     name: 'quoroom_browser',
-    description: 'Control a headless browser: navigate, click, fill forms, buy services, register domains, create accounts.',
+    description: 'Control a headless browser: navigate, click, fill forms, buy services, register domains, create accounts. Queen should delegate this to workers first in control-plane mode.',
     parameters: {
       type: 'object',
       properties: {

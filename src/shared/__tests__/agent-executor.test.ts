@@ -31,6 +31,13 @@ afterEach(() => {
 })
 
 describe('executeAgent', () => {
+  it('throws for unsupported model identifiers', async () => {
+    await expect(executeAgent({
+      model: 'unknown:model-x',
+      prompt: 'hello'
+    })).rejects.toThrow('Unsupported model')
+  })
+
   describe('Claude CLI routing', () => {
     it('routes "claude" model to executeClaudeCode', async () => {
       mockExecuteClaudeCode.mockResolvedValue({

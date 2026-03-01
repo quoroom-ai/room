@@ -18,6 +18,14 @@ interface LoopState {
   cycleAbort: AbortController | null
 }
 
+const QUEEN_EXECUTION_TOOLS = new Set([
+  'quoroom_web_search',
+  'quoroom_web_fetch',
+  'quoroom_browser',
+])
+
+const QUEEN_POLICY_WIP_HINT = '[policy] Queen control-plane mode: delegate execution tasks to workers with quoroom_delegate_task, then monitor, unblock, and report outcomes. Avoid direct web/browser execution.'
+
 function isInQuietHours(from: string, until: string): boolean {
   const now = new Date()
   const nowMins = now.getHours() * 60 + now.getMinutes()
@@ -39,6 +47,42 @@ function msUntilQuietEnd(until: string): number {
   end.setHours(uh, um, 0, 0)
   if (end <= now) end.setDate(end.getDate() + 1)
   return end.getTime() - now.getTime()
+}
+
+function nextAutoExecutorName(workers: Worker[]): string {
+  const names = new Set(workers.map(w => w.name.toLowerCase()))
+  let idx = 1
+  while (names.has(`executor-${idx}`)) idx++
+  return `executor-${idx}`
+}
+
+function extractToolNameFromConsoleLog(content: string): string | null {
+  const usingMatch = content.match(/(?:Using|→)\s*([a-zA-Z0-9_]+)/)
+  if (usingMatch?.[1]) return usingMatch[1]
+  const callMatch = content.match(/^([a-zA-Z0-9_]+)\s*\(/)
+  return callMatch?.[1] ?? null
+}
+
+function resolveWorkerExecutionModel(
+  db: Database.Database,
+  roomId: number,
+  worker: Worker
+): string | null {
+  const explicit = worker.model?.trim()
+  if (explicit) return explicit
+
+  const room = queries.getRoom(db, roomId)
+  if (!room) return null
+
+  const roomModel = room.workerModel?.trim()
+  if (!roomModel) return null
+  if (roomModel !== 'queen') return roomModel
+
+  if (!room.queenWorkerId) return null
+  if (room.queenWorkerId === worker.id) return null
+  const queen = queries.getWorker(db, room.queenWorkerId)
+  const queenModel = queen?.model?.trim()
+  return queenModel || null
 }
 
 const runningLoops = new Map<number, LoopState>()
@@ -275,7 +319,7 @@ export async function runCycle(
   queries.logRoomActivity(db, roomId, 'system',
     `Agent cycle started (${worker.name})`, undefined, worker.id)
 
-  const model = worker.model ?? 'claude'
+  const model = resolveWorkerExecutionModel(db, roomId, worker)
 
   // Create cycle record + log buffer
   const cycle = queries.createWorkerCycle(db, worker.id, roomId, model)
@@ -287,6 +331,19 @@ export async function runCycle(
   options?.onCycleLifecycle?.('created', cycle.id, roomId)
 
   try {
+    if (!model) {
+      const msg = 'No model configured for this worker. Set an explicit worker model or room worker model.'
+      logBuffer.addSynthetic('error', msg)
+      logBuffer.flush()
+      queries.completeWorkerCycle(db, cycle.id, msg, undefined)
+      options?.onCycleLifecycle?.('failed', cycle.id, roomId)
+      queries.logRoomActivity(db, roomId, 'error',
+        `Agent cycle failed (${worker.name}): model is not configured`,
+        msg, worker.id)
+      queries.updateAgentState(db, worker.id, 'idle')
+      return msg
+    }
+
     // 0. PRE-FLIGHT: ensure API key is available for API-backed models
     const provider = getModelProvider(model)
     if (provider === 'openai_api' || provider === 'anthropic_api' || provider === 'gemini_api') {
@@ -318,13 +375,50 @@ export async function runCycle(
       status: g.status,
       assignedWorkerId: g.assignedWorkerId
     }))
-    const roomWorkers = queries.listRoomWorkers(db, roomId)
+    let roomWorkers = queries.listRoomWorkers(db, roomId)
+    const isQueen = worker.id === status.room.queenWorkerId
     const unreadMessages = queries.listRoomMessages(db, roomId, 'unread').slice(0, 5)
+
+    if (isQueen) {
+      const nonQueenWorkers = roomWorkers.filter(w => w.id !== worker.id)
+      if (nonQueenWorkers.length === 0) {
+        const autoName = nextAutoExecutorName(roomWorkers)
+        const executorPreset = WORKER_ROLE_PRESETS.executor
+        const inheritedModel = status.room.workerModel === 'queen'
+          ? model
+          : status.room.workerModel?.trim()
+        if (!inheritedModel) {
+          const err = 'Auto-create skipped: no worker model configured for executor.'
+          queries.logRoomActivity(db, roomId, 'error', err, 'Set room worker model or queen model first.', worker.id)
+          logBuffer.addSynthetic('error', err)
+        } else {
+          queries.createWorker(db, {
+            name: autoName,
+            role: 'executor',
+            roomId,
+            description: 'Auto-created executor for queen-delegated execution work.',
+            systemPrompt: 'You are the room executor. Complete delegated tasks end-to-end, report concrete results, and save progress with quoroom_save_wip.',
+            model: inheritedModel,
+            cycleGapMs: executorPreset?.cycleGapMs,
+            maxTurns: executorPreset?.maxTurns,
+          })
+          queries.logRoomActivity(
+            db,
+            roomId,
+            'system',
+            `Auto-created worker "${autoName}" for delegation-first execution.`,
+            'Model B (soft): queen coordinates, workers execute.',
+            worker.id
+          )
+          logBuffer.addSynthetic('system', `Auto-created worker "${autoName}" because queen had no executors.`)
+          roomWorkers = queries.listRoomWorkers(db, roomId)
+        }
+      }
+    }
 
     // 2. BUILD PROMPT
 
     const rolePreset = worker.role ? WORKER_ROLE_PRESETS[worker.role] : undefined
-    const isQueen = worker.id === status.room.queenWorkerId
     const namePrefix = worker.name ? `Your name is ${worker.name}.\n\n` : ''
     const systemPrompt = [
       namePrefix,
@@ -429,6 +523,15 @@ At the end of this cycle, call quoroom_save_wip to save your updated position.`)
     // 3. Room Objective + Goals + Assigned Tasks
     if (status.room.goal) {
       contextParts.push(`## Room Objective\n${status.room.goal}`)
+    }
+
+    if (isQueen) {
+      contextParts.push(`## Queen Controller Contract (Model B)
+- You are the control plane: create workers, delegate tasks, and monitor delivery.
+- If there are no workers besides you, create one executor first.
+- Delegate all execution via quoroom_delegate_task and follow up with worker messages/pokes.
+- Keep governance active: use quoroom_announce for decisions and process objections/votes.
+- Do not perform execution tasks directly unless strictly unavoidable.`)
     }
 
     if (goalUpdates.length > 0) {
@@ -569,11 +672,34 @@ At the end of this cycle, call quoroom_save_wip to save your updated position.`)
     const filteredToolDefs = allowSet
       ? roleToolDefs.filter(t => allowSet.has(t.function.name))
       : roleToolDefs
+    const queenExecutionToolsUsed = new Set<string>()
+    const trackQueenExecutionTool = (toolName: string | null | undefined): void => {
+      if (!isQueen || !toolName) return
+      if (QUEEN_EXECUTION_TOOLS.has(toolName)) queenExecutionToolsUsed.add(toolName)
+    }
+    const persistQueenPolicyDeviation = (): void => {
+      if (!isQueen || queenExecutionToolsUsed.size === 0) return
+      const used = [...queenExecutionToolsUsed].sort().join(', ')
+      queries.logRoomActivity(
+        db,
+        roomId,
+        'system',
+        `Queen policy deviation: execution tool use detected (${used}).`,
+        'Model B (soft): queen should delegate execution to workers and remain control-plane focused.',
+        worker.id
+      )
+      const fresh = queries.getWorker(db, worker.id)
+      const existing = fresh?.wip?.trim() ?? ''
+      if (existing.includes(QUEEN_POLICY_WIP_HINT)) return
+      const nextWip = existing ? `${existing}\n\n${QUEEN_POLICY_WIP_HINT}` : QUEEN_POLICY_WIP_HINT
+      queries.updateWorkerWip(db, worker.id, nextWip.slice(0, 2000))
+    }
 
     const apiToolOpts = needsQueenTools
       ? {
           toolDefs: filteredToolDefs,
           onToolCall: async (toolName: string, args: Record<string, unknown>): Promise<string> => {
+            trackQueenExecutionTool(toolName)
             logBuffer.addSynthetic('tool_call', `→ ${toolName}(${JSON.stringify(args)})`)
             const result = await executeQueenTool(db, roomId, worker.id, toolName, args)
             logBuffer.addSynthetic('tool_result', result.content)
@@ -589,7 +715,12 @@ At the end of this cycle, call quoroom_save_wip to save your updated position.`)
       apiKey,
       timeoutMs: worker.role === 'executor' ? 30 * 60 * 1000 : 15 * 60 * 1000,
       maxTurns: maxTurns ?? 50,
-      onConsoleLog: logBuffer.onConsoleLog,
+      onConsoleLog: (entry) => {
+        if (entry.entryType === 'tool_call') {
+          trackQueenExecutionTool(extractToolNameFromConsoleLog(entry.content))
+        }
+        logBuffer.onConsoleLog(entry)
+      },
       // CLI models: block non-quoroom MCP tools (daymon, etc.)
       disallowedTools: isCli ? 'mcp__daymon*' : undefined,
       // CLI models: bypass permission prompts for headless operation
@@ -625,6 +756,7 @@ At the end of this cycle, call quoroom_save_wip to save your updated position.`)
       queries.completeWorkerCycle(db, cycle.id, canceledMessage, result.usage)
       options?.onCycleLifecycle?.('failed', cycle.id, roomId)
       queries.updateAgentState(db, worker.id, 'idle')
+      persistQueenPolicyDeviation()
       return result.output
     }
 
@@ -656,6 +788,7 @@ At the end of this cycle, call quoroom_save_wip to save your updated position.`)
         }
       }
 
+      persistQueenPolicyDeviation()
       return result.output
     }
 
@@ -670,6 +803,7 @@ At the end of this cycle, call quoroom_save_wip to save your updated position.`)
     }
 
     // 4. PERSIST
+    persistQueenPolicyDeviation()
     logBuffer.addSynthetic('system', 'Cycle completed')
     if (result.usage && (result.usage.inputTokens > 0 || result.usage.outputTokens > 0)) {
       logBuffer.addSynthetic('system', `Tokens: ${result.usage.inputTokens} in / ${result.usage.outputTokens} out`)
