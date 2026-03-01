@@ -19,7 +19,6 @@ describe('getRevenueSummary', () => {
     expect(summary.totalIncome).toBe(0)
     expect(summary.totalExpenses).toBe(0)
     expect(summary.netProfit).toBe(0)
-    expect(summary.stationCosts).toBe(0)
     expect(summary.transactionCount).toBe(0)
   })
 
@@ -59,17 +58,6 @@ describe('getRevenueSummary', () => {
     expect(summary.netProfit).toBe(60)
   })
 
-  it('tracks stationCosts from category=station_cost', () => {
-    const wallet = createRoomWallet(db, roomId, 'test-key')
-    queries.logWalletTransaction(db, wallet.id, 'send', '15.00', { category: 'station_cost' })
-    queries.logWalletTransaction(db, wallet.id, 'send', '5.00', { category: 'station_cost' })
-    queries.logWalletTransaction(db, wallet.id, 'send', '10.00') // no category
-
-    const summary = queries.getRevenueSummary(db, roomId)
-    expect(summary.stationCosts).toBe(20)
-    expect(summary.totalExpenses).toBe(30)
-  })
-
   it('returns correct transactionCount', () => {
     const wallet = createRoomWallet(db, roomId, 'test-key')
     queries.logWalletTransaction(db, wallet.id, 'receive', '100.00')
@@ -85,21 +73,20 @@ describe('getRevenueSummary', () => {
     queries.logWalletTransaction(db, wallet.id, 'receive', '200.00', { category: 'revenue' })
     queries.logWalletTransaction(db, wallet.id, 'fund', '50.00')
     queries.logWalletTransaction(db, wallet.id, 'send', '75.00', { category: 'expense' })
-    queries.logWalletTransaction(db, wallet.id, 'purchase', '25.00', { category: 'station_cost' })
+    queries.logWalletTransaction(db, wallet.id, 'purchase', '25.00', { category: 'expense' })
 
     const summary = queries.getRevenueSummary(db, roomId)
     expect(summary.totalIncome).toBe(250)
     expect(summary.totalExpenses).toBe(100)
     expect(summary.netProfit).toBe(150)
-    expect(summary.stationCosts).toBe(25)
     expect(summary.transactionCount).toBe(4)
   })
 
   it('logWalletTransaction stores category correctly', () => {
     const wallet = createRoomWallet(db, roomId, 'test-key')
-    const tx = queries.logWalletTransaction(db, wallet.id, 'send', '10.00', { category: 'station_cost' })
+    const tx = queries.logWalletTransaction(db, wallet.id, 'send', '10.00', { category: 'expense' })
 
-    expect(tx.category).toBe('station_cost')
+    expect(tx.category).toBe('expense')
 
     const txNoCat = queries.logWalletTransaction(db, wallet.id, 'receive', '5.00')
     expect(txNoCat.category).toBeNull()

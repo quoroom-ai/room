@@ -2,9 +2,6 @@ import { join } from 'path'
 import { writeFileSync, mkdirSync, existsSync } from 'fs'
 import { executeClaudeCode } from './claude-code'
 import type { ConsoleLogCallback, ExecutionOptions, ExecutionResult } from './claude-code'
-import { executeApiOnStation } from './agent-executor'
-import { resolveApiKeyForModel } from './model-provider'
-import { getRoomCloudId, listCloudStations } from './cloud-sync'
 import * as queries from './db-queries'
 import { DEFAULTS } from './constants'
 import { shouldDistill, distillLearnedContext } from './learned-context'
@@ -364,71 +361,7 @@ export async function executeTask(
     console.warn('Non-fatal: worker resolution failed:', err)
   }
 
-  // ─── Station path: API-key models in a room → bypass local concurrency limiter ──────
-  // Station tasks are remote calls, not local processes — no slot needed.
-  const isStationModel = model?.startsWith('openai:') || model?.startsWith('anthropic:') || model?.startsWith('claude-api:')
-  if (isStationModel && task.roomId) {
-    runningTasks.add(taskId)
-    taskAbortControllers.set(taskId, taskAbort)
-    try {
-      const cloudRoomId = getRoomCloudId(task.roomId)
-      const stations = await listCloudStations(cloudRoomId)
-      const activeStations = stations.filter(s => s.status === 'active')
-
-      if (activeStations.length > 0) {
-        const run = queries.createTaskRun(db, taskId)
-        try {
-          // Round-robin: distribute across eligible stations
-          const station = activeStations[run.id % activeStations.length]
-
-          // Augment prompt with learned context + memory
-          let augmentedPrompt = prependKeeperReferral(task.prompt, db)
-          try {
-            if (task.learnedContext) {
-              augmentedPrompt = `## Approach (learned from previous runs):\n${task.learnedContext}\n\n---\n\n${augmentedPrompt}`
-            }
-          } catch (err) { console.warn('Non-fatal: learned context injection failed:', err) }
-          try {
-            const memoryContext = queries.getTaskMemoryContext(db, taskId)
-            if (memoryContext) {
-              augmentedPrompt = `${memoryContext}\n\n---\n\n${augmentedPrompt}`
-            }
-          } catch (err) { console.warn('Non-fatal: memory injection failed:', err) }
-
-          const timeoutMs = task.timeoutMinutes != null ? task.timeoutMinutes * 60 * 1000 : undefined
-          const stationModel = model as string
-          const apiKey = resolveApiKeyForModel(db, task.roomId, stationModel)
-          const agentResult = await executeApiOnStation(cloudRoomId, station.id, {
-            model: stationModel, prompt: augmentedPrompt, systemPrompt, timeoutMs, apiKey, abortSignal: taskAbort.signal,
-          })
-
-          const result = agentResultToExecutionResult(agentResult)
-          if (taskAbort.signal.aborted) {
-            const errorMsg = 'Execution aborted'
-            queries.completeTaskRun(db, run.id, result.stdout || errorMsg, undefined, errorMsg)
-            onFailed?.(task, errorMsg)
-            return { success: false, output: result.stdout || '', errorMessage: errorMsg, durationMs: Date.now() - startTime }
-          }
-          return finishRun(db, run.id, taskId, task, result, resultsDir, onComplete, onFailed)
-        } catch (err) {
-          const errorMsg = taskAbort.signal.aborted ? 'Execution aborted' : (err instanceof Error ? err.message : String(err))
-          queries.completeTaskRun(db, run.id, '', undefined, errorMsg)
-          onFailed?.(task, errorMsg)
-          return { success: false, output: '', errorMessage: errorMsg, durationMs: Date.now() - startTime }
-        }
-      }
-      // No active stations for API model — fall through to local execution
-    } catch (err) {
-      const errorMsg = taskAbort.signal.aborted ? 'Execution aborted' : (err instanceof Error ? err.message : String(err))
-      onFailed?.(task, errorMsg)
-      return { success: false, output: '', errorMessage: errorMsg, durationMs: Date.now() - startTime }
-    } finally {
-      runningTasks.delete(taskId)
-      taskAbortControllers.delete(taskId)
-    }
-  }
-
-  // ─── Local path: Claude CLI or API model → use concurrency slot ──────
+  // ─── Runtime-host execution path (local mode local machine; cloud mode swarm host) ───
   await acquireSlot(getMaxConcurrentTasks(db, task.roomId))
 
   runningTasks.add(taskId)
@@ -596,17 +529,6 @@ export async function executeTask(
     runningTasks.delete(taskId)
     taskAbortControllers.delete(taskId)
     releaseSlot()
-  }
-}
-
-function agentResultToExecutionResult(result: { output: string; exitCode: number; durationMs: number; sessionId: string | null; timedOut: boolean }): ExecutionResult {
-  return {
-    stdout: result.output,
-    stderr: '',
-    exitCode: result.exitCode,
-    durationMs: result.durationMs,
-    timedOut: result.timedOut,
-    sessionId: result.sessionId,
   }
 }
 

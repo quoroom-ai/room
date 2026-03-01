@@ -83,14 +83,6 @@ function getLocalReferredRooms(db: Database.Database, roomId: number): ReferredR
     taskCountByRoom.set(task.roomId, (taskCountByRoom.get(task.roomId) ?? 0) + 1)
   }
 
-  const stationsByRoom = new Map<number, Array<{ name: string; status: string; tier: string }>>()
-  for (const station of queries.listStations(db)) {
-    if (station.roomId == null) continue
-    const rows = stationsByRoom.get(station.roomId) ?? []
-    rows.push({ name: station.name, status: station.status, tier: station.tier })
-    stationsByRoom.set(station.roomId, rows)
-  }
-
   return referredRooms.map((candidate): ReferredRoom => {
     if (candidate.visibility !== 'public') {
       return {
@@ -101,7 +93,6 @@ function getLocalReferredRooms(db: Database.Database, roomId: number): ReferredR
     }
 
     const workers = workersByRoom.get(candidate.id) ?? []
-    const stations = stationsByRoom.get(candidate.id) ?? []
     const wallet = queries.getWalletByRoom(db, candidate.id)
     const earnings = wallet ? queries.getWalletTransactionSummary(db, wallet.id).received : '0'
     const queen = candidate.queenWorkerId ? queries.getWorker(db, candidate.queenWorkerId) : null
@@ -116,7 +107,6 @@ function getLocalReferredRooms(db: Database.Database, roomId: number): ReferredR
       earnings,
       queenModel: queen?.model ?? candidate.workerModel ?? null,
       workers,
-      stations,
       online: candidate.status === 'active',
       registeredAt: candidate.createdAt,
     }

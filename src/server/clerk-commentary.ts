@@ -232,10 +232,6 @@ const TOOL_NAMES: Record<string, string> = {
   // Rooms
   quoroom_list_rooms: 'listing rooms',
   quoroom_room_status: 'checking room status',
-  // Stations
-  quoroom_station_create: 'creating a station',
-  quoroom_station_list: 'listing stations',
-  quoroom_station_exec: 'running station command',
   // Identity & invites
   quoroom_identity_get: 'checking identity',
   quoroom_invite_create: 'creating an invite',

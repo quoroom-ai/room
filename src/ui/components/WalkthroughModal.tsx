@@ -20,10 +20,10 @@ const steps = [
       : "The Queen spawns workers as needed. They share your machine resources, so more workers means more load. Workers can use the Queen's model or run on a separate API model.",
   },
   {
-    title: 'Need more power? Rent stations',
+    title: 'Need more power? Scale swarm runtime',
     body: isCloud
-      ? 'Stations add extra compute to your room - workers go to stations while the Queen stays on your server.'
-      : 'Workers can run on rented cloud stations. This offloads compute from your machine - the Queen stays local, workers go remote.',
+      ? 'Workers run on your swarm server. Scale that runtime host when you need more throughput.'
+      : 'Workers run on your local machine in local mode. Scale up your machine or move to cloud mode for more throughput.',
   },
   {
     title: 'Democracy in the swarm',

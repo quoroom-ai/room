@@ -33,3 +33,8 @@ playwright.config.ts
 
 # Internal ops docs
 docs/RELEASE_RUNBOOK.md
+
+# Generated market research artifacts
+docs/swarm_agent_deep_benchmark_2026-03-01.md
+docs/swarm_agent_market_dataset_2026-03-01.csv
+docs/swarm_agent_pricing_scenarios_2026-03-01.csv

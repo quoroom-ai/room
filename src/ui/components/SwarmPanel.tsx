@@ -6,18 +6,17 @@ import { api } from '../lib/client'
 import {
   ROOM_BALANCE_EVENT_TYPES,
   ROOM_NETWORK_EVENT_TYPES,
-  ROOM_STATION_EVENT_TYPES,
   ROOMS_UPDATE_EVENT,
 } from '../lib/room-events'
 import { wsClient, type WsMessage } from '../lib/ws'
 import { storageGet, storageSet } from '../lib/storage'
 import { buildKeeperInviteLink, buildKeeperShareLink } from '../lib/referrals'
-import type { Room, Worker, Station, RevenueSummary, OnChainBalance } from '@shared/types'
+import type { Room, Worker, RevenueSummary, OnChainBalance } from '@shared/types'
 
 interface ReferredRoom {
   roomId: string; visibility: 'public' | 'private'; name?: string; goal?: string
   workerCount?: number; taskCount?: number; earnings?: string; queenModel?: string | null
-  workers?: Array<{ name: string; state: string }>; stations?: Array<{ name: string; status: string; tier: string }>
+  workers?: Array<{ name: string; state: string }>
   online?: boolean; registeredAt?: string
 }
 
@@ -29,7 +28,6 @@ interface SwarmPanelProps {
   /** Optional overrides for demo/standalone rendering (skip API polling) */
   demoData?: {
     workers: Worker[]
-    stations: Record<number, Station[]>
     revenue: Record<number, RevenueSummary>
     balances: Record<number, OnChainBalance>
   }
@@ -148,15 +146,6 @@ function workerColor(state: string): string {
   }
 }
 
-function stationColor(status: string): string {
-  switch (status) {
-    case 'active': return 'var(--status-success-bg)'
-    case 'pending': return 'var(--status-warning-bg)'
-    case 'error': return 'var(--status-error-bg)'
-    default: return 'var(--surface-tertiary)'
-  }
-}
-
 // ─── Event bubble visuals ─────────────────────────────────
 
 function eventIcon(kind: SwarmEventKind): React.JSX.Element {
@@ -197,11 +186,6 @@ function eventIcon(kind: SwarmEventKind): React.JSX.Element {
       return <svg {...common}><path d="M7 1.5L1.5 12h11L7 1.5z" fill="var(--status-warning)" fillOpacity="0.2" stroke="var(--status-warning)" strokeWidth="1.2" strokeLinejoin="round"/><path d="M7 5v3M7 9.5v1" stroke="var(--status-warning)" strokeWidth="1.2" strokeLinecap="round"/></svg>
     case 'skill_created':
       return <svg {...common}><path d="M7 1C4.5 1 2.5 3 2.5 5.5c0 1.5.7 2.8 1.8 3.6V11.5h5.4V9.1c1.1-.8 1.8-2.1 1.8-3.6C11.5 3 9.5 1 7 1z" fill="var(--interactive)" fillOpacity="0.2" stroke="var(--interactive)" strokeWidth="1"/><path d="M5 12.5h4" stroke="var(--interactive)" strokeWidth="1" strokeLinecap="round"/></svg>
-    case 'station_created':
-    case 'station_started':
-      return <svg {...common}><rect x="2" y="3" width="10" height="8" rx="1.5" fill="var(--status-success)" fillOpacity="0.15" stroke="var(--status-success)" strokeWidth="1.2"/><circle cx="5" cy="7" r="1" fill="var(--status-success)"/><path d="M8 5.5h2M8 7h2M8 8.5h2" stroke="var(--status-success)" strokeWidth="0.8" strokeLinecap="round"/></svg>
-    case 'station_stopped':
-      return <svg {...common}><rect x="2" y="3" width="10" height="8" rx="1.5" fill="var(--status-warning)" fillOpacity="0.15" stroke="var(--status-warning)" strokeWidth="1.2"/><path d="M5.5 5.5v3M8.5 5.5v3" stroke="var(--status-warning)" strokeWidth="1.3" strokeLinecap="round"/></svg>
     case 'self_mod':
       return <svg {...common}><path d="M4 2v10M10 2v10" stroke="var(--interactive)" strokeWidth="1.2" strokeLinecap="round"/><path d="M4 4c2 0 2 2 6 2M4 8c2 0 2-2 6-2" stroke="var(--interactive)" strokeWidth="1.2" fill="none" strokeLinecap="round"/></svg>
     default:
@@ -211,13 +195,13 @@ function eventIcon(kind: SwarmEventKind): React.JSX.Element {
 
 function eventBgColor(kind: SwarmEventKind): string {
   switch (kind) {
-    case 'worker_thinking': case 'goal_progress': case 'task_started': case 'station_created':
+    case 'worker_thinking': case 'goal_progress': case 'task_started':
       return 'var(--status-info-bg)'
-    case 'worker_acting': case 'decision_approved': case 'goal_completed': case 'task_completed': case 'money_received': case 'station_started':
+    case 'worker_acting': case 'decision_approved': case 'goal_completed': case 'task_completed': case 'money_received':
       return 'var(--status-success-bg)'
     case 'worker_voting': case 'vote_cast': case 'skill_created': case 'self_mod':
       return 'var(--interactive-bg)'
-    case 'worker_rate_limited': case 'escalation': case 'station_stopped':
+    case 'worker_rate_limited': case 'escalation':
       return 'var(--status-warning-bg)'
     case 'worker_blocked': case 'decision_rejected': case 'task_failed': case 'money_sent':
       return 'var(--status-error-bg)'
@@ -575,21 +559,6 @@ export function SwarmPanel({ rooms, queenRunning, forcedInviteOpenNonce, onNavig
     () => isDemo ? Promise.resolve(demoData!.workers) : api.workers.list(), 30000
   )
 
-  const { data: stationMap, refresh: refreshStationMap } = usePolling<Record<number, Station[]>>(
-    async () => {
-      if (isDemo) return demoData!.stations
-      if (rooms.length === 0) return {}
-      const entries = await Promise.all(
-        rooms.map(async r => {
-          const stations = await api.stations.list(r.id).catch(() => [] as Station[])
-          return [r.id, stations] as const
-        })
-      )
-      return Object.fromEntries(entries)
-    },
-    60000
-  )
-
   const { data: revenueMap, refresh: refreshRevenueMap } = usePolling<Record<number, RevenueSummary>>(
     async () => {
       if (isDemo) return demoData!.revenue
@@ -693,19 +662,15 @@ export function SwarmPanel({ rooms, queenRunning, forcedInviteOpenNonce, onNavig
     return wsClient.subscribe('rooms', (event: WsMessage) => {
       if (event.type !== ROOMS_UPDATE_EVENT) return
       void refreshReferredMap()
-      void refreshStationMap()
       void refreshRevenueMap()
       void refreshBalanceMap()
     })
-  }, [refreshBalanceMap, refreshReferredMap, refreshRevenueMap, refreshStationMap])
+  }, [refreshBalanceMap, refreshReferredMap, refreshRevenueMap])
 
   useEffect(() => {
     if (rooms.length === 0) return
     const unsubs = rooms.map((room) =>
       wsClient.subscribe(`room:${room.id}`, (event: WsMessage) => {
-        if (ROOM_STATION_EVENT_TYPES.has(event.type)) {
-          void refreshStationMap()
-        }
         if (ROOM_BALANCE_EVENT_TYPES.has(event.type)) {
           void refreshRevenueMap()
           void refreshBalanceMap()
@@ -721,7 +686,7 @@ export function SwarmPanel({ rooms, queenRunning, forcedInviteOpenNonce, onNavig
     return () => {
       for (const unsub of unsubs) unsub()
     }
-  }, [rooms, refreshBalanceMap, refreshReferredMap, refreshRevenueMap, refreshStationMap])
+  }, [rooms, refreshBalanceMap, refreshReferredMap, refreshRevenueMap])
 
   const totalReferred = useMemo(
     () => Object.values(referredMap ?? {}).reduce((s, arr) => s + arr.length, 0),
@@ -938,7 +903,6 @@ export function SwarmPanel({ rooms, queenRunning, forcedInviteOpenNonce, onNavig
         <div className="flex items-center gap-2 flex-wrap">
           <span className="text-xs text-text-muted">{rooms.length} room{rooms.length !== 1 ? 's' : ''}</span>
           <span className="text-xs text-text-muted">{(allWorkers ?? []).filter(w => w.roomId !== null).length} workers</span>
-          <span className="text-xs text-text-muted">{Object.values(stationMap ?? {}).flat().length} stations</span>
           {totalReferred > 0 && (
             <span className="text-xs text-text-muted">{totalReferred} network</span>
           )}
@@ -1136,10 +1100,9 @@ export function SwarmPanel({ rooms, queenRunning, forcedInviteOpenNonce, onNavig
             const fill = isPlaceholder ? 'var(--surface-secondary)' : roomStateColors.fill
             const stroke = isPlaceholder ? 'var(--border-primary)' : roomStateColors.stroke
             const workers = room ? (workersPerRoom[room.id] ?? []) : []
-            const stations = room ? ((stationMap ?? {})[room.id] ?? []) : []
             const revenue = room ? ((revenueMap ?? {})[room.id]) : undefined
             const isHovered = room ? hoveredRoomId === room.id : false
-            const totalSats = workers.length + stations.length
+            const totalSats = workers.length
             const satPositions = showSatellites ? satellitePositions(cx, cy, totalSats) : []
 
             // Queen model
@@ -1153,10 +1116,9 @@ export function SwarmPanel({ rooms, queenRunning, forcedInviteOpenNonce, onNavig
 
             // Life indicators
             const busyWorkers = workers.filter(w => w.agentState === 'thinking' || w.agentState === 'acting').length
-            const activeStations = stations.filter(s => s.status === 'active').length
             const lifeLabel = isPlaceholder
               ? ''
-              : `${workers.length}w${busyWorkers > 0 ? ` (${busyWorkers} active)` : ''}${stations.length > 0 ? ` · ${stations.length}s${activeStations > 0 ? ` (${activeStations} up)` : ''}` : ''}`
+              : `${workers.length}w${busyWorkers > 0 ? ` (${busyWorkers} active)` : ''}`
 
             // Layout: goal lines at top, then gap, then life bar, then model, then money
             const lineH = 16
@@ -1206,7 +1168,7 @@ export function SwarmPanel({ rooms, queenRunning, forcedInviteOpenNonce, onNavig
                   </text>
                 ))}
 
-                {/* Life bar: workers + stations status */}
+                {/* Life bar: workers status */}
                 <text
                   x={cx}
                   y={startY + goalBlockH + lifeLineY + 8}
@@ -1251,12 +1213,6 @@ export function SwarmPanel({ rooms, queenRunning, forcedInviteOpenNonce, onNavig
                     <tspan fill="var(--status-success)">{fmtMoney(revenue?.totalIncome ?? 0)} in</tspan>
                     <tspan fill="var(--text-muted)">{' / '}</tspan>
                     <tspan fill="var(--status-error)">{fmtMoney(revenue?.totalExpenses ?? 0)} out</tspan>
-                    {(revenue?.stationCosts ?? 0) > 0 && (
-                      <tspan fill="var(--text-muted)">{' \u00b7 '}</tspan>
-                    )}
-                    {(revenue?.stationCosts ?? 0) > 0 && (
-                      <tspan fill="var(--status-warning)">{fmtMoney(revenue!.stationCosts)} srv</tspan>
-                    )}
                   </text>
                 )}
 
@@ -1283,33 +1239,6 @@ export function SwarmPanel({ rooms, queenRunning, forcedInviteOpenNonce, onNavig
                       strokeWidth={0.8}
                       style={{ transition: 'fill 300ms' }}
                     />
-                  )
-                })}
-
-                {/* Station satellites */}
-                {showSatellites && stations.map((s, si) => {
-                  const pos = satPositions[workers.length + si]
-                  if (!pos) return null
-                  return (
-                    <g key={`s-${s.id}`}>
-                      <polygon
-                        points={hexPoints(pos[0], pos[1], SAT_R)}
-                        fill={stationColor(s.status)}
-                        stroke="var(--border-primary)"
-                        strokeWidth={0.8}
-                      />
-                      <rect
-                        x={pos[0] - 5}
-                        y={pos[1] - 3.5}
-                        width={10}
-                        height={6}
-                        rx={1.5}
-                        fill="none"
-                        stroke="var(--text-muted)"
-                        strokeWidth={0.8}
-                        style={{ pointerEvents: 'none' }}
-                      />
-                    </g>
                   )
                 })}
 
@@ -1340,7 +1269,6 @@ export function SwarmPanel({ rooms, queenRunning, forcedInviteOpenNonce, onNavig
             const refName = isPublic ? (rp.ref.name || rp.ref.roomId.slice(0, 12)) : 'Private'
             const nameLines = wrapText(refName, 14).slice(0, 2)
             const wCount = rp.ref.workerCount ?? 0
-            const sCount = rp.ref.stations?.length ?? 0
             return (
               <g key={`ref-${rp.parentRoomId}-${rp.ref.roomId}`}>
                 <polygon
@@ -1364,14 +1292,14 @@ export function SwarmPanel({ rooms, queenRunning, forcedInviteOpenNonce, onNavig
                     {line}
                   </text>
                 ))}
-                {isPublic && (wCount > 0 || sCount > 0) && (
+                {isPublic && wCount > 0 && (
                   <text
                     x={rp.cx} y={rp.cy + nameLines.length * 7 + 6}
                     textAnchor="middle" dominantBaseline="middle"
                     fontSize="10" fill="var(--text-muted)"
                     style={{ pointerEvents: 'none' }}
                   >
-                    {wCount > 0 ? `${wCount}w` : ''}{wCount > 0 && sCount > 0 ? ' · ' : ''}{sCount > 0 ? `${sCount}s` : ''}
+                    {`${wCount}w`}
                   </text>
                 )}
                 {rp.ref.online && (
@@ -1445,7 +1373,7 @@ export function SwarmPanel({ rooms, queenRunning, forcedInviteOpenNonce, onNavig
             <span className="flex items-center gap-1.5"><span className="inline-block w-2.5 h-2.5 rounded-full bg-surface-tertiary" /> Idle / stopped</span>
           </div>
           <p>Small dashed hexagons are <strong className="text-text-secondary">invited network rooms</strong> linked to a parent room.</p>
-          <p>Each large hexagon is a <strong className="text-text-secondary">room</strong> — an autonomous agent collective with a queen, workers, and optional stations. Small hexagons on the border are <strong className="text-text-secondary">workers</strong> (agents) and <strong className="text-text-secondary">stations</strong> (cloud compute). Smaller hexagons with dashed borders are rooms in your <strong className="text-text-secondary">network</strong> — created via your invite links. Click a room to open it.</p>
+          <p>Each large hexagon is a <strong className="text-text-secondary">room</strong> — an autonomous agent collective with a queen and workers. Small hexagons on the border are <strong className="text-text-secondary">workers</strong> (agents). Smaller hexagons with dashed borders are rooms in your <strong className="text-text-secondary">network</strong> — created via your invite links. Click a room to open it.</p>
           <p>Toggle the <strong className="text-text-secondary">$</strong> button to show or hide financial info. Use <strong className="text-text-secondary">Share</strong> to export your swarm as an image.</p>
         </div>
 
@@ -1464,12 +1392,6 @@ export function SwarmPanel({ rooms, queenRunning, forcedInviteOpenNonce, onNavig
                 <div>
                   <span className="text-text-muted">Workers: </span>
                   {(workersPerRoom[hoveredRoom.id] ?? []).map(w => w.name).join(', ')}
-                </div>
-              )}
-              {((stationMap ?? {})[hoveredRoom.id] ?? []).length > 0 && (
-                <div>
-                  <span className="text-text-muted">Stations: </span>
-                  {((stationMap ?? {})[hoveredRoom.id] ?? []).map(s => `${s.name} (${s.tier})`).join(', ')}
                 </div>
               )}
               {showMoney && (revenueMap ?? {})[hoveredRoom.id] && (() => {

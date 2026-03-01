@@ -483,6 +483,21 @@ docker build -t quoroom .
 docker run -p 3700:3700 quoroom
 ```
 
+### Cloud Runtime Auto-Update Diagnostics
+
+Cloud runtimes now prefer a centralized update source and expose diagnostics in status:
+
+- `QUOROOM_UPDATE_SOURCE_URL` — cloud endpoint for latest runtime release metadata (preferred source)
+- `QUOROOM_UPDATE_SOURCE_TOKEN` — optional bearer token for update-source auth
+- `QUOROOM_UPDATE_GITHUB_TOKEN` — optional fallback GitHub token when direct fallback is needed
+
+`GET /api/status` includes `updateDiagnostics`:
+
+- `lastCheckAt`, `lastSuccessAt`, `lastErrorAt`
+- `lastErrorCode`, `lastErrorMessage`
+- `updateSource` (`cloud` or `github`)
+- `nextCheckAt`, `consecutiveFailures` (backoff visibility)
+
 ## Releasing
 
 Triggered by pushing a git tag (`v*`) → GitHub Actions multi-platform build:

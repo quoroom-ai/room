@@ -1,4 +1,4 @@
-import type { TRIGGER_TYPES, TASK_STATUSES, ROOM_STATUSES, AGENT_STATES, DECISION_TYPES, GOAL_STATUSES, STATION_STATUSES, STATION_TIERS, STATION_PROVIDERS, WALLET_TX_TYPES } from './constants'
+import type { TRIGGER_TYPES, TASK_STATUSES, ROOM_STATUSES, AGENT_STATES, DECISION_TYPES, GOAL_STATUSES, WALLET_TX_TYPES } from './constants'
 
 // ─── Derived Union Types ──────────────────────────────────
 
@@ -12,9 +12,6 @@ export type DecisionStatus = 'voting' | 'approved' | 'rejected' | 'vetoed' | 'ex
 export type VoteValue = 'yes' | 'no' | 'abstain'
 export type ActivityEventType = 'decision' | 'milestone' | 'financial' | 'deployment' | 'worker' | 'error' | 'system' | 'self_mod'
 export type EscalationStatus = 'pending' | 'in_progress' | 'resolved'
-export type StationStatus = typeof STATION_STATUSES[keyof typeof STATION_STATUSES]
-export type StationTier = typeof STATION_TIERS[keyof typeof STATION_TIERS]
-export type StationProvider = typeof STATION_PROVIDERS[keyof typeof STATION_PROVIDERS]
 export type WalletTransactionType = typeof WALLET_TX_TYPES[keyof typeof WALLET_TX_TYPES]
 
 // ─── Worker Types ──────────────────────────────────────────
@@ -437,7 +434,7 @@ export interface Wallet {
   createdAt: string
 }
 
-export type WalletTransactionCategory = 'revenue' | 'expense' | 'transfer' | 'station_cost'
+export type WalletTransactionCategory = 'revenue' | 'expense' | 'transfer'
 
 export interface WalletTransaction {
   id: number
@@ -450,32 +447,6 @@ export interface WalletTransaction {
   status: string
   category: WalletTransactionCategory | null
   createdAt: string
-}
-
-// ─── Station Types ─────────────────────────────────────────
-
-export interface Station {
-  id: number
-  roomId: number
-  name: string
-  provider: StationProvider
-  externalId: string | null
-  tier: StationTier
-  region: string | null
-  status: StationStatus
-  monthlyCost: number
-  config: Record<string, unknown> | null
-  createdAt: string
-  updatedAt: string
-}
-
-export interface CreateStationInput {
-  roomId: number
-  name: string
-  provider: StationProvider
-  tier: StationTier
-  region?: string
-  config?: Record<string, unknown>
 }
 
 // ─── Room Message Types ────────────────────────────────────
@@ -501,7 +472,6 @@ export interface RevenueSummary {
   totalIncome: number
   totalExpenses: number
   netProfit: number
-  stationCosts: number
   transactionCount: number
 }
 

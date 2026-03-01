@@ -10,7 +10,6 @@ import { registerGoalTools } from './tools/goals'
 import { registerSelfModTools } from './tools/self-mod'
 import { registerSkillTools } from './tools/skills'
 import { registerWalletTools } from './tools/wallet'
-import { registerStationTools } from './tools/station'
 import { registerIdentityTools } from './tools/identity'
 import { registerInboxTools } from './tools/inbox'
 import { registerCredentialTools } from './tools/credentials'
@@ -39,7 +38,6 @@ async function main(): Promise<void> {
   registerSelfModTools(server)
   registerSkillTools(server)
   registerWalletTools(server)
-  registerStationTools(server)
   registerIdentityTools(server)
   registerInboxTools(server)
   registerCredentialTools(server)

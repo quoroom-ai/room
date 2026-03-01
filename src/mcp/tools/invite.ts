@@ -93,7 +93,7 @@ export function registerInviteTools(server: McpServer): void {
     {
       title: 'View Network',
       description: 'See rooms in your network — rooms created through your invite links. '
-        + 'Public rooms show full data (name, goal, workers, stations, earnings). '
+        + 'Public rooms show full data (name, goal, workers, earnings). '
         + 'Private rooms show only that they exist.',
       inputSchema: {
         roomId: z.number().describe('The room ID')

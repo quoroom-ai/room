@@ -3,10 +3,29 @@
  * Verifies that the frontend renders correctly when served by the API server.
  */
 
-import { test, expect } from '@playwright/test'
+import { test, expect, type APIRequestContext } from '@playwright/test'
 import { getToken, getBaseUrl } from './helpers'
 
 const base = getBaseUrl()
+const token = getToken()
+
+async function ensureActiveRoom(request: APIRequestContext): Promise<number> {
+  const roomsRes = await request.get(`${base}/api/rooms`, {
+    headers: { Authorization: `Bearer ${token}` },
+  })
+  const rooms = (await roomsRes.json()) as Array<{ id: number; status: string }>
+  const active = rooms.find((room) => room.status !== 'stopped')
+  if (active) return active.id
+
+  const roomName = `ui-e2e-${Date.now().toString(36)}`
+  const createRes = await request.post(`${base}/api/rooms`, {
+    headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+    data: { name: roomName, goal: 'UI e2e room' },
+  })
+  expect(createRes.ok()).toBeTruthy()
+  const created = (await createRes.json()) as { room: { id: number } }
+  return created.room.id
+}
 
 test.describe('UI — SPA loads and renders', () => {
   test('index.html served at root', async ({ page }) => {
@@ -32,8 +51,8 @@ test.describe('UI — SPA loads and renders', () => {
 
 test.describe('UI — Tab navigation', () => {
   test.beforeEach(async ({ page }) => {
+    const roomId = await ensureActiveRoom(page.request)
     // Enable advanced mode so Workers, Tasks, Skills, Messages tabs are visible
-    const token = getToken()
     await page.request.put(`${base}/api/settings/advanced_mode`, {
       headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
       data: { value: 'true' }
@@ -44,6 +63,9 @@ test.describe('UI — Tab navigation', () => {
       localStorage.setItem('quoroom_contact_prompt_seen', '1')
       localStorage.setItem('quoroom_tab', 'status')
     })
+    await page.addInitScript((id) => {
+      localStorage.setItem('quoroom_room', String(id))
+    }, roomId)
     // Suppress update modal by stripping updateInfo from /api/status
     await page.route('**/api/status', async (route) => {
       const response = await route.fetch()
@@ -121,7 +143,7 @@ test.describe('UI — Tab navigation', () => {
 
   test('Transactions tab', async ({ page }) => {
     await page.locator('button').filter({ hasText: /^Transactions$/i }).first().click()
-    // Transactions panel shows the heading and Wallet/Billing sub-tabs
+    // Transactions panel shows the heading
     await expect(page.getByRole('heading', { name: 'Transactions' })).toBeVisible({ timeout: 5000 })
     await page.screenshot({ path: 'e2e/screenshots/ui-18-transactions-panel.png', fullPage: true })
   })
@@ -129,8 +151,8 @@ test.describe('UI — Tab navigation', () => {
 
 test.describe('UI — Interaction', () => {
   test.beforeEach(async ({ page }) => {
+    const roomId = await ensureActiveRoom(page.request)
     // Enable advanced mode so Workers, Tasks tabs are visible
-    const token = getToken()
     await page.request.put(`${base}/api/settings/advanced_mode`, {
       headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
       data: { value: 'true' }
@@ -153,6 +175,9 @@ test.describe('UI — Interaction', () => {
       localStorage.setItem('quoroom_contact_prompt_seen', '1')
       localStorage.setItem('quoroom_tab', 'status')
     })
+    await page.addInitScript((id) => {
+      localStorage.setItem('quoroom_room', String(id))
+    }, roomId)
     await page.route('**/api/status', async (route) => {
       const response = await route.fetch()
       const json = await response.json()
@@ -273,7 +298,7 @@ test.describe('UI — Interaction', () => {
     await page.screenshot({ path: 'e2e/screenshots/ui-10-workers-readonly.png', fullPage: true })
   })
 
-  test('transactions panel has Wallet and Billing sub-tabs', async ({ page }) => {
+  test('transactions panel shows wallet state', async ({ page }) => {
     // Navigate to Transactions tab
     await page.locator('button').filter({ hasText: /^Transactions$/i }).first().click()
 
@@ -284,23 +309,7 @@ test.describe('UI — Interaction', () => {
       await roomLink.click()
     }
 
-    // Check for Wallet / Billing sub-tab buttons
-    const walletBtn = page.getByRole('button', { name: /^Wallet$/i })
-    const billingBtn = page.getByRole('button', { name: /^Billing$/i })
-    await expect(walletBtn).toBeVisible({ timeout: 5000 })
-    await expect(billingBtn).toBeVisible()
-
-    // Default is Wallet sub-tab — should show wallet content or empty state
-    await expect(page.getByText('No transactions yet.')).toBeVisible({ timeout: 5000 })
-
-    // Click Billing sub-tab
-    await billingBtn.click()
-    // Billing tab shows station subscriptions or empty state
-    await expect(page.getByText('No station subscriptions.')).toBeVisible({ timeout: 5000 })
-
-    // Click back to Wallet sub-tab
-    await walletBtn.click()
-    // Wallet tab shows empty state again
+    // Wallet panel shows empty state
     await expect(page.getByText('No transactions yet.')).toBeVisible({ timeout: 5000 })
 
     await page.screenshot({ path: 'e2e/screenshots/ui-19-transactions-subtabs.png', fullPage: true })

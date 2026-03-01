@@ -10,8 +10,8 @@ export function registerResourceTools(server: McpServer): void {
       title: 'Get Local Resources',
       description:
         'Get current local machine resource usage: CPU load and RAM usage. '
-        + 'Use this to decide if the room needs to rent a cloud station for extra compute. '
-        + 'If CPU load > number of CPUs or RAM used > 85%, consider proposing a station rental to the quorum.',
+        + 'Use this to decide if the room needs additional swarm runtime capacity. '
+        + 'If CPU load > number of CPUs or RAM used > 85%, consider scaling swarm infrastructure.',
       inputSchema: {}
     },
     async () => {
@@ -38,7 +38,7 @@ export function registerResourceTools(server: McpServer): void {
       const highLoad = loadRatio > 0.8 || memUsedPct > 85
 
       const summary = highLoad
-        ? `HIGH LOAD — CPU ${Math.round(loadRatio * 100)}% of capacity, RAM ${memUsedPct}% used. Consider proposing a station rental if funds allow.`
+        ? `HIGH LOAD — CPU ${Math.round(loadRatio * 100)}% of capacity, RAM ${memUsedPct}% used. Consider scaling swarm runtime if funds allow.`
         : `Normal load — CPU ${Math.round(loadRatio * 100)}% of capacity, RAM ${memUsedPct}% used.`
 
       return {

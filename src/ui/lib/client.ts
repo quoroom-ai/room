@@ -10,9 +10,8 @@ import type {
   Escalation,
   ClerkMessage,
   SelfModAuditEntry,
-  Wallet, WalletTransaction, RevenueSummary, OnChainBalance, CryptoPricing,
+  Wallet, WalletTransaction, RevenueSummary, OnChainBalance,
   Credential,
-  Station,
   RoomMessage,
   WorkerCycle,
   CycleLogEntry,
@@ -396,7 +395,7 @@ export const api = {
       request<Array<{
         roomId: string; visibility: 'public' | 'private'; name?: string; goal?: string;
         workerCount?: number; taskCount?: number; earnings?: string; queenModel?: string | null;
-        workers?: Array<{ name: string; state: string }>; stations?: Array<{ name: string; status: string; tier: string }>;
+        workers?: Array<{ name: string; state: string }>;
         online?: boolean; registeredAt?: string;
       }>>('GET', `/api/rooms/${id}/network`),
     usage: (id: number) =>
@@ -529,6 +528,16 @@ export const api = {
         deploymentMode?: 'local' | 'cloud'
         pending?: { claude?: boolean; codex?: boolean }
         updateInfo?: { latestVersion: string; releaseUrl: string; assets: { mac: string | null; windows: string | null; linux: string | null } } | null
+        updateDiagnostics?: {
+          lastCheckAt: string | null
+          lastSuccessAt: string | null
+          lastErrorAt: string | null
+          lastErrorCode: string | null
+          lastErrorMessage: string | null
+          updateSource: 'cloud' | 'github' | null
+          nextCheckAt: string | null
+          consecutiveFailures: number
+        }
       }>('GET', '/api/status'),
     getParts: (parts: Array<'storage' | 'providers' | 'resources' | 'update'>) =>
       request<{
@@ -542,6 +551,16 @@ export const api = {
         deploymentMode?: 'local' | 'cloud'
         pending?: { claude?: boolean; codex?: boolean }
         updateInfo?: { latestVersion: string; releaseUrl: string; assets: { mac: string | null; windows: string | null; linux: string | null } } | null
+        updateDiagnostics?: {
+          lastCheckAt: string | null
+          lastSuccessAt: string | null
+          lastErrorAt: string | null
+          lastErrorCode: string | null
+          lastErrorMessage: string | null
+          updateSource: 'cloud' | 'github' | null
+          nextCheckAt: string | null
+          consecutiveFailures: number
+        }
       }>('GET', `/api/status${qs({ parts: parts.join(',') })}`),
     checkUpdate: () =>
       request<{
@@ -633,39 +652,6 @@ export const api = {
       request<Credential>('POST', `/api/rooms/${roomId}/credentials`, { name, value, type }),
     delete: (id: number) =>
       request<{ ok: true }>('DELETE', `/api/credentials/${id}`),
-  },
-
-  // ─── Stations ─────────────────────────────────────────
-  stations: {
-    list: (roomId: number) =>
-      request<Station[]>('GET', `/api/rooms/${roomId}/stations`),
-    get: (id: number) =>
-      request<Station>('GET', `/api/stations/${id}`),
-  },
-
-  // ─── Cloud Stations (remote control via local proxy) ──────
-  cloudStations: {
-    list: (roomId: number) =>
-      request<Array<Record<string, unknown>>>('GET', `/api/rooms/${roomId}/cloud-stations`),
-    start: (roomId: number, id: number) =>
-      request<{ ok: true }>('POST', `/api/rooms/${roomId}/cloud-stations/${id}/start`),
-    stop: (roomId: number, id: number) =>
-      request<{ ok: true }>('POST', `/api/rooms/${roomId}/cloud-stations/${id}/stop`),
-    cancel: (roomId: number, id: number) =>
-      request<{ ok: true }>('POST', `/api/rooms/${roomId}/cloud-stations/${id}/cancel`),
-    delete: (roomId: number, id: number) =>
-      request<{ ok: true }>('DELETE', `/api/rooms/${roomId}/cloud-stations/${id}`),
-    payments: (roomId: number) =>
-      request<Array<{ id: string; sourceName: string; status: string; amount: number; currency: string; date: string; paymentMethod: string; cryptoTxHash?: string; cryptoChain?: string }>>('GET', `/api/rooms/${roomId}/cloud-station-payments`),
-    cryptoPrices: (roomId: number) =>
-      request<CryptoPricing>('GET', `/api/rooms/${roomId}/cloud-stations/crypto-prices`),
-    cryptoCheckout: (roomId: number, body: {
-      tier: string; name: string
-      chain?: string; token?: string
-    }) =>
-      request<{ ok: boolean; txHash: string; subscriptionId?: number; currentPeriodEnd?: string }>(
-        'POST', `/api/rooms/${roomId}/cloud-stations/crypto-checkout`, body
-      ),
   },
 
   // ─── Room Messages (inter-room) ───────────────────────

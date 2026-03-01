@@ -1124,22 +1124,6 @@ export function RoomSettingsPanel({ roomId }: RoomSettingsPanelProps): React.JSX
         issues.push(`Failed to stop room runtime: ${getErrorMessage(err)}`)
       }
 
-      // Delete all cloud stations to prevent lingering spend.
-      try {
-        const stations = await api.cloudStations.list(room.id)
-        for (const station of stations) {
-          const stationId = Number((station as Record<string, unknown>).id)
-          if (!Number.isFinite(stationId)) continue
-          try {
-            await api.cloudStations.delete(room.id, stationId)
-          } catch (err) {
-            issues.push(`Station #${stationId}: ${getErrorMessage(err)}`)
-          }
-        }
-      } catch (err) {
-        issues.push(`Failed to list cloud stations: ${getErrorMessage(err)}`)
-      }
-
       // Archive room (server also pauses agents).
       try {
         await api.rooms.update(room.id, { status: 'stopped' } as Record<string, unknown>)
@@ -1630,7 +1614,7 @@ export function RoomSettingsPanel({ roomId }: RoomSettingsPanelProps): React.JSX
             <div className="bg-surface-secondary shadow-sm rounded-lg p-3">
               <div className="mb-2 rounded-lg border border-border-primary bg-surface-primary px-2.5 py-2 text-xs text-text-muted leading-relaxed">
                 Optional: funding this wallet is not required. The Queen should still find ways to make money without starting capital.
-                If you add funds, she can use them for resources (like stations) and other profit-seeking actions.
+                If you add funds, she can use them for swarm resources and other profit-seeking actions.
               </div>
               {!wallet ? (
                 <p className="text-sm text-text-muted py-1">Wallet not found for this room.</p>
@@ -1807,7 +1791,7 @@ export function RoomSettingsPanel({ roomId }: RoomSettingsPanelProps): React.JSX
         <h3 className="text-sm font-semibold text-status-error mb-2">Danger Zone</h3>
         <div className="border border-status-error rounded-lg p-4">
           <p className="text-sm text-text-secondary mb-1">Archive this room</p>
-          <p className="text-xs text-text-muted mb-3">Stops the queen, cancels all stations, and hides the room from the sidebar.</p>
+          <p className="text-xs text-text-muted mb-3">Stops the queen and hides the room from the sidebar.</p>
           <button
             onClick={() => setShowArchiveConfirm(true)}
             disabled={archiveBusy}
@@ -1869,7 +1853,7 @@ export function RoomSettingsPanel({ roomId }: RoomSettingsPanelProps): React.JSX
       {showArchiveConfirm && (
         <ConfirmDialog
           title={`Archive "${room.name}"?`}
-          message="This will stop the queen, cancel all stations, and hide the room."
+          message="This will stop the queen and hide the room."
           confirmLabel="Archive Room"
           danger
           onConfirm={() => {

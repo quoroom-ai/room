@@ -1,5 +1,5 @@
 import type Database from 'better-sqlite3'
-import type { Entity, Observation, Relation, MemoryStats, Task, CreateTaskInput, TaskRun, Worker, CreateWorkerInput, TriggerType, TaskStatus, Watch, ConsoleLogEntry, Room, RoomConfig, RoomActivityEntry, ActivityEventType, QuorumDecision, DecisionType, DecisionStatus, QuorumVote, VoteValue, Goal, GoalStatus, GoalUpdate, Skill, SelfModAuditEntry, SelfModSnapshot, Escalation, EscalationStatus, ChatMessage, ClerkMessage, ClerkMessageSource, ClerkUsageEntry, ClerkUsageSource, ClerkUsageSummary, Credential, Wallet, WalletTransaction, WalletTransactionType, Station, StationStatus, StationProvider, StationTier, RoomMessage, RevenueSummary, WorkerCycle, CycleLogEntry } from './types'
+import type { Entity, Observation, Relation, MemoryStats, Task, CreateTaskInput, TaskRun, Worker, CreateWorkerInput, TriggerType, TaskStatus, Watch, ConsoleLogEntry, Room, RoomConfig, RoomActivityEntry, ActivityEventType, QuorumDecision, DecisionType, DecisionStatus, QuorumVote, VoteValue, Goal, GoalStatus, GoalUpdate, Skill, SelfModAuditEntry, SelfModSnapshot, Escalation, EscalationStatus, ChatMessage, ClerkMessage, ClerkMessageSource, ClerkUsageEntry, ClerkUsageSource, ClerkUsageSummary, Credential, Wallet, WalletTransaction, WalletTransactionType, RoomMessage, RevenueSummary, WorkerCycle, CycleLogEntry } from './types'
 import { DEFAULT_ROOM_CONFIG } from './constants'
 import { encryptSecret, decryptSecret } from './secret-store'
 import { CLERK_ASSISTANT_SYSTEM_PROMPT } from './clerk-profile-config'
@@ -1918,89 +1918,6 @@ export function getWalletTransactionSummary(db: Database.Database, walletId: num
   return { received: received.total.toString(), sent: sent.total.toString() }
 }
 
-// ─── Stations ───────────────────────────────────────────────
-
-function mapStationRow(row: Record<string, unknown>): Station {
-  let config: Record<string, unknown> | null = null
-  if (row.config && typeof row.config === 'string') {
-    try { config = JSON.parse(row.config) } catch { /* ignore */ }
-  }
-  return {
-    id: row.id as number,
-    roomId: row.room_id as number,
-    name: row.name as string,
-    provider: row.provider as StationProvider,
-    externalId: row.external_id as string | null,
-    tier: row.tier as StationTier,
-    region: row.region as string | null,
-    status: row.status as StationStatus,
-    monthlyCost: row.monthly_cost as number,
-    config,
-    createdAt: row.created_at as string,
-    updatedAt: row.updated_at as string
-  }
-}
-
-export function createStation(
-  db: Database.Database, roomId: number, name: string, provider: string, tier: string,
-  opts?: { externalId?: string; region?: string; monthlyCost?: number; config?: Record<string, unknown>; status?: string }
-): Station {
-  const result = db
-    .prepare('INSERT INTO stations (room_id, name, provider, tier, external_id, region, monthly_cost, config, status) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)')
-    .run(
-      roomId, name, provider, tier,
-      opts?.externalId ?? null,
-      opts?.region ?? null,
-      opts?.monthlyCost ?? 0,
-      opts?.config ? JSON.stringify(opts.config) : null,
-      opts?.status ?? 'provisioning'
-    )
-  return getStation(db, result.lastInsertRowid as number)!
-}
-
-export function getStation(db: Database.Database, id: number): Station | null {
-  const row = db.prepare('SELECT * FROM stations WHERE id = ?').get(id) as Record<string, unknown> | undefined
-  return row ? mapStationRow(row) : null
-}
-
-export function listStations(db: Database.Database, roomId?: number, status?: string): Station[] {
-  if (roomId && status) {
-    const rows = db.prepare('SELECT * FROM stations WHERE room_id = ? AND status = ? ORDER BY created_at DESC').all(roomId, status)
-    return (rows as Record<string, unknown>[]).map(mapStationRow)
-  }
-  if (roomId) {
-    const rows = db.prepare('SELECT * FROM stations WHERE room_id = ? ORDER BY created_at DESC').all(roomId)
-    return (rows as Record<string, unknown>[]).map(mapStationRow)
-  }
-  if (status) {
-    const rows = db.prepare('SELECT * FROM stations WHERE status = ? ORDER BY created_at DESC').all(status)
-    return (rows as Record<string, unknown>[]).map(mapStationRow)
-  }
-  const rows = db.prepare('SELECT * FROM stations ORDER BY created_at DESC').all()
-  return (rows as Record<string, unknown>[]).map(mapStationRow)
-}
-
-export function updateStation(
-  db: Database.Database, id: number,
-  updates: { externalId?: string; status?: string; monthlyCost?: number; config?: Record<string, unknown> }
-): Station {
-  const parts: string[] = []
-  const values: unknown[] = []
-  if (updates.externalId !== undefined) { parts.push('external_id = ?'); values.push(updates.externalId) }
-  if (updates.status !== undefined) { parts.push('status = ?'); values.push(updates.status) }
-  if (updates.monthlyCost !== undefined) { parts.push('monthly_cost = ?'); values.push(updates.monthlyCost) }
-  if (updates.config !== undefined) { parts.push('config = ?'); values.push(JSON.stringify(updates.config)) }
-  if (parts.length === 0) return getStation(db, id)!
-  parts.push("updated_at = datetime('now','localtime')")
-  values.push(id)
-  db.prepare(`UPDATE stations SET ${parts.join(', ')} WHERE id = ?`).run(...values)
-  return getStation(db, id)!
-}
-
-export function deleteStation(db: Database.Database, id: number): void {
-  db.prepare('DELETE FROM stations WHERE id = ?').run(id)
-}
-
 // ─── Chat Messages ──────────────────────────────────────────
 
 function mapChatMessageRow(row: Record<string, unknown>): ChatMessage {
@@ -2260,7 +2177,7 @@ export function ensureClerkWorker(db: Database.Database): Worker {
 
 export function getRevenueSummary(db: Database.Database, roomId: number): RevenueSummary {
   const wallet = getWalletByRoom(db, roomId)
-  if (!wallet) return { totalIncome: 0, totalExpenses: 0, netProfit: 0, stationCosts: 0, transactionCount: 0 }
+  if (!wallet) return { totalIncome: 0, totalExpenses: 0, netProfit: 0, transactionCount: 0 }
 
   const income = db.prepare(
     "SELECT COALESCE(SUM(CAST(amount AS REAL)), 0) as total FROM wallet_transactions WHERE wallet_id = ? AND type IN ('receive', 'fund')"
@@ -2268,10 +2185,6 @@ export function getRevenueSummary(db: Database.Database, roomId: number): Revenu
 
   const expenses = db.prepare(
     "SELECT COALESCE(SUM(CAST(amount AS REAL)), 0) as total FROM wallet_transactions WHERE wallet_id = ? AND type IN ('send', 'purchase')"
-  ).get(wallet.id) as { total: number }
-
-  const stationCosts = db.prepare(
-    "SELECT COALESCE(SUM(CAST(amount AS REAL)), 0) as total FROM wallet_transactions WHERE wallet_id = ? AND category = 'station_cost'"
   ).get(wallet.id) as { total: number }
 
   const count = db.prepare(
@@ -2282,7 +2195,6 @@ export function getRevenueSummary(db: Database.Database, roomId: number): Revenu
     totalIncome: income.total,
     totalExpenses: expenses.total,
     netProfit: income.total - expenses.total,
-    stationCosts: stationCosts.total,
     transactionCount: count.cnt
   }
 }

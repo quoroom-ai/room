@@ -10,11 +10,6 @@ import {
   ROOM_SELF_MOD_EDITED_EVENT,
   ROOM_SELF_MOD_REVERTED_EVENT,
   ROOM_SKILL_CREATED_EVENT,
-  ROOM_STATION_CANCELED_EVENT,
-  ROOM_STATION_CREATED_EVENT,
-  ROOM_STATION_DELETED_EVENT,
-  ROOM_STATION_STARTED_EVENT,
-  ROOM_STATION_STOPPED_EVENT,
   ROOM_WALLET_RECEIVED_EVENT,
   ROOM_WALLET_SENT_EVENT,
   RUN_COMPLETED_EVENT,
@@ -43,9 +38,6 @@ export type SwarmEventKind =
   | 'money_sent'
   | 'escalation'
   | 'skill_created'
-  | 'station_created'
-  | 'station_started'
-  | 'station_stopped'
   | 'self_mod'
 
 export interface SwarmEvent {
@@ -91,9 +83,6 @@ const RIPPLE_COLORS: Partial<Record<SwarmEventKind, string>> = {
   money_sent: 'var(--status-error)',
   escalation: 'var(--status-warning)',
   skill_created: 'var(--interactive)',
-  station_created: 'var(--status-info)',
-  station_started: 'var(--status-success)',
-  station_stopped: 'var(--status-warning)',
   self_mod: 'var(--interactive)',
 }
 
@@ -187,21 +176,6 @@ function mapWsEvent(msg: WsMessage, rooms: Room[]): { kind: SwarmEventKind; labe
       const amount = data.amount as number | undefined
       const label = amount ? `+$${amount}` : 'Received'
       return roomId ? { kind: 'money_received', label, roomId } : null
-    }
-    case ROOM_STATION_CREATED_EVENT: {
-      return roomId ? { kind: 'station_created', label: 'Station created', roomId } : null
-    }
-    case ROOM_STATION_STARTED_EVENT: {
-      return roomId ? { kind: 'station_started', label: 'Station started', roomId } : null
-    }
-    case ROOM_STATION_STOPPED_EVENT: {
-      return roomId ? { kind: 'station_stopped', label: 'Station stopped', roomId } : null
-    }
-    case ROOM_STATION_CANCELED_EVENT: {
-      return roomId ? { kind: 'station_stopped', label: 'Station canceled', roomId } : null
-    }
-    case ROOM_STATION_DELETED_EVENT: {
-      return roomId ? { kind: 'station_stopped', label: 'Station deleted', roomId } : null
     }
     case ROOM_SELF_MOD_EDITED_EVENT: {
       const reason = (data.reason as string) ?? 'Code modified'
@@ -329,9 +303,6 @@ export function useSwarmEvents(
       { kind: 'money_received', label: '+$500' },
       { kind: 'escalation', label: 'Escalation' },
       { kind: 'skill_created', label: 'Skill created' },
-      { kind: 'station_created', label: 'Station created' },
-      { kind: 'station_started', label: 'Station started' },
-      { kind: 'station_stopped', label: 'Station stopped' },
       { kind: 'worker_thinking', label: 'John thinking' },
       { kind: 'worker_acting', label: 'John acting' },
       { kind: 'worker_rate_limited', label: 'Ada rate limited' },

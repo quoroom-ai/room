@@ -13,7 +13,6 @@ import { registerSelfModRoutes } from './self-mod'
 import { registerStatusRoutes } from './status'
 import { registerWalletRoutes } from './wallet'
 import { registerCredentialRoutes } from './credentials'
-import { registerStationRoutes } from './stations'
 import { registerRoomMessageRoutes } from './room-messages'
 import { registerProviderRoutes } from './providers'
 import { registerContactRoutes } from './contacts'
@@ -34,7 +33,6 @@ export function registerAllRoutes(router: Router): void {
   registerStatusRoutes(router)
   registerWalletRoutes(router)
   registerCredentialRoutes(router)
-  registerStationRoutes(router)
   registerRoomMessageRoutes(router)
   registerProviderRoutes(router)
   registerContactRoutes(router)

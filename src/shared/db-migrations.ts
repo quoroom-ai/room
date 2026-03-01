@@ -152,5 +152,8 @@ export function runMigrations(database: Database.Database, log: (msg: string) =>
   // Remove auto mode: all rooms operate in semi mode.
   database.prepare(`UPDATE rooms SET autonomy_mode = 'semi' WHERE autonomy_mode IS NULL OR autonomy_mode != 'semi'`).run()
 
+  // Remove deprecated stations subsystem data.
+  database.exec(`DROP TABLE IF EXISTS stations`)
+
   log('Database schema initialized')
 }

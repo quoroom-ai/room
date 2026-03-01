@@ -405,23 +405,6 @@ CREATE TABLE IF NOT EXISTS room_messages (
 CREATE INDEX IF NOT EXISTS idx_room_messages_room ON room_messages(room_id);
 CREATE INDEX IF NOT EXISTS idx_room_messages_status ON room_messages(status);
 
--- Stations
-CREATE TABLE IF NOT EXISTS stations (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    room_id INTEGER NOT NULL REFERENCES rooms(id) ON DELETE CASCADE,
-    name TEXT NOT NULL,
-    provider TEXT NOT NULL,
-    external_id TEXT,
-    tier TEXT NOT NULL,
-    region TEXT,
-    status TEXT NOT NULL DEFAULT 'provisioning',
-    monthly_cost REAL NOT NULL DEFAULT 0,
-    config TEXT,
-    created_at DATETIME DEFAULT (datetime('now','localtime')),
-    updated_at DATETIME DEFAULT (datetime('now','localtime'))
-);
-CREATE INDEX IF NOT EXISTS idx_stations_room ON stations(room_id);
-
 -- Worker cycles (agent loop execution tracking)
 CREATE TABLE IF NOT EXISTS worker_cycles (
     id INTEGER PRIMARY KEY AUTOINCREMENT,

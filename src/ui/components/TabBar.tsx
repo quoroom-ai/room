@@ -1,4 +1,4 @@
-export type Tab = 'swarm' | 'clerk' | 'status' | 'memory' | 'workers' | 'tasks' | 'goals' | 'votes' | 'messages' | 'skills' | 'credentials' | 'transactions' | 'stations' | 'room-settings' | 'settings' | 'help'
+export type Tab = 'swarm' | 'clerk' | 'status' | 'memory' | 'workers' | 'tasks' | 'goals' | 'votes' | 'messages' | 'skills' | 'credentials' | 'transactions' | 'room-settings' | 'settings' | 'help'
 
 export const mainTabs: { id: Tab; label: string; advanced?: boolean }[] = [
   { id: 'status', label: 'Overview' },
@@ -10,7 +10,6 @@ export const mainTabs: { id: Tab; label: string; advanced?: boolean }[] = [
   { id: 'skills', label: 'Skills', advanced: true },
   { id: 'credentials', label: 'Credentials', advanced: true },
   { id: 'transactions', label: 'Transactions', advanced: true },
-  { id: 'stations', label: 'Stations' },
   { id: 'memory', label: 'Memory', advanced: true },
   { id: 'room-settings', label: 'Settings' },
 ]
@@ -68,11 +67,6 @@ export const tabIcons: Record<Tab, React.JSX.Element> = {
   transactions: ( // arrows up-down
     <svg width={S} height={S} viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth={sw} strokeLinecap="round" strokeLinejoin="round">
       <path d="M5 3v10M5 3L2 6M5 3l3 3" /><path d="M11 13V3M11 13l-3-3M11 13l3-3" />
-    </svg>
-  ),
-  stations: ( // server
-    <svg width={S} height={S} viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth={sw} strokeLinecap="round" strokeLinejoin="round">
-      <rect x="2" y="2" width="12" height="4" rx="1" /><rect x="2" y="10" width="12" height="4" rx="1" /><path d="M8 6v4" /><circle cx="5" cy="4" r="0.5" fill="currentColor" /><circle cx="5" cy="12" r="0.5" fill="currentColor" />
     </svg>
   ),
   memory: ( // brain/database

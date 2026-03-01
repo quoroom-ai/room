@@ -27,12 +27,6 @@ export const ROOM_CREDENTIAL_DELETED_EVENT = 'credential:deleted' as const
 export const ROOM_WALLET_SENT_EVENT = 'wallet:sent' as const
 export const ROOM_WALLET_RECEIVED_EVENT = 'wallet:received' as const
 
-export const ROOM_STATION_CREATED_EVENT = 'station:created' as const
-export const ROOM_STATION_STARTED_EVENT = 'station:started' as const
-export const ROOM_STATION_STOPPED_EVENT = 'station:stopped' as const
-export const ROOM_STATION_CANCELED_EVENT = 'station:canceled' as const
-export const ROOM_STATION_DELETED_EVENT = 'station:deleted' as const
-
 export const ROOM_UPDATED_EVENT = 'room:updated' as const
 export const ROOM_PAUSED_EVENT = 'room:paused' as const
 export const ROOM_RESTARTED_EVENT = 'room:restarted' as const
@@ -88,14 +82,6 @@ export const ROOM_BADGE_EVENT_TYPES = new Set([
   ...ROOM_MESSAGE_EVENT_TYPES,
 ])
 
-export const ROOM_STATION_EVENT_TYPES = new Set([
-  ROOM_STATION_CREATED_EVENT,
-  ROOM_STATION_STARTED_EVENT,
-  ROOM_STATION_STOPPED_EVENT,
-  ROOM_STATION_CANCELED_EVENT,
-  ROOM_STATION_DELETED_EVENT,
-])
-
 export const ROOM_WALLET_EVENT_TYPES = new Set([
   ROOM_WALLET_SENT_EVENT,
   ROOM_WALLET_RECEIVED_EVENT,
@@ -103,7 +89,6 @@ export const ROOM_WALLET_EVENT_TYPES = new Set([
 
 export const ROOM_BALANCE_EVENT_TYPES = new Set([
   ...ROOM_WALLET_EVENT_TYPES,
-  ...ROOM_STATION_EVENT_TYPES,
 ])
 
 export const ROOM_NETWORK_EVENT_TYPES = new Set([

@@ -1,7 +1,7 @@
 import React from 'react'
 import ReactDOM from 'react-dom/client'
 import { SwarmPanel } from './components/SwarmPanel'
-import type { Room, Worker, Station, RevenueSummary, OnChainBalance } from '@shared/types'
+import type { Room, Worker, RevenueSummary, OnChainBalance } from '@shared/types'
 import './styles/globals.css'
 
 // Auto-enable ?demo flag so useSwarmEvents fires simulated event bubbles
@@ -42,15 +42,6 @@ function w(id: number, roomId: number, name: string, state: string): Worker {
   }
 }
 
-function s(id: number, roomId: number, name: string, status: string, tier: string): Station {
-  return {
-    id, roomId, name, provider: 'flyio' as Station['provider'],
-    externalId: null, tier: tier as Station['tier'], region: 'iad',
-    status: status as Station['status'], monthlyCost: tier === 'micro' ? 5 : tier === 'small' ? 15 : 35,
-    config: null, createdAt: now, updatedAt: now,
-  }
-}
-
 const ROOMS: Room[] = [
   r(901, 'builder', 'Build and ship software. Find opportunities, execute, and deliver autonomously...', 'claude-sonnet-4-20250514'),
   r(902, 'research', 'Monitor markets, analyze trends, and surface actionable insights...', 'claude-opus-4-20250514'),
@@ -72,23 +63,14 @@ const WORKERS: Worker[] = [
   w(9020, 906, 'Incident', 'idle'), w(9021, 906, 'Scale', 'blocked'),
 ]
 
-const STATIONS: Record<number, Station[]> = {
-  901: [s(8001, 901, 'web-server', 'active', 'small'), s(8002, 901, 'scraper', 'active', 'micro')],
-  902: [s(8003, 902, 'monitor', 'active', 'small'), s(8004, 902, 'executor', 'active', 'medium')],
-  903: [s(8005, 903, 'workbench', 'active', 'small')],
-  904: [s(8006, 904, 'publisher', 'active', 'micro')],
-  905: [],
-  906: [s(8007, 906, 'ci-runner', 'active', 'medium'), s(8008, 906, 'staging', 'pending', 'small')],
-}
-
 // Demo data only — not representative of actual results
 const REVENUE: Record<number, RevenueSummary> = {
-  901: { totalIncome: 0, totalExpenses: 12.40, netProfit: -12.40, stationCosts: 5, transactionCount: 3 },
-  902: { totalIncome: 0, totalExpenses: 8.20, netProfit: -8.20, stationCosts: 5, transactionCount: 2 },
-  903: { totalIncome: 0, totalExpenses: 6.00, netProfit: -6.00, stationCosts: 5, transactionCount: 1 },
-  904: { totalIncome: 0, totalExpenses: 4.50, netProfit: -4.50, stationCosts: 5, transactionCount: 1 },
-  905: { totalIncome: 0, totalExpenses: 0, netProfit: 0, stationCosts: 0, transactionCount: 0 },
-  906: { totalIncome: 0, totalExpenses: 9.10, netProfit: -9.10, stationCosts: 5, transactionCount: 2 },
+  901: { totalIncome: 0, totalExpenses: 12.40, netProfit: -12.40, transactionCount: 3 },
+  902: { totalIncome: 0, totalExpenses: 8.20, netProfit: -8.20, transactionCount: 2 },
+  903: { totalIncome: 0, totalExpenses: 6.00, netProfit: -6.00, transactionCount: 1 },
+  904: { totalIncome: 0, totalExpenses: 4.50, netProfit: -4.50, transactionCount: 1 },
+  905: { totalIncome: 0, totalExpenses: 0, netProfit: 0, transactionCount: 0 },
+  906: { totalIncome: 0, totalExpenses: 9.10, netProfit: -9.10, transactionCount: 2 },
 }
 
 const BALANCES: Record<number, OnChainBalance> = {
@@ -109,7 +91,7 @@ function Demo(): React.JSX.Element {
         rooms={ROOMS}
         queenRunning={QUEEN_RUNNING}
         onNavigateToRoom={() => {}}
-        demoData={{ workers: WORKERS, stations: STATIONS, revenue: REVENUE, balances: BALANCES }}
+        demoData={{ workers: WORKERS, revenue: REVENUE, balances: BALANCES }}
       />
     </div>
   )

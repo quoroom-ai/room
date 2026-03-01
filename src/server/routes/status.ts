@@ -3,7 +3,7 @@ import os from 'node:os'
 import { execFile } from 'node:child_process'
 import { promisify } from 'node:util'
 import { getDataDir } from '../db'
-import { getUpdateInfo, simulateUpdate, forceCheck, getAutoUpdateStatus, getReadyUpdateVersion } from '../updateChecker'
+import { getUpdateInfo, simulateUpdate, forceCheck, getAutoUpdateStatus, getReadyUpdateVersion, getUpdateDiagnostics } from '../updateChecker'
 import { checkAndApplyUpdate } from '../autoUpdate'
 import { getDeploymentMode } from '../auth'
 
@@ -129,7 +129,7 @@ export function registerStatusRoutes(router: Router): void {
   })
 
   router.post('/api/status/check-update', async () => {
-    await forceCheck()
+    await forceCheck({ ignoreBackoff: true })
     return { data: { updateInfo: getUpdateInfo() } }
   })
 
@@ -167,6 +167,7 @@ export function registerStatusRoutes(router: Router): void {
       data.updateInfo = getUpdateInfo()
       data.autoUpdate = getAutoUpdateStatus()
       data.readyUpdateVersion = getReadyUpdateVersion()
+      data.updateDiagnostics = getUpdateDiagnostics()
     }
     if (Object.keys(pending).length > 0) {
       data.pending = pending

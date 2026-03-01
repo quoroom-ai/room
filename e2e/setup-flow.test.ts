@@ -204,7 +204,7 @@ test('setup popup applies selected model path', async ({ page }) => {
   await expect(page.getByRole('button', { name: /Apply/i })).toBeVisible()
 })
 
-test('archive uses cloud-station deletion route', async ({ page, request }) => {
+test('archive flow does not call cloud-station routes', async ({ page, request }) => {
   const roomName = uniqueRoomName('D').toLowerCase().replace(/\s+/g, '-')
   const create = await request.post(`${base}/api/rooms`, {
     headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
@@ -213,37 +213,19 @@ test('archive uses cloud-station deletion route', async ({ page, request }) => {
   expect(create.status()).toBe(201)
   const roomId = (await create.json() as { room: { id: number } }).room.id
 
-  await page.route(`**/api/rooms/${roomId}/cloud-stations`, async (route) => {
-    await route.fulfill({
-      json: [{
-        id: 101,
-        roomId: 'room-hash',
-        tier: 'micro',
-        stationName: 'E2E Station',
-        flyAppName: null,
-        flyMachineId: null,
-        status: 'active',
-        monthlyCost: 9,
-        currentPeriodEnd: null,
-        createdAt: new Date().toISOString(),
-        updatedAt: new Date().toISOString(),
-      }],
-    })
-  })
-  await page.route(`**/api/rooms/${roomId}/cloud-stations/101`, async (route) => {
-    await route.fulfill({ json: { ok: true } })
+  let calledCloudStationRoute = false
+  page.on('request', (req) => {
+    const pathname = new URL(req.url()).pathname
+    if (pathname.includes(`/api/rooms/${roomId}/cloud-stations`)) {
+      calledCloudStationRoute = true
+    }
   })
 
   await openRoomSettings(page, roomId, roomName)
-
-  const deleteReq = page.waitForRequest((req) => {
-    const pathname = new URL(req.url()).pathname
-    return req.method() === 'DELETE' && pathname === `/api/rooms/${roomId}/cloud-stations/101`
-  })
   await page.getByRole('button', { name: 'Archive Room' }).first().click()
   await expect(page.getByText(`Archive "${roomName}"?`)).toBeVisible()
   await page.keyboard.press('Enter')
-  await deleteReq
+  await expect.poll(() => calledCloudStationRoute).toBe(false)
 
   await expect.poll(async () => {
     const res = await request.get(`${base}/api/rooms`, {

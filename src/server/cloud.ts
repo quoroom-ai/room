@@ -5,7 +5,7 @@
 
 import type Database from 'better-sqlite3'
 import { startCloudSync, stopCloudSync, getRoomCloudId, pushActivityToCloud, type CloudHeartbeat } from '../shared/cloud-sync'
-import { listRooms, listWorkers, listTasks, listStations, getWalletByRoom, getWalletTransactionSummary, getSetting, getWorker, getRoom } from '../shared/db-queries'
+import { listRooms, listWorkers, listTasks, getWalletByRoom, getWalletTransactionSummary, getSetting, getWorker, getRoom } from '../shared/db-queries'
 import { eventBus } from './event-bus'
 
 function getVersion(): string {
@@ -30,11 +30,6 @@ const CLOUD_EVENT_MAP: Record<string, string> = {
   'run:completed': 'task_completed',
   'run:failed': 'task_failed',
   'skill:created': 'skill_created',
-  'station:created': 'station_created',
-  'station:started': 'station_started',
-  'station:stopped': 'station_stopped',
-  'station:canceled': 'station_stopped',
-  'station:deleted': 'station_stopped',
   'self_mod:edited': 'self_mod',
   'self_mod:reverted': 'self_mod',
   'wallet:sent': 'money_sent',
@@ -120,7 +115,6 @@ export function initCloudSync(db: Database.Database): void {
 
       const allWorkers = listWorkers(db)
       const tasks = listTasks(db)
-      const allStations = listStations(db)
       const version = getVersion()
 
       // Pre-compute per-room data
@@ -132,14 +126,6 @@ export function initCloudSync(db: Database.Database): void {
         const list = workersPerRoom.get(worker.roomId) ?? []
         list.push({ name: worker.name, state: worker.agentState, model: worker.model ?? undefined })
         workersPerRoom.set(worker.roomId, list)
-      }
-
-      const stationsPerRoom = new Map<number, Array<{ name: string; status: string; tier: string }>>()
-      for (const station of allStations) {
-        if (station.roomId == null) continue
-        const list = stationsPerRoom.get(station.roomId) ?? []
-        list.push({ name: station.name, status: station.status, tier: station.tier })
-        stationsPerRoom.set(station.roomId, list)
       }
 
       const taskCounts = new Map<number, number>()
@@ -171,7 +157,6 @@ export function initCloudSync(db: Database.Database): void {
             version,
             queenModel: queen?.model ?? null,
             workers: privateWorkers,
-            stations: [],
             visibility: 'private' as const,
           }
         }
@@ -194,7 +179,6 @@ export function initCloudSync(db: Database.Database): void {
           version,
           queenModel: queen?.model ?? null,
           workers: workersPerRoom.get(room.id) ?? [],
-          stations: stationsPerRoom.get(room.id) ?? [],
           visibility: 'public' as const,
           referredByCode: room.referredByCode,
           keeperReferralCode,

@@ -62,30 +62,6 @@ export const GOAL_STATUSES = {
   BLOCKED: 'blocked'
 } as const
 
-export const STATION_STATUSES = {
-  PROVISIONING: 'provisioning',
-  RUNNING: 'running',
-  STOPPED: 'stopped',
-  ERROR: 'error',
-  DELETED: 'deleted'
-} as const
-
-export const STATION_TIERS = {
-  MICRO: 'micro',
-  SMALL: 'small',
-  MEDIUM: 'medium',
-  LARGE: 'large',
-  EPHEMERAL: 'ephemeral',
-  GPU: 'gpu'
-} as const
-
-export const STATION_PROVIDERS = {
-  FLYIO: 'flyio',
-  E2B: 'e2b',
-  MODAL: 'modal',
-  MOCK: 'mock'
-} as const
-
 export const WALLET_TX_TYPES = {
   SEND: 'send',
   RECEIVE: 'receive',

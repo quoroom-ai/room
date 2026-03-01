@@ -639,7 +639,7 @@ describe('schema', () => {
       'entities', 'escalations', 'goal_updates', 'goals',
       'observations', 'quorum_decisions', 'quorum_votes', 'relations',
       'room_activity', 'room_messages', 'rooms', 'schema_version',
-      'self_mod_audit', 'settings', 'skills', 'stations',
+      'self_mod_audit', 'settings', 'skills',
       'task_runs', 'tasks', 'wallet_transactions', 'wallets',
       'watches', 'workers'
     ]

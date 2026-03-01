@@ -13,7 +13,6 @@ import { SkillsPanel } from './components/SkillsPanel'
 import { MessagesPanel } from './components/MessagesPanel'
 import { CredentialsPanel } from './components/CredentialsPanel'
 import { TransactionsPanel } from './components/TransactionsPanel'
-import { StationsPanel } from './components/StationsPanel'
 import { RoomSettingsPanel } from './components/RoomSettingsPanel'
 import { SwarmPanel } from './components/SwarmPanel'
 import { ClerkPanel } from './components/ClerkPanel'
@@ -40,7 +39,7 @@ const ADVANCED_TABS = new Set<Tab>(
   mainTabs.filter((tab) => tab.advanced).map((tab) => tab.id)
 )
 
-const ALL_TAB_IDS: Tab[] = ['clerk', 'swarm', 'status', 'goals', 'votes', 'messages', 'workers', 'tasks', 'skills', 'credentials', 'transactions', 'stations', 'room-settings', 'memory', 'settings', 'help']
+const ALL_TAB_IDS: Tab[] = ['clerk', 'swarm', 'status', 'goals', 'votes', 'messages', 'workers', 'tasks', 'skills', 'credentials', 'transactions', 'room-settings', 'memory', 'settings', 'help']
 
 const DEFAULT_PORT = '3700'
 const isRemoteOrigin = location.hostname !== 'localhost' && location.hostname !== '127.0.0.1'
@@ -359,10 +358,6 @@ function App(): React.JSX.Element {
         if (!shouldShowManualUpdateControls(mode)) {
           setServerUpdateInfo(null)
         }
-        if (mode === 'local' && tabRef.current === 'stations') {
-          setTab('status')
-        }
-
         const isDevDb = mode === 'local' && isDevDbPath(status.dbPath)
         if (isDevDb) {
           setDevDbBanner({ dbPath: status.dbPath, dataDir: status.dataDir })
@@ -578,9 +573,6 @@ function App(): React.JSX.Element {
         return <CredentialsPanel roomId={selectedRoomId} autonomyMode="semi" />
       case 'transactions':
         return <TransactionsPanel roomId={selectedRoomId} />
-      case 'stations':
-        if (deploymentMode !== 'cloud') return null
-        return <StationsPanel roomId={selectedRoomId} autonomyMode="semi" queenModel={selectedRoom ? (queenModels[selectedRoom.id] ?? null) : null} workerModel={selectedRoom?.workerModel ?? null} />
       case 'room-settings':
         return <RoomSettingsPanel roomId={selectedRoomId} />
       case 'settings':
@@ -680,7 +672,6 @@ function App(): React.JSX.Element {
   }
 
   const visibleTabs = (advancedMode ? mainTabs : mainTabs.filter(t => !t.advanced))
-    .filter(t => t.id !== 'stations' || deploymentMode === 'cloud')
 
   return (
     <div className="flex h-screen bg-surface-primary">
