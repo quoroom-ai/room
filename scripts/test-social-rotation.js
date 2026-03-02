@@ -125,11 +125,11 @@ async function main() {
     process.exit(1);
   }
 
-  console.log('social:test PASSED');
-  console.log(`- Variants: ${variants.length}`);
-  console.log(`- Current selection: ${state2.file} (index ${state2.index})`);
-  console.log(`- social.png hash: ${hash2}`);
-  for (const note of notes) console.log(`- Note: ${note}`);
+  // console.log('social:test PASSED');
+  // console.log(`- Variants: ${variants.length}`);
+  // console.log(`- Current selection: ${state2.file} (index ${state2.index})`);
+  // console.log(`- social.png hash: ${hash2}`);
+  for (const note of notes) // console.log(`- Note: ${note}`);
 }
 
 main().catch((error) => {
