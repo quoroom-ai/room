@@ -289,7 +289,7 @@ export function RoomSettingsPanel({ roomId }: RoomSettingsPanelProps): React.JSX
     () => api.providers.status().catch(() => null),
     120000
   )
-  const [queenRunning, setQueenRunning] = useState<Record<number, boolean>>({})
+  const [roomRuntimeRunning, setRoomRuntimeRunning] = useState<Record<number, boolean>>({})
   const [queenModel, setQueenModel] = useState<Record<number, string | null>>({})
   const [queenAuth, setQueenAuth] = useState<Record<number, QueenStatus['auth'] | null>>({})
   const pendingModelUpdate = useRef(false)
@@ -298,7 +298,7 @@ export function RoomSettingsPanel({ roomId }: RoomSettingsPanelProps): React.JSX
   const fetchQueenStatusRef = useRef(async (targetRoom: Room | null) => {
     if (!targetRoom) return
     if (!targetRoom.queenWorkerId) {
-      setQueenRunning(prev => ({ ...prev, [targetRoom.id]: false }))
+      setRoomRuntimeRunning(prev => ({ ...prev, [targetRoom.id]: false }))
       if (!pendingModelUpdate.current) {
         setQueenModel(prev => ({ ...prev, [targetRoom.id]: null }))
         setQueenAuth(prev => ({ ...prev, [targetRoom.id]: null }))
@@ -307,7 +307,7 @@ export function RoomSettingsPanel({ roomId }: RoomSettingsPanelProps): React.JSX
     }
 
     const q = await api.rooms.queenStatus(targetRoom.id).catch(() => null)
-    setQueenRunning(prev => ({ ...prev, [targetRoom.id]: q?.running ?? false }))
+    setRoomRuntimeRunning(prev => ({ ...prev, [targetRoom.id]: q?.running ?? false }))
     if (!pendingModelUpdate.current) {
       setQueenModel(prev => ({ ...prev, [targetRoom.id]: q?.model ?? null }))
       setQueenAuth(prev => ({ ...prev, [targetRoom.id]: q?.auth ?? null }))
@@ -924,24 +924,24 @@ export function RoomSettingsPanel({ roomId }: RoomSettingsPanelProps): React.JSX
     }
   }
 
-  async function handleQueenStart(targetRoomId: number): Promise<void> {
-    await withSwitchPending(`queen-running:${targetRoomId}`, async () => {
-      setQueenRunning(prev => ({ ...prev, [targetRoomId]: true }))
+  async function handleRoomRuntimeStart(targetRoomId: number): Promise<void> {
+    await withSwitchPending(`room-runtime:${targetRoomId}`, async () => {
+      setRoomRuntimeRunning(prev => ({ ...prev, [targetRoomId]: true }))
       try {
         await api.rooms.start(targetRoomId)
       } catch {
-        setQueenRunning(prev => ({ ...prev, [targetRoomId]: false }))
+        setRoomRuntimeRunning(prev => ({ ...prev, [targetRoomId]: false }))
       }
     })
   }
 
-  async function handleQueenStop(targetRoomId: number): Promise<void> {
-    await withSwitchPending(`queen-running:${targetRoomId}`, async () => {
-      setQueenRunning(prev => ({ ...prev, [targetRoomId]: false }))
+  async function handleRoomRuntimeStop(targetRoomId: number): Promise<void> {
+    await withSwitchPending(`room-runtime:${targetRoomId}`, async () => {
+      setRoomRuntimeRunning(prev => ({ ...prev, [targetRoomId]: false }))
       try {
         await api.rooms.stop(targetRoomId)
       } catch {
-        setQueenRunning(prev => ({ ...prev, [targetRoomId]: true }))
+        setRoomRuntimeRunning(prev => ({ ...prev, [targetRoomId]: true }))
       }
     })
   }
@@ -960,7 +960,7 @@ export function RoomSettingsPanel({ roomId }: RoomSettingsPanelProps): React.JSX
   const quietHoursPending = isSwitchPending(`quiet-hours:${room.id}`)
   const visibilityPending = isSwitchPending(`visibility:${room.id}`)
   const governancePending = isSwitchPending(`governance:${room.id}`)
-  const queenRunningPending = isSwitchPending(`queen-running:${room.id}`)
+  const roomRuntimePending = isSwitchPending(`room-runtime:${room.id}`)
   const quietEnabled = room.queenQuietFrom !== null
   const activeQueenAuth = queenAuth[room.id] ?? null
   const hasQueenModelLoaded = Object.prototype.hasOwnProperty.call(queenModel, room.id)
@@ -1142,6 +1142,35 @@ export function RoomSettingsPanel({ roomId }: RoomSettingsPanelProps): React.JSX
 
   return (
     <div className="p-4">
+      {/* Room runtime */}
+      <div className="mb-4">
+        <h3 className="text-sm font-semibold text-text-secondary mb-1">Room Runtime</h3>
+        <p className="text-xs text-text-muted mb-2">Controls the full room runtime (queen + workers).</p>
+        <div className="flex gap-2 items-center">
+          {room.status !== 'stopped' && (
+            room.status === 'active' && !Object.prototype.hasOwnProperty.call(roomRuntimeRunning, room.id) ? (
+              <button
+                disabled
+                className="text-sm px-2.5 py-1.5 rounded-lg border border-border-primary text-text-muted opacity-70 cursor-not-allowed"
+              >Checking...</button>
+            ) : roomRuntimeRunning[room.id] ? (
+              <button
+                onClick={() => { void handleRoomRuntimeStop(room.id) }}
+                disabled={roomRuntimePending}
+                className="text-sm px-2.5 py-1.5 rounded-lg border text-orange-600 border-orange-200 hover:border-orange-300 transition-colors disabled:opacity-70 disabled:cursor-not-allowed"
+              >Stop Room</button>
+            ) : (
+              <button
+                onClick={() => { void handleRoomRuntimeStart(room.id) }}
+                disabled={roomRuntimePending}
+                className="text-sm px-2.5 py-1.5 rounded-lg border text-status-success border-green-200 hover:border-green-300 transition-colors disabled:opacity-70 disabled:cursor-not-allowed"
+              >Start Room</button>
+            )
+          )}
+          {room.status !== 'stopped' && roomRuntimePending && <InlineSpinner />}
+        </div>
+      </div>
+
       {/* Room name */}
       <div className="mb-4">
         <label className="block text-sm font-medium text-text-secondary mb-1">Room Name</label>
@@ -1579,30 +1608,6 @@ export function RoomSettingsPanel({ roomId }: RoomSettingsPanelProps): React.JSX
                 'Email address the keeper can reply to. Replies route back to this room.'
               )}
 
-              {/* Room runtime start/stop */}
-              <div className="pt-2 flex gap-2 items-center">
-                {room.status !== 'stopped' && (
-                  room.status === 'active' && !Object.prototype.hasOwnProperty.call(queenRunning, room.id) ? (
-                    <button
-                      disabled
-                      className="text-sm px-2.5 py-1.5 rounded-lg border border-border-primary text-text-muted opacity-70 cursor-not-allowed"
-                    >Checking...</button>
-                  ) : queenRunning[room.id] ? (
-                    <button
-                      onClick={() => { void handleQueenStop(room.id) }}
-                      disabled={queenRunningPending}
-                      className="text-sm px-2.5 py-1.5 rounded-lg border text-orange-600 border-orange-200 hover:border-orange-300 transition-colors disabled:opacity-70 disabled:cursor-not-allowed"
-                    >Stop Room</button>
-                  ) : (
-                    <button
-                      onClick={() => { void handleQueenStart(room.id) }}
-                      disabled={queenRunningPending}
-                      className="text-sm px-2.5 py-1.5 rounded-lg border text-status-success border-green-200 hover:border-green-300 transition-colors disabled:opacity-70 disabled:cursor-not-allowed"
-                    >Start Room</button>
-                  )
-                )}
-                {room.status !== 'stopped' && queenRunningPending && <InlineSpinner />}
-              </div>
             </div>
           </div>
         </div>
@@ -1791,7 +1796,7 @@ export function RoomSettingsPanel({ roomId }: RoomSettingsPanelProps): React.JSX
         <h3 className="text-sm font-semibold text-status-error mb-2">Danger Zone</h3>
         <div className="border border-status-error rounded-lg p-4">
           <p className="text-sm text-text-secondary mb-1">Archive this room</p>
-          <p className="text-xs text-text-muted mb-3">Stops the queen and hides the room from the sidebar.</p>
+          <p className="text-xs text-text-muted mb-3">Stops the room runtime and hides the room from the sidebar.</p>
           <button
             onClick={() => setShowArchiveConfirm(true)}
             disabled={archiveBusy}
@@ -1853,7 +1858,7 @@ export function RoomSettingsPanel({ roomId }: RoomSettingsPanelProps): React.JSX
       {showArchiveConfirm && (
         <ConfirmDialog
           title={`Archive "${room.name}"?`}
-          message="This will stop the queen and hide the room."
+          message="This will stop the room runtime and hide the room."
           confirmLabel="Archive Room"
           danger
           onConfirm={() => {

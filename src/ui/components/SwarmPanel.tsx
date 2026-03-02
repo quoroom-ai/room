@@ -1368,7 +1368,7 @@ export function SwarmPanel({ rooms, queenRunning, forcedInviteOpenNonce, onNavig
         {/* Legend */}
         <div className="px-6 pb-6 pt-2 space-y-3 text-xs text-text-muted max-w-xl mx-auto">
           <div className="flex flex-wrap gap-x-5 gap-y-1.5">
-            <span className="flex items-center gap-1.5"><span className="inline-block w-2.5 h-2.5 rounded-full bg-status-success" /> Active (queen running)</span>
+            <span className="flex items-center gap-1.5"><span className="inline-block w-2.5 h-2.5 rounded-full bg-status-success" /> Active (room running)</span>
             <span className="flex items-center gap-1.5"><span className="inline-block w-2.5 h-2.5 rounded-full bg-status-warning" /> Paused</span>
             <span className="flex items-center gap-1.5"><span className="inline-block w-2.5 h-2.5 rounded-full bg-surface-tertiary" /> Idle / stopped</span>
           </div>

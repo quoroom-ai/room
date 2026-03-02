@@ -10,12 +10,12 @@ import { storageGet, storageSet } from '../lib/storage'
 import { formatRelativeTime } from '../utils/time'
 import { Select } from './Select'
 import { AutoModeLockModal, modeAwareButtonClass, useAutonomyControlGate } from './AutonomyControlGate'
-import type { Escalation, Worker, RoomMessage } from '@shared/types'
+import type { Escalation, EscalationStatus, Worker, RoomMessage } from '@shared/types'
 
-const STATUS_COLORS: Record<string, string> = {
-  pending: 'bg-status-warning-bg border-amber-200',
-  in_progress: 'bg-interactive-bg border-interactive',
-  resolved: 'bg-surface-tertiary border-transparent',
+const STATUS_COLORS: Record<EscalationStatus, string> = {
+  pending: 'bg-surface-secondary border-border-primary',
+  in_progress: 'bg-interactive-bg border-border-primary',
+  resolved: 'bg-surface-tertiary border-border-primary',
 }
 
 interface MessagesPanelProps {
@@ -26,6 +26,10 @@ interface MessagesPanelProps {
 export function MessagesPanel({ roomId, autonomyMode }: MessagesPanelProps): React.JSX.Element {
   const { semi, guard, showLockModal, closeLockModal } = useAutonomyControlGate(autonomyMode)
   const [viewSection, setViewSection] = useState<'escalations' | 'rooms'>('escalations')
+  const [scope, setScope] = useState<'keeper' | 'all'>(() => {
+    const saved = storageGet('quoroom_messages_scope')
+    return saved === 'all' ? 'all' : 'keeper'
+  })
   const [collapsed, setCollapsed] = useState(() => storageGet('quoroom_messages_collapsed') === 'true')
 
   const { data: escalations, refresh } = usePolling<Escalation[]>(
@@ -69,7 +73,7 @@ export function MessagesPanel({ roomId, autonomyMode }: MessagesPanelProps): Rea
   // Auto-scroll to bottom on new messages
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
-  }, [escalations?.length])
+  }, [escalations?.length, scope])
 
   const workerList = workers ?? []
   const workerMap = new Map(workerList.map(w => [w.id, w]))
@@ -123,8 +127,7 @@ export function MessagesPanel({ roomId, autonomyMode }: MessagesPanelProps): Rea
   async function handleMarkAllRead(): Promise<void> {
     if (!roomId) return
     if (viewSection === 'escalations') {
-      const pending = (escalations ?? []).filter(e => e.status === 'pending')
-      await Promise.all(pending.map(e => api.escalations.resolve(e.id, '')))
+      await Promise.all(pendingEscalations.map(e => api.escalations.resolve(e.id, '')))
       refresh()
     } else {
       const unread = (roomMessages ?? []).filter(m => m.status === 'unread')
@@ -133,7 +136,10 @@ export function MessagesPanel({ roomId, autonomyMode }: MessagesPanelProps): Rea
     }
   }
 
-  const pending = (escalations ?? []).filter(e => e.status === 'pending')
+  const filteredEscalations = (escalations ?? []).filter(e => (
+    scope === 'all' || e.toAgentId === null || e.fromAgentId === null
+  ))
+  const pendingEscalations = filteredEscalations.filter(e => e.status === 'pending')
   const unreadMessages = (roomMessages ?? []).filter(m => m.status === 'unread')
 
   return (
@@ -150,7 +156,7 @@ export function MessagesPanel({ roomId, autonomyMode }: MessagesPanelProps): Rea
                 : 'bg-interactive-bg text-interactive hover:bg-interactive hover:text-text-invert'
             }`}
           >
-            My Room{pending.length > 0 ? ` (${pending.length})` : ''}
+            My Room{pendingEscalations.length > 0 ? ` (${pendingEscalations.length})` : ''}
           </button>
           <button
             onClick={() => setViewSection('rooms')}
@@ -163,7 +169,19 @@ export function MessagesPanel({ roomId, autonomyMode }: MessagesPanelProps): Rea
             Outside Rooms{unreadMessages.length > 0 ? ` (${unreadMessages.length})` : ''}
           </button>
         </div>
-        {((viewSection === 'escalations' && pending.length > 0) || (viewSection === 'rooms' && unreadMessages.length > 0)) && (
+        {viewSection === 'escalations' && (
+          <button
+            onClick={() => setScope((current) => {
+              const next = current === 'keeper' ? 'all' : 'keeper'
+              storageSet('quoroom_messages_scope', next)
+              return next
+            })}
+            className="text-xs px-2.5 py-1.5 rounded-lg border border-border-primary text-text-secondary hover:text-text-primary hover:border-interactive transition-colors"
+          >
+            {scope === 'keeper' ? 'Show internal' : 'Hide internal'}
+          </button>
+        )}
+        {((viewSection === 'escalations' && pendingEscalations.length > 0) || (viewSection === 'rooms' && unreadMessages.length > 0)) && (
           <button
             onClick={handleMarkAllRead}
             className="text-xs px-2.5 py-1.5 rounded-lg bg-interactive text-text-invert hover:bg-interactive-hover"
@@ -229,13 +247,13 @@ export function MessagesPanel({ roomId, autonomyMode }: MessagesPanelProps): Rea
         {!roomId ? (
           <div className="p-4 text-sm text-text-muted">Select a room to view messages.</div>
         ) : viewSection === 'escalations' ? (
-          (escalations ?? []).length === 0 && escalations ? (
+          filteredEscalations.length === 0 && escalations ? (
             <div className="p-4 text-sm text-text-muted">
               {semi ? 'No messages yet.' : 'No messages yet. Messages are created by agents.'}
             </div>
           ) : (
             <div className="p-4 space-y-3">
-              {(escalations ?? []).map(esc => (
+              {filteredEscalations.map(esc => (
                 <MessageBubble
                   key={esc.id}
                   escalation={esc}
@@ -364,7 +382,7 @@ function MessageBubble({
   return (
     <div className="space-y-2">
       {/* Question bubble */}
-      <div className={`rounded-lg p-3 max-w-[85%] border shadow-sm ${STATUS_COLORS[esc.status] ?? 'bg-surface-tertiary border-transparent'}`}>
+      <div className={`rounded-lg p-3 max-w-[85%] border shadow-sm ${STATUS_COLORS[esc.status] ?? 'bg-surface-tertiary border-border-primary'}`}>
         <div className="flex items-center gap-2 mb-1">
           <span className="text-xs font-medium text-text-secondary">
             {getWorkerName(esc.fromAgentId)}
@@ -379,13 +397,18 @@ function MessageBubble({
           )}
           {isPending && (
             <span className="px-1.5 py-0.5 rounded-lg text-xs font-medium bg-status-warning-bg text-status-warning">
-              pending
+              Needs reply
             </span>
           )}
           <span className="text-xs text-text-muted ml-auto">
             {formatRelativeTime(esc.createdAt)}
           </span>
         </div>
+        {collapsed && (
+          <div className="text-sm text-text-secondary truncate">
+            {esc.question}
+          </div>
+        )}
         {!collapsed && (
           <>
             <div className="text-sm text-text-primary whitespace-pre-wrap">{esc.question}</div>

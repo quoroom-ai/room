@@ -135,9 +135,67 @@ test.describe('UI — Tab navigation', () => {
   })
 
   test('Messages tab', async ({ page }) => {
-    await page.locator('button').filter({ hasText: /^Messages$/i }).first().click()
-    // Messages panel — check for empty state (no room selected shows prompt)
-    await expect(page.getByText(/Select a room|No messages yet/i)).toBeVisible({ timeout: 5000 })
+    const roomId = await ensureActiveRoom(page.request)
+    const unique = `msg-${Date.now().toString(36)}`
+
+    const workersRes = await page.request.get(`${base}/api/rooms/${roomId}/workers`, {
+      headers: { Authorization: `Bearer ${token}` },
+    })
+    expect(workersRes.ok()).toBeTruthy()
+    const existingWorkers = await workersRes.json() as Array<{ id: number }>
+    expect(existingWorkers.length).toBeGreaterThan(0)
+    const queenWorkerId = existingWorkers[0].id
+
+    const helperWorkerRes = await page.request.post(`${base}/api/workers`, {
+      headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+      data: {
+        name: `${unique}-helper`,
+        systemPrompt: 'Support message panel e2e checks.',
+        roomId,
+      },
+    })
+    expect(helperWorkerRes.ok()).toBeTruthy()
+    const helperWorker = await helperWorkerRes.json() as { id: number }
+
+    const keeperQuestion = `${unique} keeper-visible escalation`
+    const internalQuestion = `${unique} internal escalation`
+
+    const keeperEscalationRes = await page.request.post(`${base}/api/rooms/${roomId}/escalations`, {
+      headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+      data: {
+        fromAgentId: helperWorker.id,
+        question: keeperQuestion,
+      },
+    })
+    expect(keeperEscalationRes.ok()).toBeTruthy()
+
+    const internalEscalationRes = await page.request.post(`${base}/api/rooms/${roomId}/escalations`, {
+      headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+      data: {
+        fromAgentId: helperWorker.id,
+        toAgentId: queenWorkerId,
+        question: internalQuestion,
+      },
+    })
+    expect(internalEscalationRes.ok()).toBeTruthy()
+
+    await page.evaluate(() => {
+      localStorage.setItem('quoroom_messages_collapsed', 'true')
+      localStorage.setItem('quoroom_messages_scope', 'keeper')
+    })
+    await page.reload({ waitUntil: 'domcontentloaded' })
+    await page.locator('button').filter({ hasText: /Overview|Workers/i }).first().waitFor({ timeout: 10000 })
+
+    await page.locator('button').filter({ hasText: /^Messages/i }).first().click()
+    await expect(page.getByRole('button', { name: 'Show internal' })).toBeVisible({ timeout: 5000 })
+    await expect(page.getByText(keeperQuestion)).toBeVisible({ timeout: 5000 })
+    await expect(page.getByText(internalQuestion)).toHaveCount(0)
+    await expect(page.getByText('Needs reply').first()).toBeVisible({ timeout: 5000 })
+
+    await page.getByRole('button', { name: 'Show internal' }).click()
+    await expect(page.getByRole('button', { name: 'Hide internal' })).toBeVisible({ timeout: 5000 })
+    await expect(page.getByText(internalQuestion)).toBeVisible({ timeout: 5000 })
+
     await page.screenshot({ path: 'e2e/screenshots/ui-17-messages-panel.png', fullPage: true })
   })
 
@@ -281,16 +339,12 @@ test.describe('UI — Interaction', () => {
     await page.reload({ waitUntil: 'domcontentloaded' })
     await page.locator('button').filter({ hasText: /Overview|Workers/i }).first().waitFor({ timeout: 10000 })
 
-    // Navigate to Workers tab — wait for the workers API response before asserting
-    const workersLoaded = page.waitForResponse(
-      resp => resp.url().includes('/workers') && resp.request().method() === 'GET',
-      { timeout: 10000 }
-    )
-    await page.locator('button').filter({ hasText: /^Workers$/i }).first().click()
-    await workersLoaded
+    // Navigate to Workers tab
+    await page.locator('div.pl-4 button').filter({ hasText: /^Workers/i }).first().click()
+    await expect(page.getByRole('heading', { name: 'Workers' })).toBeVisible({ timeout: 5000 })
 
     // Worker should appear in the list
-    await expect(page.getByText('PW Read-Only Worker').first()).toBeVisible({ timeout: 5000 })
+    await expect(page.getByText('PW Read-Only Worker').first()).toBeVisible({ timeout: 10000 })
 
     // In auto mode, create button is visible but gated by lock modal
     await expect(page.getByRole('button', { name: /New Worker/i })).toBeVisible()

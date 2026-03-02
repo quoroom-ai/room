@@ -12,6 +12,7 @@ beforeEach(() => {
   vi.resetModules()
   process.argv = ['node', 'cli.js', 'help']
   process.env = { ...ORIG_ENV }
+  process.env.QUOROOM_DISABLE_VERSION_HINT = '1'
   delete process.env.QUOROOM_BOOTSTRAPPED_USER_CLI
   fakeHome = mkdtempSync(path.join(tmpdir(), 'quoroom-cli-home-'))
 })

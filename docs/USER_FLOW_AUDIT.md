@@ -15,7 +15,7 @@ This is the most typical keeper path in current code:
 4. Use `Overview` + `Clerk` to observe activity and coordinate keeper actions.
 5. Create/update Workers, Tasks, Goals, and Skills.
 6. Track Decisions/Votes and Messages (escalations + room messages).
-7. Monitor Transactions (wallet + billing) and Stations.
+7. Monitor Transactions (wallet + cloud billing summary).
 8. Review task run history and self-mod audit data, then pause/restart/archive room as needed.
 
 ## 1.1) New Guided Setup Flow (Current UX)
@@ -105,8 +105,8 @@ Important:
 ## F. Finance + Infra
 - Wallet data, transaction history, balance aggregation, revenue summary.
 - Onramp URL/redirect flow.
-- Cloud stations list/start/stop/cancel/delete.
-- Crypto checkout flow for station provisioning.
+- Cloud swarm runtime host status (instance-level only).
+- Cloud instance billing summary (instance-level only).
 
 ## G. Platform/Ops
 - Global settings (advanced mode, notifications, telemetry, plans, queen default model).
@@ -130,28 +130,28 @@ E2E currently validates:
 - UI load/navigation and room management behavior
 - mobile sidebar usability + PWA endpoints
 
-Unit/integration route tests cover most core routes (`rooms/tasks/workers/goals/decisions/memory/skills/settings/stations/messages/runs`).
+Unit/integration route tests cover most core routes (`rooms/tasks/workers/goals/decisions/memory/skills/settings/messages/runs`).
 
 Browser flow automation added:
 - `e2e/setup-flow.test.ts`
   - setup popup appears after room creation
   - subscription recommendation logic
   - model-path apply behavior
-  - archive uses cloud-station deletion endpoint
+  - archive flow has no legacy cloud execution dependency
 - `e2e/test-buttons.test.ts`
   - hardened with transient-request retries to reduce flaky `ECONNRESET` failures
 
 ## 4) Main Failure Points / Bug Candidates
 
 ## Resolved In This Branch
-1. Archive flow now uses correct cloud station APIs and surfaces errors.
+1. Removed legacy cloud execution subsystem references from room runtime and dashboard flow.
 - Fixed:
-  - `src/ui/components/RoomSettingsPanel.tsx` archive path now uses `api.cloudStations.list/delete`.
-  - Archive now reports partial failures instead of silently ignoring them.
+  - archive no longer depends on legacy cloud execution mutation calls.
+  - runtime/tooling now assumes swarm host execution only.
 
-2. Removed dead local station mutation methods from UI API client.
+2. Removed dead legacy execution mutation methods and old UI/API coupling.
 - Fixed:
-  - `src/ui/lib/client.ts` no longer exposes removed local `/api/stations` mutation routes.
+  - removed local and cloud legacy execution mutation expectations from audited UI flows.
 
 ## High (Remaining)
 1. Provider/onramp flows are not covered by Playwright E2E.
@@ -170,17 +170,17 @@ Browser flow automation added:
 
 1. Add E2E tests for unvalidated high-risk flows.
 - Provider connect/install/disconnect lifecycle.
-- Archive room with active cloud stations (assert cancellation happened).
+- Archive room flow in cloud mode (assert no legacy execution-layer calls are attempted).
 - Wallet onramp URL/redirect behavior.
 
 2. Add explicit user-visible error states for destructive actions.
-- Archive, station actions, provider sessions, credential validation.
+- Archive, provider sessions, credential validation.
 
 3. Keep setup guidance in sync with model/provider behavior.
 - Post-create setup popup should remain aligned with actual model options and auth prerequisites.
 
 ## 6) Notes For Agents
 
-- Current test baseline is green and archive/station mismatch is fixed in this branch.
+- Current test baseline is green and archive flow no longer has legacy execution-layer coupling.
 - Next stability wins are in provider/onramp E2E coverage and reducing silent UI catches.
 - Setup UX now includes a post-create guided popup and should be treated as the primary keeper onboarding path for room model selection.

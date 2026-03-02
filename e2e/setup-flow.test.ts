@@ -204,6 +204,82 @@ test('setup popup applies selected model path', async ({ page }) => {
   await expect(page.getByRole('button', { name: /Apply/i })).toBeVisible()
 })
 
+test('room runtime control is top-level and uses room start/stop endpoints', async ({ page, request }) => {
+  const roomName = uniqueRoomName('Runtime').toLowerCase().replace(/\s+/g, '-')
+  const create = await request.post(`${base}/api/rooms`, {
+    headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+    data: { name: roomName, goal: 'Test room runtime controls' },
+  })
+  expect(create.status()).toBe(201)
+  const roomId = (await create.json() as { room: { id: number } }).room.id
+
+  const stopBeforeOpen = await request.post(`${base}/api/rooms/${roomId}/stop`, {
+    headers: { Authorization: `Bearer ${token}` },
+  })
+  expect(stopBeforeOpen.ok()).toBe(true)
+
+  let startCalls = 0
+  let stopCalls = 0
+  let deprecatedQueenCalls = 0
+  page.on('request', (req) => {
+    if (req.method() !== 'POST') return
+    const pathname = new URL(req.url()).pathname
+    if (pathname === `/api/rooms/${roomId}/start`) {
+      startCalls += 1
+      return
+    }
+    if (pathname === `/api/rooms/${roomId}/stop`) {
+      stopCalls += 1
+      return
+    }
+    if (pathname === `/api/rooms/${roomId}/queen/start` || pathname === `/api/rooms/${roomId}/queen/stop`) {
+      deprecatedQueenCalls += 1
+    }
+  })
+
+  await openRoomSettings(page, roomId, roomName)
+
+  const runtimeHeading = page.getByRole('heading', { name: 'Room Runtime' })
+  const runtimeSection = runtimeHeading.locator('xpath=..')
+  const queenHeading = page.getByRole('heading', { name: 'Queen' }).first()
+  const roomNameLabel = page.getByText('Room Name', { exact: true }).first()
+
+  await expect(runtimeHeading).toBeVisible()
+  await expect(queenHeading).toBeVisible()
+  await expect(roomNameLabel).toBeVisible()
+  await expect(page.getByText('Controls the full room runtime (queen + workers).')).toBeVisible()
+
+  const runtimeBox = await runtimeHeading.boundingBox()
+  const roomNameBox = await roomNameLabel.boundingBox()
+  const queenBox = await queenHeading.boundingBox()
+  expect(runtimeBox).not.toBeNull()
+  expect(roomNameBox).not.toBeNull()
+  expect(queenBox).not.toBeNull()
+  expect((runtimeBox as NonNullable<typeof runtimeBox>).y).toBeLessThan((roomNameBox as NonNullable<typeof roomNameBox>).y)
+  expect((runtimeBox as NonNullable<typeof runtimeBox>).y).toBeLessThan((queenBox as NonNullable<typeof queenBox>).y)
+
+  const startRoomButton = runtimeSection.getByRole('button', { name: 'Start Room' })
+  const stopRoomButton = runtimeSection.getByRole('button', { name: 'Stop Room' })
+
+  await expect(startRoomButton).toHaveCount(1)
+  await startRoomButton.click()
+  await expect.poll(() => startCalls, { timeout: 10000 }).toBeGreaterThan(0)
+
+  await expect(stopRoomButton).toHaveCount(1)
+  await expect.poll(async () => {
+    if (stopCalls > 0) return stopCalls
+    try {
+      await stopRoomButton.click({ timeout: 1500 })
+    } catch {
+      // Button can re-render while runtime transitions; retry until request is seen.
+    }
+    return stopCalls
+  }, { timeout: 10000, intervals: [250, 500, 1000] }).toBeGreaterThan(0)
+
+  await expect(startRoomButton).toHaveCount(1)
+  await expect.poll(() => deprecatedQueenCalls, { timeout: 10000 }).toBe(0)
+})
+
 test('archive flow does not call cloud-station routes', async ({ page, request }) => {
   const roomName = uniqueRoomName('D').toLowerCase().replace(/\s+/g, '-')
   const create = await request.post(`${base}/api/rooms`, {

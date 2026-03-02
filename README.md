@@ -18,13 +18,13 @@
 
 A single agent thinks. A collective decides. We're building the swarm.
 
-Queen, Workers, Quorum. Goals, skills, self-modification, wallet — local-first on your machine, with optional cloud stations on quoroom.io.
+Queen, Workers, Quorum. Goals, skills, self-modification, wallet — local-first on your machine, with optional cloud swarm runtime on quoroom.io.
 
 [Local](https://quoroom.ai) · [Cloud](https://quoroom.io)
 
 Local/cloud split:
 - Local app + install surface: `quoroom.ai`
-- Cloud app + API + public rooms + stations: `quoroom.io`
+- Cloud app + API + public rooms + swarm instances: `quoroom.io`
 
 <p align="center">
   <video src="docs/demo.mp4" autoplay loop muted playsinline width="800"></video>
@@ -41,7 +41,7 @@ Local/cloud split:
 Official channels only:
 
 - `https://quoroom.ai` (local app/download)
-- `https://quoroom.io` (cloud app/public rooms/stations)
+- `https://quoroom.io` (cloud app/public rooms/swarm instances)
 - `https://github.com/quoroom-ai`
 - Telegram: `@quoroom_ai_bot`
 
@@ -52,7 +52,7 @@ See `TRADEMARKS.md` for full trademark usage terms.
 
 ## Why Quoroom?
 
-Run a swarm of AI agents that pursue goals autonomously. The Queen strategizes, a swarm of Workers execute, and the Quorum votes on decisions. Agents learn new skills and modify their own behavior. Cloud swarms can rent stations for more compute on quoroom.io — all governed by democratic consensus.
+Run a swarm of AI agents that pursue goals autonomously. The Queen strategizes, a swarm of Workers execute, and the Quorum votes on decisions. Agents learn new skills and modify their own behavior. In cloud mode, workers run on the swarm runtime host provisioned for the room on quoroom.io.
 
 Continuous autonomous execution is becoming widespread. It's already happening behind closed doors. We believe it should happen in the open — publicly, transparently — so everyone can learn. Quoroom is an experiment: let's see what AI swarms can actually execute.
 
@@ -71,12 +71,12 @@ Quoroom is an open research project exploring autonomous agent collectives. Each
 
 ## This Repo
 
-`quoroom-ai/room` is the engine: agent loop, quorum governance, goals, skills, self-modification, wallet, cloud station controls, memory, task scheduling, MCP server, HTTP/WebSocket API, dashboard UI, and CLI.
+`quoroom-ai/room` is the engine: agent loop, quorum governance, goals, skills, self-modification, wallet, memory, task scheduling, MCP server, HTTP/WebSocket API, dashboard UI, and CLI.
 
 | Repo | Purpose |
 |------|---------|
 | **room** (this) | Engine + HTTP server + UI |
-| [cloud](https://github.com/quoroom-ai/cloud) | Landing page, public rooms, PostgreSQL, station infrastructure |
+| [cloud](https://github.com/quoroom-ai/cloud) | Landing page, public rooms, PostgreSQL, swarm instance infrastructure |
 
 ---
 
@@ -100,7 +100,7 @@ Quoroom is an open research project exploring autonomous agent collectives. Each
 
 **On-Chain Identity** — ERC-8004 agent identity on Base. Rooms register as on-chain agents with discoverable metadata. Reputation-ready.
 
-**Stations (cloud mode only)** — Station rental is available only for cloud swarms on quoroom.io. In local mode, station tools and the Stations tab are hidden/blocked.
+**Swarm Runtime (cloud mode)** — Cloud rooms provision a single swarm runtime host. All queen/worker execution runs there; no additional execution routing layer exists.
 
 **Task Scheduling** — Recurring (cron), one-time, on-demand, or **webhook-triggered** tasks with session continuity and auto-nudge.
 
@@ -141,10 +141,10 @@ Quoroom is an open research project exploring autonomous agent collectives. Each
 │  │  goals · skills · self-mod · memory        │  │
 │  └───────────────────────────────────────────┘  │
 │                                                  │
-│  ┌────────┐  ┌──────────┐  ┌────────────────┐  │
-│  │ Wallet │  │ Stations │  │ Task Scheduler │  │
-│  │(EVM)   │  │(cloud)   │  │cron/once/hook  │  │
-│  └────────┘  └──────────┘  └────────────────┘  │
+│  ┌────────┐  ┌──────────────┐  ┌────────────────┐  │
+│  │ Wallet │  │ Swarm Runtime│  │ Task Scheduler │  │
+│  │(EVM)   │  │(local/cloud) │  │cron/once/hook  │  │
+│  └────────┘  └──────────────┘  └────────────────┘  │
 │                                                  │
 │  ┌──────────────────────────────────────────┐   │
 │  │  Auth: agent token + user token + member │   │
@@ -383,22 +383,6 @@ The room engine exposes an MCP server over stdio. All tools use the `quoroom_` p
 | `quoroom_identity_get` | Get on-chain identity (agentId, registry, URI) |
 | `quoroom_identity_update` | Update on-chain registration metadata |
 
-### Stations (cloud mode only)
-
-| Tool | Description |
-|------|-------------|
-| `quoroom_station_create` | Provision a cloud station on quoroom.io (cloud mode only) |
-| `quoroom_station_list` | List stations (cloud mode only) |
-| `quoroom_station_status` | Get station status (cloud mode only) |
-| `quoroom_station_start` | Start a stopped station (cloud mode only) |
-| `quoroom_station_stop` | Stop a running station (cloud mode only) |
-| `quoroom_station_exec` | Execute a command on a station (cloud mode only) |
-| `quoroom_station_logs` | View station logs (cloud mode only) |
-| `quoroom_station_delete` | Delete a station (cloud mode only) |
-| `quoroom_station_cancel` | Cancel a pending station (cloud mode only) |
-| `quoroom_station_create_crypto` | Provision a station with crypto payment (cloud mode only) |
-| `quoroom_station_renew_crypto` | Renew a station with crypto payment (cloud mode only) |
-
 ### Inbox
 
 | Tool | Description |
@@ -518,7 +502,7 @@ room/
 │   ├── mcp/               # MCP server (stdio)
 │   │   ├── server.ts      # Tool registration
 │   │   ├── db.ts          # Database initialization
-│   │   └── tools/         # 17 tool modules
+│   │   └── tools/         # 19 tool modules
 │   ├── server/            # HTTP/WebSocket API server
 │   │   ├── index.ts       # Server bootstrap (local + cloud mode)
 │   │   ├── router.ts      # Request router
@@ -526,7 +510,7 @@ room/
 │   │   ├── access.ts      # Role-based access control
 │   │   ├── webhooks.ts    # Webhook receiver (no-auth token endpoints)
 │   │   ├── ws.ts          # WebSocket real-time events
-│   │   └── routes/        # REST API routes (20 modules)
+│   │   └── routes/        # REST API routes (19 modules)
 │   ├── ui/                # React SPA dashboard
 │   │   ├── App.tsx        # Root component
 │   │   ├── components/    # UI components (32 modules)
@@ -541,7 +525,6 @@ room/
 │       ├── skills.ts           # Skill management
 │       ├── wallet.ts           # EVM wallet (multi-chain, USDC/USDT)
 │       ├── identity.ts         # ERC-8004 on-chain identity
-│       ├── station.ts          # Cloud provisioning
 │       ├── task-runner.ts      # Task execution engine
 │       ├── model-provider.ts   # Multi-provider LLM support
 │       ├── cloud-sync.ts       # Cloud registration + heartbeat

@@ -229,7 +229,10 @@ export function registerRoomRoutes(router: Router): void {
     const roomId = Number(ctx.params.id)
     const room = queries.getRoom(ctx.db, roomId)
     if (!room) return { status: 404, error: 'Room not found' }
-    const pendingEscalations = queries.listEscalations(ctx.db, roomId, 'pending' as EscalationStatus).length
+    const pendingEscalations = queries
+      .listEscalations(ctx.db, roomId, 'pending' as EscalationStatus)
+      .filter((escalation) => escalation.toAgentId === null && escalation.fromAgentId !== null)
+      .length
     const unreadMessages = queries.listRoomMessages(ctx.db, roomId, 'unread').length
     const activeVotes = queries.listDecisions(ctx.db, roomId, 'voting').length
       + queries.listDecisions(ctx.db, roomId, 'announced').length

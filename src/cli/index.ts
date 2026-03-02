@@ -11,6 +11,7 @@
 import fs from 'node:fs'
 import path from 'node:path'
 import { homedir } from 'node:os'
+import { maybeShowVersionHint } from './version-hint'
 
 declare const __APP_VERSION__: string
 
@@ -91,6 +92,7 @@ function tryBootstrapUserCli(): boolean {
 function runBundledCli(): void {
   const args = process.argv.slice(2)
   const command = args[0] || 'help'
+  void maybeShowVersionHint(getBundledVersion(), command)
 
   switch (command) {
     case 'mcp': {

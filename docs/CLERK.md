@@ -8,7 +8,7 @@ Unlike room-scoped escalations and inbox messages, Clerk has a system-wide view 
 
 - Answer questions about active rooms, goals, workers, and recent activity
 - Create, update, pause, restart, and delete rooms
-- Start/stop queen loops
+- Start/stop full room runtime (queen + workers)
 - Create tasks and reminders
 - Send keeper messages to rooms and inter-room messages
 - Emit live commentary while agents run

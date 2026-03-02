@@ -1,7 +1,7 @@
 import type Database from 'better-sqlite3'
 import * as queries from './db-queries'
 import { createRoom, pauseRoom, restartRoom, deleteRoom } from './room'
-import { triggerAgent } from './agent-loop'
+import { triggerAgent, setRoomLaunchEnabled } from './agent-loop'
 import type { ToolDef } from './queen-tools'
 import type { VoteValue } from './types'
 import { getRoomCloudId } from './cloud-sync'
@@ -116,8 +116,36 @@ export const CLERK_TOOL_DEFINITIONS: ToolDef[] = [
   {
     type: 'function',
     function: {
+      name: 'quoroom_start_room',
+      description: 'Start full room runtime (queen + workers).',
+      parameters: {
+        type: 'object',
+        properties: {
+          roomId: { type: 'number', description: 'Room ID' },
+          roomName: { type: 'string', description: 'Room name (alternative to roomId)' }
+        }
+      }
+    }
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'quoroom_stop_room',
+      description: 'Stop full room runtime (queen + workers).',
+      parameters: {
+        type: 'object',
+        properties: {
+          roomId: { type: 'number', description: 'Room ID' },
+          roomName: { type: 'string', description: 'Room name (alternative to roomId)' }
+        }
+      }
+    }
+  },
+  {
+    type: 'function',
+    function: {
       name: 'quoroom_start_queen',
-      description: 'Start queen loop for a room.',
+      description: 'Deprecated alias. Starts full room runtime (queen + workers).',
       parameters: {
         type: 'object',
         properties: {
@@ -131,7 +159,7 @@ export const CLERK_TOOL_DEFINITIONS: ToolDef[] = [
     type: 'function',
     function: {
       name: 'quoroom_stop_queen',
-      description: 'Stop queen loop for a room.',
+      description: 'Deprecated alias. Stops full room runtime (queen + workers).',
       parameters: {
         type: 'object',
         properties: {
@@ -530,6 +558,7 @@ export async function executeClerkTool(
         const room = resolveRoom(db, args)
         if (!room) return { content: 'Error: room not found.', isError: true }
         pauseRoom(db, room.id)
+        setRoomLaunchEnabled(room.id, false)
         stopRoomRuntime(db, room.id, 'Room paused by keeper')
         return { content: `Paused room "${room.name}" (#${room.id}).` }
       }
@@ -550,19 +579,35 @@ export async function executeClerkTool(
         return { content: `Deleted room "${room.name}" (#${room.id}).` }
       }
 
+      case 'quoroom_start_room':
       case 'quoroom_start_queen': {
-        return {
-          content: 'Error: direct queen start is disabled. Start the room manually from the Room controls.',
-          isError: true
+        const room = resolveRoom(db, args)
+        if (!room) return { content: 'Error: room not found.', isError: true }
+        if (room.status === 'stopped') {
+          return { content: `Error: room "${room.name}" is archived (stopped).`, isError: true }
         }
+        if (!room.queenWorkerId) return { content: `Error: room "${room.name}" has no queen worker.`, isError: true }
+
+        if (room.status !== 'active') {
+          queries.updateRoom(db, room.id, { status: 'active' })
+        }
+
+        setRoomLaunchEnabled(room.id, true)
+        stopRoomRuntime(db, room.id, 'Runtime reset before room start')
+        triggerAgent(db, room.id, room.queenWorkerId, { allowColdStart: true })
+        return { content: `Started room runtime for "${room.name}" (#${room.id}).` }
       }
 
+      case 'quoroom_stop_room':
       case 'quoroom_stop_queen': {
         const room = resolveRoom(db, args)
         if (!room) return { content: 'Error: room not found.', isError: true }
-        if (!room.queenWorkerId) return { content: `Error: room "${room.name}" has no queen worker.`, isError: true }
-        stopRoomRuntime(db, room.id, 'Queen stopped by keeper')
-        return { content: `Stopped queen in "${room.name}" (#${room.id}).` }
+        setRoomLaunchEnabled(room.id, false)
+        stopRoomRuntime(db, room.id, 'Room stopped by keeper')
+        if (room.status !== 'stopped') {
+          queries.updateRoom(db, room.id, { status: 'paused' })
+        }
+        return { content: `Stopped room runtime for "${room.name}" (#${room.id}).` }
       }
 
       case 'quoroom_message_room': {

@@ -33,10 +33,10 @@ export function RoomsPanel({ selectedRoomId, onSelectRoom }: RoomsPanelProps): R
     )
     return Object.fromEntries(entries.filter(([, w]) => w !== null))
   }, 120000)
-  const [queenRunning, setQueenRunning] = useState<Record<number, boolean>>({})
-  const { refresh: refreshQueenRunning } = usePolling(async () => {
+  const [roomRuntimeRunning, setRoomRuntimeRunning] = useState<Record<number, boolean>>({})
+  const { refresh: refreshRoomRuntime } = usePolling(async () => {
     const states = await api.rooms.queenStates().catch(() => ({}))
-    setQueenRunning(states)
+    setRoomRuntimeRunning(states)
     return states
   }, 60000)
 
@@ -45,18 +45,18 @@ export function RoomsPanel({ selectedRoomId, onSelectRoom }: RoomsPanelProps): R
       if (event.type === ROOMS_QUEEN_STATE_EVENT) {
         const payload = event.data as { roomId?: number; running?: boolean }
         if (typeof payload.roomId === 'number' && typeof payload.running === 'boolean') {
-          setQueenRunning(prev => ({ ...prev, [payload.roomId]: payload.running }))
+          setRoomRuntimeRunning(prev => ({ ...prev, [payload.roomId]: payload.running }))
           return
         }
       }
       if (event.type === ROOMS_UPDATE_EVENT) {
         void refresh()
         void refreshWallets()
-        void refreshQueenRunning()
+        void refreshRoomRuntime()
       }
     })
     return unsubscribe
-  }, [refresh, refreshQueenRunning, refreshWallets])
+  }, [refresh, refreshRoomRuntime, refreshWallets])
   const [containerRef, containerWidth] = useContainerWidth<HTMLDivElement>()
   const isWide = containerWidth > 500
 
@@ -96,7 +96,7 @@ export function RoomsPanel({ selectedRoomId, onSelectRoom }: RoomsPanelProps): R
     }
     await api.rooms.stop(roomId)
     setConfirmStopId(null)
-    setQueenRunning(prev => ({ ...prev, [roomId]: false }))
+    setRoomRuntimeRunning(prev => ({ ...prev, [roomId]: false }))
     refresh()
   }
 
@@ -113,7 +113,7 @@ export function RoomsPanel({ selectedRoomId, onSelectRoom }: RoomsPanelProps): R
 
   async function handleRoomStart(roomId: number): Promise<void> {
     await api.rooms.start(roomId)
-    setQueenRunning(prev => ({ ...prev, [roomId]: true }))
+    setRoomRuntimeRunning(prev => ({ ...prev, [roomId]: true }))
   }
 
   return (
@@ -203,8 +203,8 @@ export function RoomsPanel({ selectedRoomId, onSelectRoom }: RoomsPanelProps): R
                   <span className="text-sm font-medium text-text-secondary truncate">{room.name}</span>
                   <div className="flex items-center gap-2">
                     <span
-                      title={queenRunning[room.id] ? 'Queen running' : 'Queen stopped'}
-                      className={`w-1.5 h-1.5 rounded-full ${queenRunning[room.id] ? 'bg-status-success' : 'bg-surface-tertiary'}`}
+                      title={roomRuntimeRunning[room.id] ? 'Room running' : 'Room stopped'}
+                      className={`w-1.5 h-1.5 rounded-full ${roomRuntimeRunning[room.id] ? 'bg-status-success' : 'bg-surface-tertiary'}`}
                     />
                     <span className={`px-1.5 py-0.5 rounded text-xs font-medium ${STATUS_COLORS[room.status] || 'bg-surface-tertiary text-text-muted'}`}>
                       {room.status}
@@ -268,7 +268,7 @@ export function RoomsPanel({ selectedRoomId, onSelectRoom }: RoomsPanelProps): R
                 <div className="flex gap-2" onClick={(e) => e.stopPropagation()}>
                   {room.status === 'active' ? (
                     <>
-                      {queenRunning[room.id] ? (
+                      {roomRuntimeRunning[room.id] ? (
                         <button
                           onClick={() => handleStop(room.id)}
                           className={`text-sm px-2.5 py-1.5 rounded-lg border transition-colors ${

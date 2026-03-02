@@ -118,6 +118,31 @@ describe('Room routes', () => {
     })
   })
 
+  describe('GET /api/rooms/:id/badges', () => {
+    it('counts only keeper-actionable pending escalations', async () => {
+      const createRes = await request(ctx, 'POST', '/api/rooms', { name: 'BadgeScopeRoom' })
+      const roomId = (createRes.body as any).room.id as number
+      const queenId = (createRes.body as any).queen.id as number
+
+      const worker = queries.createWorker(ctx.db, {
+        name: 'badge-worker',
+        systemPrompt: 'Handle badge routing checks.',
+        roomId
+      })
+
+      // Worker -> keeper (counts)
+      queries.createEscalation(ctx.db, roomId, worker.id, 'Need keeper decision for rollout')
+      // Worker -> worker internal (does not count)
+      queries.createEscalation(ctx.db, roomId, worker.id, 'Internal check between workers', queenId)
+      // Keeper -> worker (does not count)
+      queries.createEscalation(ctx.db, roomId, null, 'Please re-check queue depth', worker.id)
+
+      const res = await request(ctx, 'GET', `/api/rooms/${roomId}/badges`)
+      expect(res.status).toBe(200)
+      expect((res.body as any).pendingEscalations).toBe(1)
+    })
+  })
+
   describe('GET /api/rooms/:id/queen', () => {
     it('returns subscription auth mode for default queen model', async () => {
       const createRes = await request(ctx, 'POST', '/api/rooms', { name: 'QueenAuthDefault' })

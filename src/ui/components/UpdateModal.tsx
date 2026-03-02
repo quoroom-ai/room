@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import type { RestartToApplyUpdateResult } from '../lib/update-restart'
 
 interface UpdateModalProps {
   version: string
@@ -7,7 +8,7 @@ interface UpdateModalProps {
   /** If true, the update is already downloaded and we can restart to apply it */
   updateReady: boolean
   onDownload: () => void
-  onRestart: () => void
+  onRestart: () => Promise<RestartToApplyUpdateResult>
   onSkip: () => void
   onDismiss: () => void
 }
@@ -23,6 +24,7 @@ export function UpdateModal({
   onDismiss,
 }: UpdateModalProps): React.JSX.Element {
   const [restarting, setRestarting] = useState(false)
+  const [restartError, setRestartError] = useState<string | null>(null)
 
   return (
     <div
@@ -60,7 +62,21 @@ export function UpdateModal({
 
               {updateReady ? (
                 <button
-                  onClick={() => { setRestarting(true); onRestart() }}
+                  onClick={() => {
+                    setRestartError(null)
+                    setRestarting(true)
+                    void onRestart()
+                      .then((result) => {
+                        if (!result.ok) {
+                          setRestarting(false)
+                          setRestartError(result.error)
+                        }
+                      })
+                      .catch((error: unknown) => {
+                        setRestarting(false)
+                        setRestartError(error instanceof Error ? error.message : 'Restart to update failed.')
+                      })
+                  }}
                   className="block w-full py-3 text-sm font-medium text-center text-text-invert bg-interactive hover:bg-interactive-hover rounded-lg transition-colors mb-3"
                 >
                   Restart to Update
@@ -90,6 +106,9 @@ export function UpdateModal({
                   Skip this version
                 </button>
               </div>
+              {restartError && (
+                <p className="text-xs text-status-error mt-3 leading-tight">{restartError}</p>
+              )}
             </>
           )}
         </div>

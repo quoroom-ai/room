@@ -26,6 +26,7 @@ import { semverGt } from './lib/releases'
 import { useDocumentVisible } from './hooks/useDocumentVisible'
 import { api } from './lib/client'
 import { shouldShowManualUpdateControls, shouldShowUpdateModal } from './lib/update-visibility'
+import { restartToApplyUpdate } from './lib/update-restart'
 import { wsClient, type WsMessage } from './lib/ws'
 import {
   ROOM_BADGE_EVENT_TYPES,
@@ -972,26 +973,12 @@ function App(): React.JSX.Element {
             setUpdateDismissed(true)
           }}
           onRestart={async () => {
-            try {
-              await fetch(`${API_BASE}/api/server/update-restart`, { method: 'POST' })
-              // Wait for server to restart, then reload the page
-              setTimeout(() => {
-                const poll = setInterval(async () => {
-                  try {
-                    const res = await fetch(`${API_BASE}/api/status`)
-                    if (res.ok) {
-                      clearInterval(poll)
-                      window.location.reload()
-                    }
-                  } catch { /* server still restarting */ }
-                }, 1000)
-                // Give up after 30 seconds
-                setTimeout(() => clearInterval(poll), 30_000)
-              }, 2000)
-            } catch {
-              // Fallback: just reload after a delay
-              setTimeout(() => window.location.reload(), 3000)
-            }
+            const authToken = await getToken().catch(() => null)
+            return restartToApplyUpdate({
+              apiBase: API_BASE,
+              targetVersion: serverUpdateInfo.latestVersion,
+              authToken,
+            })
           }}
           onSkip={() => {
             storageSet('quoroom_update_dismissed', serverUpdateInfo.latestVersion)

@@ -7,6 +7,7 @@ import { storageGet, storageSet } from '../lib/storage'
 import * as notif from '../lib/notifications'
 import { semverGt } from '../lib/releases'
 import { shouldShowManualUpdateControls } from '../lib/update-visibility'
+import { restartToApplyUpdate } from '../lib/update-restart'
 
 interface SettingsPanelProps {
   advancedMode: boolean
@@ -66,6 +67,8 @@ export function SettingsPanel({ advancedMode, onAdvancedModeChange }: SettingsPa
   const [serverStatus, setServerStatus] = useState<ServerStatus | null>(null)
   const [updateChecking, setUpdateChecking] = useState(false)
   const [updateChecked, setUpdateChecked] = useState(false)
+  const [updateRestarting, setUpdateRestarting] = useState(false)
+  const [updateRestartError, setUpdateRestartError] = useState<string | null>(null)
   const [claudePlan, setClaudePlan] = useState<'pro' | 'max' | 'api' | null>(null)
   const [chatGptPlan, setChatGptPlan] = useState<'plus' | 'pro' | 'api' | null>(null)
   const [queenModel, setQueenModel] = useState<string | null>(null)
@@ -857,20 +860,24 @@ export function SettingsPanel({ advancedMode, onAdvancedModeChange }: SettingsPa
               {isReady ? (
                 <button
                   onClick={async () => {
-                    await fetch(`${API_BASE}/api/server/update-restart`, { method: 'POST' })
-                    setTimeout(() => {
-                      const poll = setInterval(async () => {
-                        try {
-                          const res = await fetch(`${API_BASE}/api/status`)
-                          if (res.ok) { clearInterval(poll); window.location.reload() }
-                        } catch { /* server still restarting */ }
-                      }, 1000)
-                      setTimeout(() => clearInterval(poll), 30_000)
-                    }, 2000)
+                    if (updateRestarting) return
+                    setUpdateRestartError(null)
+                    setUpdateRestarting(true)
+                    const authToken = await getToken().catch(() => null)
+                    const result = await restartToApplyUpdate({
+                      apiBase: API_BASE,
+                      targetVersion: ui.latestVersion,
+                      authToken,
+                    })
+                    if (!result.ok) {
+                      setUpdateRestartError(result.error)
+                      setUpdateRestarting(false)
+                    }
                   }}
-                  className="px-3 py-1 bg-interactive text-text-invert rounded-lg hover:bg-interactive-hover transition-colors"
+                  disabled={updateRestarting}
+                  className="px-3 py-1 bg-interactive text-text-invert rounded-lg hover:bg-interactive-hover transition-colors disabled:opacity-60 disabled:cursor-not-allowed"
                 >
-                  Restart to Update
+                  {updateRestarting ? 'Restarting...' : 'Restart to Update'}
                 </button>
               ) : (
                 <button
@@ -890,6 +897,11 @@ export function SettingsPanel({ advancedMode, onAdvancedModeChange }: SettingsPa
             </div>
           )
         })()}
+        {updateRestartError && (
+          <div className="py-2">
+            <p className="text-xs text-status-error leading-tight">{updateRestartError}</p>
+          </div>
+        )}
         {row('Database', serverStatus?.dbPath ?? null)}
         {row('Data Directory', serverStatus?.dataDir ?? null)}
       </div>

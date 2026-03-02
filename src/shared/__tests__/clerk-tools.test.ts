@@ -82,6 +82,40 @@ describe('executeClerkTool', () => {
     expect(queries.getRoom(db, room!.id)).toBeNull()
   })
 
+  it('starts and stops room runtime via clerk tools (including legacy aliases)', async () => {
+    const created = await executeClerkTool(db, 'quoroom_create_room', {
+      name: 'runtimecontrol',
+      goal: 'test runtime controls',
+    })
+    expect(created.isError).toBeFalsy()
+
+    const room = queries.listRooms(db).find((r) => r.name === 'runtimecontrol')
+    expect(room).toBeTruthy()
+
+    const stopped = await executeClerkTool(db, 'quoroom_stop_room', { roomId: room!.id })
+    expect(stopped.isError).toBeFalsy()
+    expect(stopped.content).toContain('Stopped room runtime')
+    expect(queries.getRoom(db, room!.id)!.status).toBe('paused')
+
+    const started = await executeClerkTool(db, 'quoroom_start_room', { roomId: room!.id })
+    expect(started.isError).toBeFalsy()
+    expect(started.content).toContain('Started room runtime')
+    expect(queries.getRoom(db, room!.id)!.status).toBe('active')
+
+    const legacyStop = await executeClerkTool(db, 'quoroom_stop_queen', { roomId: room!.id })
+    expect(legacyStop.isError).toBeFalsy()
+    expect(queries.getRoom(db, room!.id)!.status).toBe('paused')
+
+    const legacyStart = await executeClerkTool(db, 'quoroom_start_queen', { roomId: room!.id })
+    expect(legacyStart.isError).toBeFalsy()
+    expect(queries.getRoom(db, room!.id)!.status).toBe('active')
+
+    queries.updateRoom(db, room!.id, { status: 'stopped' })
+    const blockedStart = await executeClerkTool(db, 'quoroom_start_room', { roomId: room!.id })
+    expect(blockedStart.isError).toBe(true)
+    expect(blockedStart.content.toLowerCase()).toContain('archived')
+  })
+
   it('reads and writes global settings', async () => {
     const setResult = await executeClerkTool(db, 'quoroom_set_setting', {
       key: 'clerk_commentary_enabled',
