@@ -92,7 +92,17 @@ async function openRoomSettings(page: Page, roomId: number, roomName: string): P
   }
 
   const sidebar = page.getByTestId('sidebar')
-  const roomBtn = sidebar.locator('button').filter({ hasText: roomName }).first()
+  await expect.poll(async () => {
+    return await sidebar.getByText('Loading rooms...').count()
+  }, { timeout: 15000, intervals: [250, 500, 1000] }).toBe(0)
+
+  let roomBtn = sidebar.locator('button').filter({ hasText: roomName }).first()
+  for (let attempt = 0; attempt < 3; attempt++) {
+    if (await roomBtn.count()) break
+    await page.waitForTimeout(600)
+    await page.reload({ waitUntil: 'domcontentloaded' })
+    roomBtn = sidebar.locator('button').filter({ hasText: roomName }).first()
+  }
   await roomBtn.waitFor({ timeout: 10000 })
   const text = await roomBtn.textContent()
   if (!text?.includes('\u25B4')) await roomBtn.click()

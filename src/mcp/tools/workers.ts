@@ -3,6 +3,7 @@ import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
 import { getMcpDatabase } from '../db'
 import * as queries from '../../shared/db-queries'
 import { WORKER_ROLE_PRESETS } from '../../shared/constants'
+import { exportWorkerPrompts, importWorkerPrompts } from '../../shared/worker-prompt-sync'
 
 export function registerWorkerTools(server: McpServer): void {
   server.registerTool(
@@ -75,6 +76,62 @@ export function registerWorkerTools(server: McpServer): void {
         createdAt: w.createdAt
       }))
       return { content: [{ type: 'text' as const, text: JSON.stringify(list, null, 2) }] }
+    }
+  )
+
+  server.registerTool(
+    'quoroom_export_worker_prompts',
+    {
+      title: 'Export Worker Prompts',
+      description: 'Export worker system prompts to markdown files under .quoroom/prompts/workers. '
+        + 'RESPONSE STYLE: Confirm briefly in 1 sentence. No notes, tips, or implementation details.',
+      inputSchema: {
+        roomId: z.number().optional().describe('Optional room scope filter'),
+        workerIds: z.array(z.number().int().positive()).optional().describe('Optional specific worker IDs to export'),
+        force: z.boolean().optional().describe('Overwrite even when the file is newer than DB')
+      }
+    },
+    async ({ roomId, workerIds, force }) => {
+      const db = getMcpDatabase()
+      if (roomId != null && !queries.getRoom(db, roomId)) {
+        return { content: [{ type: 'text' as const, text: `No room found with id ${roomId}.` }], isError: true }
+      }
+
+      const result = exportWorkerPrompts(db, { roomId, workerIds, force })
+      return {
+        content: [{
+          type: 'text' as const,
+          text: `Exported worker prompts to ${result.rootDir} (${result.summary.written} written, ${result.summary.skipped} skipped, ${result.summary.errors} errors).`
+        }]
+      }
+    }
+  )
+
+  server.registerTool(
+    'quoroom_import_worker_prompts',
+    {
+      title: 'Import Worker Prompts',
+      description: 'Import worker system prompts from markdown files under .quoroom/prompts/workers. '
+        + 'RESPONSE STYLE: Confirm briefly in 1 sentence. No notes, tips, or implementation details.',
+      inputSchema: {
+        roomId: z.number().optional().describe('Optional room scope guard for import'),
+        paths: z.array(z.string().min(1)).optional().describe('Optional absolute or repo-relative markdown file paths'),
+        force: z.boolean().optional().describe('Overwrite even when DB is newer than file')
+      }
+    },
+    async ({ roomId, paths, force }) => {
+      const db = getMcpDatabase()
+      if (roomId != null && !queries.getRoom(db, roomId)) {
+        return { content: [{ type: 'text' as const, text: `No room found with id ${roomId}.` }], isError: true }
+      }
+
+      const result = importWorkerPrompts(db, { roomId, paths, force })
+      return {
+        content: [{
+          type: 'text' as const,
+          text: `Imported worker prompts from ${result.rootDir} (${result.summary.updated} updated, ${result.summary.created} created, ${result.summary.skipped} skipped, ${result.summary.errors} errors).`
+        }]
+      }
     }
   )
 

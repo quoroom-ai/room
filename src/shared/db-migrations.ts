@@ -133,22 +133,6 @@ export function runMigrations(database: Database.Database, log: (msg: string) =>
     log('Migrated: added effective_at column to quorum_decisions')
   }
 
-  // Migrate ollama models → 'claude' (ollama removed in v0.1.12+)
-  const ollamaWorkers = database
-    .prepare(`SELECT id FROM workers WHERE model LIKE 'ollama:%'`)
-    .all() as { id: number }[]
-  if (ollamaWorkers.length > 0) {
-    database.prepare(`UPDATE workers SET model = 'claude' WHERE model LIKE 'ollama:%'`).run()
-    log(`Migrated: reset ${ollamaWorkers.length} ollama worker model(s) to 'claude'`)
-  }
-  const ollamaRooms = database
-    .prepare(`SELECT id FROM rooms WHERE worker_model LIKE 'ollama:%'`)
-    .all() as { id: number }[]
-  if (ollamaRooms.length > 0) {
-    database.prepare(`UPDATE rooms SET worker_model = 'claude' WHERE worker_model LIKE 'ollama:%'`).run()
-    log(`Migrated: reset ${ollamaRooms.length} room worker_model(s) to 'claude'`)
-  }
-
   // Remove auto mode: all rooms operate in semi mode.
   database.prepare(`UPDATE rooms SET autonomy_mode = 'semi' WHERE autonomy_mode IS NULL OR autonomy_mode != 'semi'`).run()
 

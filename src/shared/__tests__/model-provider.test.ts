@@ -26,6 +26,7 @@ describe('model-provider', () => {
     expect(getModelProvider('gemini')).toBe('gemini_api')
     expect(getModelProvider('gemini:gemini-2.5-flash')).toBe('gemini_api')
     expect(getModelProvider('gemini:gemini-2.5-pro')).toBe('gemini_api')
+    expect(getModelProvider('ollama:qwen3-coder:30b')).toBe('ollama_local')
   })
 
   it('returns api auth readiness from room credentials', async () => {
@@ -89,5 +90,16 @@ describe('model-provider', () => {
     expect(status.hasEnvKey).toBe(true)
     expect(status.ready).toBe(true)
     expect(resolveApiKeyForModel(db, roomId, 'gemini:gemini-2.5-pro')).toBe('AIza-env')
+  })
+
+  it('ollama_local returns local auth mode without credential dependencies', async () => {
+    const status = await getModelAuthStatus(db, roomId, 'ollama:qwen3-coder:30b')
+    expect(status.provider).toBe('ollama_local')
+    expect(status.mode).toBe('local')
+    expect(status.credentialName).toBeNull()
+    expect(status.envVar).toBeNull()
+    expect(status.hasCredential).toBe(false)
+    expect(status.hasEnvKey).toBe(false)
+    expect(typeof status.ready).toBe('boolean')
   })
 })

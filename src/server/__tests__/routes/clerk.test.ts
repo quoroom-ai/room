@@ -98,7 +98,7 @@ describe('Clerk routes', () => {
   })
 
   describe('GET /api/clerk/status', () => {
-    it('returns configured=false by default', async () => {
+    it('auto-configures local model by default', async () => {
       const res = await request(ctx, 'GET', '/api/clerk/status')
       expect(res.status).toBe(200)
       const body = res.body as any
@@ -107,7 +107,9 @@ describe('Clerk routes', () => {
       expect(body.commentaryEnabled).toBe(true) // default is enabled
       expect(body.commentaryMode).toBe('auto')
       expect(body.commentaryPace).toBe('light')
-      expect(body.model).toBeNull()
+      expect(body.configured).toBe(true)
+      expect(body.model).toBe('ollama:qwen3-coder:30b')
+      expect(body.autoConfigured).toBe(true)
       expect(body.apiAuth).toBeDefined()
     })
 

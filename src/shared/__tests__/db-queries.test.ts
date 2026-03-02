@@ -1697,6 +1697,14 @@ describe('worker cycles', () => {
     expect(firstUpdated.errorMessage).toBe('Superseded by newer cycle')
     expect(secondUpdated.status).toBe('running')
   })
+
+  it('throws when worker does not belong to target room', () => {
+    const roomA = q.createRoom(db, 'Room A')
+    const roomB = q.createRoom(db, 'Room B')
+    const worker = q.createWorker(db, { name: 'Worker A', systemPrompt: 'worker', roomId: roomA.id })
+
+    expect(() => q.createWorkerCycle(db, worker.id, roomB.id, 'codex')).toThrow('Worker-room mapping invalid')
+  })
 })
 
 // ─── Queen nickname ───────────────────────────────────────────

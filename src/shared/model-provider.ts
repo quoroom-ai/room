@@ -2,17 +2,19 @@ import type Database from 'better-sqlite3'
 import { execSync } from 'node:child_process'
 import * as queries from './db-queries'
 import { checkClaudeCliAvailable } from './claude-code'
+import { probeOllamaRuntime } from './local-model'
 
 export type ModelProvider =
   | 'claude_subscription'
   | 'codex_subscription'
+  | 'ollama_local'
   | 'openai_api'
   | 'anthropic_api'
   | 'gemini_api'
 
 export interface ModelAuthStatus {
   provider: ModelProvider
-  mode: 'subscription' | 'api'
+  mode: 'subscription' | 'api' | 'local'
   credentialName: string | null
   envVar: string | null
   hasCredential: boolean
@@ -29,6 +31,7 @@ export function normalizeModel(model: string | null | undefined): string {
 export function getModelProvider(model: string | null | undefined): ModelProvider {
   const normalized = normalizeModel(model)
   if (normalized === 'codex' || normalized.startsWith('codex:')) return 'codex_subscription'
+  if (normalized === 'ollama' || normalized.startsWith('ollama:')) return 'ollama_local'
   if (normalized === 'openai' || normalized.startsWith('openai:')) return 'openai_api'
   if (normalized === 'anthropic' || normalized.startsWith('anthropic:') || normalized.startsWith('claude-api:')) {
     return 'anthropic_api'
@@ -47,6 +50,19 @@ export async function getModelAuthStatus(db: Database.Database, roomId: number, 
   }
   if (provider === 'gemini_api') {
     return resolveApiAuthStatus(db, roomId, 'gemini_api_key', 'GEMINI_API_KEY', provider)
+  }
+  if (provider === 'ollama_local') {
+    const runtime = probeOllamaRuntime()
+    return {
+      provider,
+      mode: 'local',
+      credentialName: null,
+      envVar: null,
+      hasCredential: false,
+      hasEnvKey: false,
+      ready: runtime.ready,
+      maskedKey: null
+    }
   }
 
   let ready = false

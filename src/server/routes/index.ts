@@ -17,6 +17,7 @@ import { registerRoomMessageRoutes } from './room-messages'
 import { registerProviderRoutes } from './providers'
 import { registerContactRoutes } from './contacts'
 import { registerClerkRoutes } from './clerk'
+import { registerLocalModelRoutes } from './local-model'
 
 export function registerAllRoutes(router: Router): void {
   registerRoomRoutes(router)
@@ -35,6 +36,7 @@ export function registerAllRoutes(router: Router): void {
   registerCredentialRoutes(router)
   registerRoomMessageRoutes(router)
   registerProviderRoutes(router)
+  registerLocalModelRoutes(router)
   registerContactRoutes(router)
   registerClerkRoutes(router)
 }

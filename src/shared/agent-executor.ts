@@ -6,9 +6,10 @@ import { executeClaudeCode } from './claude-code'
 import type { ExecutionOptions, ExecutionResult, ConsoleLogCallback, ProgressCallback } from './claude-code'
 import type { ToolDef } from './queen-tools'
 import { registerManagedChildProcess } from './process-supervisor'
+import { OLLAMA_HTTP_BASE_URL } from './local-model'
 
 export interface AgentExecutionOptions {
-  model: string // 'claude' | 'codex' | 'openai:gpt-4o-mini' | 'anthropic:claude-3-5-sonnet-latest' | 'gemini:gemini-2.5-flash'
+  model: string // 'claude' | 'codex' | 'openai:gpt-4o-mini' | 'anthropic:claude-3-5-sonnet-latest' | 'gemini:gemini-2.5-flash' | 'ollama:qwen3-coder:30b'
   prompt: string
   systemPrompt?: string
   maxTurns?: number
@@ -89,13 +90,17 @@ function resolveCodexNodeScript(): string | null {
 
 export async function executeAgent(options: AgentExecutionOptions): Promise<AgentExecutionResult> {
   const model = options.model.trim()
-  if (model.startsWith('ollama:')) {
-    throw new Error(`Ollama models are no longer supported. Update your room model to 'claude', 'codex', 'anthropic:*', or 'openai:*'.`)
-  }
   if (model === 'codex' || model.startsWith('codex:')) {
     return executeCodex(options)
   }
-  if (model === 'openai' || model.startsWith('openai:') || model === 'gemini' || model.startsWith('gemini:')) {
+  if (
+    model === 'openai'
+    || model.startsWith('openai:')
+    || model === 'gemini'
+    || model.startsWith('gemini:')
+    || model === 'ollama'
+    || model.startsWith('ollama:')
+  ) {
     if (options.toolDefs && options.toolDefs.length > 0 && options.onToolCall) {
       return executeOpenAiWithTools(options)
     }
@@ -110,7 +115,7 @@ export async function executeAgent(options: AgentExecutionOptions): Promise<Agen
   if (model === 'claude' || model.startsWith('claude-')) {
     return executeClaude(options)
   }
-  throw new Error(`Unsupported model "${model}". Configure an explicit supported model (claude, codex, openai:*, anthropic:*, gemini:*).`)
+  throw new Error(`Unsupported model "${model}". Configure an explicit supported model (claude, codex, openai:*, anthropic:*, gemini:*, ollama:*).`)
 }
 
 async function executeClaude(options: AgentExecutionOptions): Promise<AgentExecutionResult> {
@@ -311,7 +316,8 @@ async function executeCodex(options: AgentExecutionOptions): Promise<AgentExecut
 // ─── OpenAI-compatible config resolver (OpenAI + Gemini) ─────────────────
 
 interface OpenAiCompatibleConfig {
-  apiKey: string
+  apiKey: string | null
+  requiresApiKey: boolean
   url: string
   defaultModel: string
   label: string
@@ -320,11 +326,22 @@ interface OpenAiCompatibleConfig {
 
 function resolveOpenAiCompatible(model: string, apiKeyOverride?: string): OpenAiCompatibleConfig | null {
   const trimmed = model.trim()
+  if (trimmed === 'ollama' || trimmed.startsWith('ollama:')) {
+    return {
+      apiKey: null,
+      requiresApiKey: false,
+      url: OLLAMA_HTTP_BASE_URL,
+      defaultModel: 'qwen3-coder:30b',
+      label: 'Ollama',
+      prefix: 'ollama',
+    }
+  }
   if (trimmed === 'gemini' || trimmed.startsWith('gemini:')) {
     const apiKey = apiKeyOverride?.trim() || (process.env.GEMINI_API_KEY || '').trim()
     if (!apiKey) return null
     return {
       apiKey,
+      requiresApiKey: true,
       url: 'https://generativelanguage.googleapis.com/v1beta/openai/chat/completions',
       defaultModel: 'gemini-2.5-flash',
       label: 'Gemini',
@@ -336,6 +353,7 @@ function resolveOpenAiCompatible(model: string, apiKeyOverride?: string): OpenAi
   if (!apiKey) return null
   return {
     apiKey,
+    requiresApiKey: true,
     url: 'https://api.openai.com/v1/chat/completions',
     defaultModel: 'gpt-4o-mini',
     label: 'OpenAI',
@@ -361,7 +379,7 @@ async function executeOpenAiWithTools(options: AgentExecutionOptions): Promise<A
   const config = resolveOpenAiCompatible(options.model, options.apiKey)
   if (!config) return immediateError(`Missing ${options.model.startsWith('gemini') ? 'Gemini' : 'OpenAI'} API key.`)
 
-  const { apiKey, url: apiUrl, defaultModel, label: providerLabel, prefix } = config
+  const { apiKey, requiresApiKey, url: apiUrl, defaultModel, label: providerLabel, prefix } = config
   const modelName = parseModelSuffix(options.model, prefix) || defaultModel
   const startTime = Date.now()
   const maxTurns = options.maxTurns ?? 10
@@ -391,9 +409,11 @@ async function executeOpenAiWithTools(options: AgentExecutionOptions): Promise<A
 
     let json: Record<string, unknown>
     try {
+      const headers: Record<string, string> = { 'Content-Type': 'application/json' }
+      if (requiresApiKey && apiKey) headers.Authorization = `Bearer ${apiKey}`
       const response = await fetch(apiUrl, {
         method: 'POST',
-        headers: { 'Authorization': `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
+        headers,
         body: JSON.stringify({ model: modelName, messages, tools: options.toolDefs }),
         signal: controller.signal
       })
@@ -585,11 +605,14 @@ async function executeAnthropicWithTools(options: AgentExecutionOptions): Promis
 async function executeOpenAiApi(options: AgentExecutionOptions): Promise<AgentExecutionResult> {
   const config = resolveOpenAiCompatible(options.model, options.apiKey)
   if (!config) {
+    if (options.model.startsWith('ollama') || options.model === 'ollama') {
+      return immediateError('Ollama runtime is unavailable. Install/start Ollama and pull qwen3-coder:30b.')
+    }
     const isGemini = options.model.startsWith('gemini')
     return immediateError(`Missing ${isGemini ? 'Gemini' : 'OpenAI'} API key. Set room credential "${isGemini ? 'gemini_api_key' : 'openai_api_key'}" or ${isGemini ? 'GEMINI_API_KEY' : 'OPENAI_API_KEY'}.`)
   }
 
-  const { apiKey, url: apiUrl, defaultModel, label: providerLabel, prefix } = config
+  const { apiKey, requiresApiKey, url: apiUrl, defaultModel, label: providerLabel, prefix } = config
   const modelName = parseModelSuffix(options.model, prefix) || defaultModel
   const messages: Array<{ role: 'system' | 'user'; content: string }> = []
   if (options.systemPrompt) messages.push({ role: 'system', content: options.systemPrompt })
@@ -601,12 +624,15 @@ async function executeOpenAiApi(options: AgentExecutionOptions): Promise<AgentEx
   const timeoutMs = options.timeoutMs ?? DEFAULT_HTTP_TIMEOUT_MS
   const timer = setTimeout(() => controller.abort(), timeoutMs)
   try {
+    const headers: Record<string, string> = {
+      'Content-Type': 'application/json'
+    }
+    if (requiresApiKey && apiKey) {
+      headers.Authorization = `Bearer ${apiKey}`
+    }
     const response = await fetch(apiUrl, {
       method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${apiKey}`,
-        'Content-Type': 'application/json'
-      },
+      headers,
       body: JSON.stringify({
         model: modelName,
         messages
@@ -879,13 +905,22 @@ Respond ONLY with a JSON object (no markdown, no explanation):
 
   const timeoutMs = 60_000
   try {
-    if (model === 'openai' || model.startsWith('openai:') || model === 'gemini' || model.startsWith('gemini:')) {
+    if (
+      model === 'openai'
+      || model.startsWith('openai:')
+      || model === 'gemini'
+      || model.startsWith('gemini:')
+      || model === 'ollama'
+      || model.startsWith('ollama:')
+    ) {
       const config = resolveOpenAiCompatible(model, apiKey)
       if (!config) return null
       const modelName = parseModelSuffix(model, config.prefix) || config.defaultModel
+      const headers: Record<string, string> = { 'Content-Type': 'application/json' }
+      if (config.requiresApiKey && config.apiKey) headers.Authorization = `Bearer ${config.apiKey}`
       const response = await fetch(config.url, {
         method: 'POST',
-        headers: { 'Authorization': `Bearer ${config.apiKey}`, 'Content-Type': 'application/json' },
+        headers,
         body: JSON.stringify({ model: modelName, messages: [{ role: 'user', content: compressionPrompt }] }),
         signal: AbortSignal.timeout(timeoutMs)
       })

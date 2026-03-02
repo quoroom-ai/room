@@ -1,4 +1,7 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest'
+import { mkdtempSync, mkdirSync, readFileSync, rmSync, utimesSync, writeFileSync } from 'node:fs'
+import { join } from 'node:path'
+import { tmpdir } from 'node:os'
 import { createTestServer, request, type TestContext } from '../helpers/test-server'
 
 let ctx: TestContext
@@ -160,6 +163,305 @@ describe('Worker routes', () => {
       expect(Array.isArray(res.body)).toBe(true)
       // Room creation creates a queen worker
       expect((res.body as any[]).length).toBeGreaterThanOrEqual(1)
+    })
+  })
+
+  describe('Worker prompt sync routes', () => {
+    it('POST /api/workers/prompts/export returns summary and writes markdown files', async () => {
+      const tmpRoot = mkdtempSync(join(tmpdir(), 'workers-route-export-'))
+      const prev = process.env.QUOROOM_PROMPTS_ROOT
+      process.env.QUOROOM_PROMPTS_ROOT = tmpRoot
+
+      try {
+        const roomRes = await request(ctx, 'POST', '/api/rooms', { name: 'exportsyncroom' })
+        const roomId = (roomRes.body as any).room.id as number
+        const workerRes = await request(ctx, 'POST', '/api/workers', {
+          name: 'Export Target',
+          systemPrompt: 'prompt export',
+          roomId,
+        })
+        const workerId = (workerRes.body as any).id as number
+
+        const exportRes = await request(ctx, 'POST', '/api/workers/prompts/export', {
+          roomId,
+          workerIds: [workerId],
+        })
+
+        expect(exportRes.status).toBe(200)
+        expect((exportRes.body as any).summary.written).toBe(1)
+
+        const filePath = (exportRes.body as any).results[0].path as string
+        const content = readFileSync(filePath, 'utf-8')
+        expect(content).toContain(`worker_id: ${workerId}`)
+        expect(content).toContain('prompt export')
+      } finally {
+        if (prev === undefined) delete process.env.QUOROOM_PROMPTS_ROOT
+        else process.env.QUOROOM_PROMPTS_ROOT = prev
+        rmSync(tmpRoot, { recursive: true, force: true })
+      }
+    })
+
+    it('POST /api/workers/prompts/import updates existing workers', async () => {
+      const tmpRoot = mkdtempSync(join(tmpdir(), 'workers-route-import-update-'))
+      const prev = process.env.QUOROOM_PROMPTS_ROOT
+      process.env.QUOROOM_PROMPTS_ROOT = tmpRoot
+
+      try {
+        const roomRes = await request(ctx, 'POST', '/api/rooms', { name: 'importupdateroom' })
+        const roomId = (roomRes.body as any).room.id as number
+        const createRes = await request(ctx, 'POST', '/api/workers', {
+          name: 'Import Existing',
+          systemPrompt: 'old prompt',
+          roomId,
+        })
+        const workerId = (createRes.body as any).id as number
+
+        ctx.db.prepare(`UPDATE workers SET updated_at = datetime('now','localtime','-2 hours') WHERE id = ?`).run(workerId)
+
+        const fileDir = join(tmpRoot, '.quoroom', 'prompts', 'workers', `room-${roomId}`)
+        mkdirSync(fileDir, { recursive: true })
+        const filePath = join(fileDir, 'import-existing.md')
+        writeFileSync(filePath, [
+          '---',
+          'version: 1',
+          `worker_id: ${workerId}`,
+          `room_id: ${roomId}`,
+          'name: "Import Existing"',
+          '---',
+          'updated prompt from file',
+          ''
+        ].join('\n'))
+
+        const importRes = await request(ctx, 'POST', '/api/workers/prompts/import', {
+          paths: [filePath],
+        })
+        expect(importRes.status).toBe(200)
+        expect((importRes.body as any).summary.updated).toBe(1)
+
+        const getRes = await request(ctx, 'GET', `/api/workers/${workerId}`)
+        expect((getRes.body as any).systemPrompt).toBe('updated prompt from file\n')
+      } finally {
+        if (prev === undefined) delete process.env.QUOROOM_PROMPTS_ROOT
+        else process.env.QUOROOM_PROMPTS_ROOT = prev
+        rmSync(tmpRoot, { recursive: true, force: true })
+      }
+    })
+
+    it('POST /api/workers/prompts/import creates missing workers', async () => {
+      const tmpRoot = mkdtempSync(join(tmpdir(), 'workers-route-import-create-'))
+      const prev = process.env.QUOROOM_PROMPTS_ROOT
+      process.env.QUOROOM_PROMPTS_ROOT = tmpRoot
+
+      try {
+        const roomRes = await request(ctx, 'POST', '/api/rooms', { name: 'importcreateroom' })
+        const roomId = (roomRes.body as any).room.id as number
+
+        const fileDir = join(tmpRoot, '.quoroom', 'prompts', 'workers', `room-${roomId}`)
+        mkdirSync(fileDir, { recursive: true })
+        const filePath = join(fileDir, 'new-worker.md')
+        writeFileSync(filePath, [
+          '---',
+          'version: 1',
+          `room_id: ${roomId}`,
+          'name: "Created from import"',
+          'role: "writer"',
+          '---',
+          'created prompt',
+          ''
+        ].join('\n'))
+
+        const importRes = await request(ctx, 'POST', '/api/workers/prompts/import', { paths: [filePath] })
+        expect(importRes.status).toBe(200)
+        expect((importRes.body as any).summary.created).toBe(1)
+
+        const roomWorkers = await request(ctx, 'GET', `/api/rooms/${roomId}/workers`)
+        expect((roomWorkers.body as any[]).some(w => w.name === 'Created from import')).toBe(true)
+      } finally {
+        if (prev === undefined) delete process.env.QUOROOM_PROMPTS_ROOT
+        else process.env.QUOROOM_PROMPTS_ROOT = prev
+        rmSync(tmpRoot, { recursive: true, force: true })
+      }
+    })
+
+    it('conflict skipping and force override behavior on import', async () => {
+      const tmpRoot = mkdtempSync(join(tmpdir(), 'workers-route-import-force-'))
+      const prev = process.env.QUOROOM_PROMPTS_ROOT
+      process.env.QUOROOM_PROMPTS_ROOT = tmpRoot
+
+      try {
+        const createRes = await request(ctx, 'POST', '/api/workers', {
+          name: 'Conflict Worker',
+          systemPrompt: 'db current',
+        })
+        const workerId = (createRes.body as any).id as number
+
+        const fileDir = join(tmpRoot, '.quoroom', 'prompts', 'workers', 'room-global')
+        mkdirSync(fileDir, { recursive: true })
+        const filePath = join(fileDir, 'conflict.md')
+        writeFileSync(filePath, [
+          '---',
+          `worker_id: ${workerId}`,
+          'name: "Conflict Worker"',
+          '---',
+          'file value',
+          ''
+        ].join('\n'))
+
+        ctx.db.prepare(`UPDATE workers SET updated_at = datetime('now','localtime') WHERE id = ?`).run(workerId)
+        const past = new Date(Date.now() - 120_000)
+        utimesSync(filePath, past, past)
+
+        const skipped = await request(ctx, 'POST', '/api/workers/prompts/import', {
+          paths: [filePath],
+          force: false,
+        })
+        expect((skipped.body as any).summary.skipped).toBe(1)
+        expect((skipped.body as any).results[0].reason).toBe('db_newer_than_file')
+
+        const forced = await request(ctx, 'POST', '/api/workers/prompts/import', {
+          paths: [filePath],
+          force: true,
+        })
+        expect((forced.body as any).summary.updated).toBe(1)
+      } finally {
+        if (prev === undefined) delete process.env.QUOROOM_PROMPTS_ROOT
+        else process.env.QUOROOM_PROMPTS_ROOT = prev
+        rmSync(tmpRoot, { recursive: true, force: true })
+      }
+    })
+
+    it('room-scoped import/export only affects matching room', async () => {
+      const tmpRoot = mkdtempSync(join(tmpdir(), 'workers-route-room-scope-'))
+      const prev = process.env.QUOROOM_PROMPTS_ROOT
+      process.env.QUOROOM_PROMPTS_ROOT = tmpRoot
+
+      try {
+        const roomARes = await request(ctx, 'POST', '/api/rooms', { name: 'scopea' })
+        const roomBRes = await request(ctx, 'POST', '/api/rooms', { name: 'scopeb' })
+        const roomA = (roomARes.body as any).room.id as number
+        const roomB = (roomBRes.body as any).room.id as number
+
+        const wa = await request(ctx, 'POST', '/api/workers', { name: 'Worker A', systemPrompt: 'A', roomId: roomA })
+        const wb = await request(ctx, 'POST', '/api/workers', { name: 'Worker B', systemPrompt: 'B', roomId: roomB })
+        const workerAId = (wa.body as any).id as number
+        const workerBId = (wb.body as any).id as number
+
+        const exported = await request(ctx, 'POST', '/api/workers/prompts/export', { roomId: roomA })
+        const exportedIds = (exported.body as any).results
+          .filter((r: any) => r.status === 'written')
+          .map((r: any) => r.workerId)
+        expect(exportedIds).toContain(workerAId)
+        expect(exportedIds).not.toContain(workerBId)
+
+        const bPath = join(tmpRoot, '.quoroom', 'prompts', 'workers', `room-${roomB}`, 'room-b.md')
+        mkdirSync(join(tmpRoot, '.quoroom', 'prompts', 'workers', `room-${roomB}`), { recursive: true })
+        writeFileSync(bPath, [
+          '---',
+          `worker_id: ${workerBId}`,
+          `room_id: ${roomB}`,
+          'name: "Worker B"',
+          '---',
+          'scope mismatch',
+          ''
+        ].join('\n'))
+
+        const importRes = await request(ctx, 'POST', '/api/workers/prompts/import', {
+          roomId: roomA,
+          paths: [bPath],
+        })
+        expect((importRes.body as any).summary.errors).toBe(1)
+        expect((importRes.body as any).results[0].reason).toBe('room_mismatch')
+      } finally {
+        if (prev === undefined) delete process.env.QUOROOM_PROMPTS_ROOT
+        else process.env.QUOROOM_PROMPTS_ROOT = prev
+        rmSync(tmpRoot, { recursive: true, force: true })
+      }
+    })
+
+    it('validates prompt sync route payloads', async () => {
+      const exportBad = await request(ctx, 'POST', '/api/workers/prompts/export', { workerIds: 'not-array' })
+      expect(exportBad.status).toBe(400)
+
+      const importBad = await request(ctx, 'POST', '/api/workers/prompts/import', { paths: [123] })
+      expect(importBad.status).toBe(400)
+
+      const roomBad = await request(ctx, 'POST', '/api/workers/prompts/import', { roomId: 0 })
+      expect(roomBad.status).toBe(400)
+    })
+
+    it('imports all markdown files from default prompt directory when paths omitted', async () => {
+      const tmpRoot = mkdtempSync(join(tmpdir(), 'workers-route-autodiscover-'))
+      const prev = process.env.QUOROOM_PROMPTS_ROOT
+      process.env.QUOROOM_PROMPTS_ROOT = tmpRoot
+
+      try {
+        const roomRes = await request(ctx, 'POST', '/api/rooms', { name: 'autodiscoverroom' })
+        const roomId = (roomRes.body as any).room.id as number
+
+        const dir = join(tmpRoot, '.quoroom', 'prompts', 'workers', `room-${roomId}`)
+        mkdirSync(dir, { recursive: true })
+        writeFileSync(join(dir, 'one.md'), [
+          '---',
+          `room_id: ${roomId}`,
+          'name: "Auto One"',
+          '---',
+          'prompt one',
+          ''
+        ].join('\n'))
+        writeFileSync(join(dir, 'two.md'), [
+          '---',
+          `room_id: ${roomId}`,
+          'name: "Auto Two"',
+          '---',
+          'prompt two',
+          ''
+        ].join('\n'))
+
+        const importRes = await request(ctx, 'POST', '/api/workers/prompts/import', { roomId })
+        expect(importRes.status).toBe(200)
+        expect((importRes.body as any).summary.created).toBe(2)
+      } finally {
+        if (prev === undefined) delete process.env.QUOROOM_PROMPTS_ROOT
+        else process.env.QUOROOM_PROMPTS_ROOT = prev
+        rmSync(tmpRoot, { recursive: true, force: true })
+      }
+    })
+
+    it('export respects file-newer conflict and force override', async () => {
+      const tmpRoot = mkdtempSync(join(tmpdir(), 'workers-route-export-force-'))
+      const prev = process.env.QUOROOM_PROMPTS_ROOT
+      process.env.QUOROOM_PROMPTS_ROOT = tmpRoot
+
+      try {
+        const workerRes = await request(ctx, 'POST', '/api/workers', {
+          name: 'Export Conflict Worker',
+          systemPrompt: 'initial',
+        })
+        const workerId = (workerRes.body as any).id as number
+
+        const firstExport = await request(ctx, 'POST', '/api/workers/prompts/export', { workerIds: [workerId] })
+        const filePath = (firstExport.body as any).results[0].path as string
+
+        const future = new Date(Date.now() + 120_000)
+        utimesSync(filePath, future, future)
+
+        const skipped = await request(ctx, 'POST', '/api/workers/prompts/export', {
+          workerIds: [workerId],
+          force: false,
+        })
+        expect((skipped.body as any).summary.skipped).toBe(1)
+        expect((skipped.body as any).results[0].reason).toBe('file_newer_than_db')
+
+        const forced = await request(ctx, 'POST', '/api/workers/prompts/export', {
+          workerIds: [workerId],
+          force: true,
+        })
+        expect((forced.body as any).summary.written).toBe(1)
+      } finally {
+        if (prev === undefined) delete process.env.QUOROOM_PROMPTS_ROOT
+        else process.env.QUOROOM_PROMPTS_ROOT = prev
+        rmSync(tmpRoot, { recursive: true, force: true })
+      }
     })
   })
 })

@@ -10,6 +10,8 @@ import {
   getClerkApiAuth,
   syncProjectDocsMemory,
 } from '../clerk-profile'
+import { getModelProvider } from '../../shared/model-provider'
+import { buildOllamaUnavailableMessage, probeOllamaRuntime } from '../../shared/local-model'
 import { insertClerkMessageAndEmit } from '../clerk-message-events'
 import { DEFAULT_CLERK_MODEL } from '../../shared/clerk-profile-config'
 
@@ -348,6 +350,17 @@ export async function runClerkAssistantTurn(
     // Ensure clerk worker exists
     const clerk = queries.ensureClerkWorker(db)
     const model = queries.getSetting(db, 'clerk_model') || clerk.model || DEFAULT_CLERK_MODEL
+    if (getModelProvider(model) === 'ollama_local') {
+      const local = probeOllamaRuntime()
+      if (!local.ready) {
+        return {
+          ok: false,
+          statusCode: 400,
+          response: null,
+          error: buildOllamaUnavailableMessage(local),
+        }
+      }
+    }
 
     if (!options.skipUserInsert) {
       insertClerkMessageAndEmit(db, 'user', trimmed, options.userSource)

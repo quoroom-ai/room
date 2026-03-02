@@ -2,6 +2,8 @@ import { getToken, clearToken, API_BASE } from './auth'
 import type {
   Task, CreateTaskInput, TaskRun, ConsoleLogEntry,
   Worker, CreateWorkerInput,
+  WorkerPromptExportRequest, WorkerPromptExportResponse,
+  WorkerPromptImportRequest, WorkerPromptImportResponse,
   Entity, Observation, Relation, MemoryStats,
   Room, CreateRoomInput, RoomActivityEntry,
   Goal, GoalUpdate,
@@ -131,6 +133,83 @@ interface ProviderStatusEntry {
   installSession: ProviderInstallSession | null
 }
 
+export interface LocalModelInstallSessionLine {
+  id: number
+  stream: 'stdout' | 'stderr' | 'system'
+  text: string
+  timestamp: string
+}
+
+export interface LocalModelInstallSession {
+  sessionId: string
+  status: ProviderSessionStatus
+  startedAt: string
+  updatedAt: string
+  endedAt: string | null
+  active: boolean
+  exitCode: number | null
+  lines: LocalModelInstallSessionLine[]
+}
+
+export interface LocalModelStatus {
+  deploymentMode: 'local' | 'cloud'
+  modelId: string
+  modelTag: string
+  supported: boolean
+  ready: boolean
+  blockers: string[]
+  warnings: string[]
+  requirements: {
+    minRamGb: number
+    minFreeDiskGb: number
+    minCpuCores: number
+    maxMemUsedPct: number
+    maxCpuLoadRatio: number
+    minDarwinMajor: number
+    minWindowsBuild: number
+  }
+  system: {
+    platform: string
+    osRelease: string
+    cpuCount: number
+    loadAvg1m: number
+    loadRatio: number
+    memTotalGb: number
+    memFreeGb: number
+    memUsedPct: number
+    diskFreeGb: number | null
+  }
+  runtime: {
+    installed: boolean
+    version: string | null
+    daemonReachable: boolean
+    modelAvailable: boolean
+    ready: boolean
+    error: string | null
+  }
+}
+
+export interface LocalModelApplyRoomResult {
+  roomId: number
+  roomName: string
+  status: 'updated'
+  queenWorkerId: number
+  queenModelBefore: string | null
+  queenModelAfter: string
+  workerModelBefore: string
+  workerModelAfter: 'queen'
+}
+
+export interface LocalModelApplyAllResult {
+  modelId: string
+  clerkModelBefore: string | null
+  clerkModelAfter: string
+  queenDefaultBefore: string | null
+  queenDefaultAfter: string
+  activeRoomsUpdated: number
+  rooms: LocalModelApplyRoomResult[]
+}
+
 interface ContactEmailStatus {
   value: string | null
   verified: boolean
@@ -218,6 +297,10 @@ export const api = {
       request<{ ok: true }>('DELETE', `/api/workers/${id}`),
     listForRoom: (roomId: number) =>
       request<Worker[]>('GET', `/api/rooms/${roomId}/workers`),
+    exportPrompts: (body: WorkerPromptExportRequest) =>
+      request<WorkerPromptExportResponse>('POST', '/api/workers/prompts/export', body),
+    importPrompts: (body: WorkerPromptImportRequest) =>
+      request<WorkerPromptImportResponse>('POST', '/api/workers/prompts/import', body),
   },
 
   // ─── Memory ──────────────────────────────────────────────
@@ -380,8 +463,8 @@ export const api = {
         running: boolean
         model: string | null
         auth: {
-          provider: 'claude_subscription' | 'codex_subscription' | 'openai_api' | 'anthropic_api'
-          mode: 'subscription' | 'api'
+          provider: 'claude_subscription' | 'codex_subscription' | 'openai_api' | 'anthropic_api' | 'gemini_api' | 'ollama_local'
+          mode: 'subscription' | 'api' | 'local'
           credentialName: string | null
           envVar: string | null
           hasCredential: boolean
@@ -483,14 +566,16 @@ export const api = {
         apiAuth: {
           openai: { hasRoomCredential: boolean; hasSavedKey: boolean; hasEnvKey: boolean; ready: boolean; maskedKey: string | null }
           anthropic: { hasRoomCredential: boolean; hasSavedKey: boolean; hasEnvKey: boolean; ready: boolean; maskedKey: string | null }
+          gemini: { hasRoomCredential: boolean; hasSavedKey: boolean; hasEnvKey: boolean; ready: boolean; maskedKey: string | null }
         }
       }>('GET', '/api/clerk/status'),
-    setApiKey: (provider: 'openai_api' | 'anthropic_api', key: string) =>
+    setApiKey: (provider: 'openai_api' | 'anthropic_api' | 'gemini_api', key: string) =>
       request<{
         ok: true
         apiAuth: {
           openai: { hasRoomCredential: boolean; hasSavedKey: boolean; hasEnvKey: boolean; ready: boolean; maskedKey: string | null }
           anthropic: { hasRoomCredential: boolean; hasSavedKey: boolean; hasEnvKey: boolean; ready: boolean; maskedKey: string | null }
+          gemini: { hasRoomCredential: boolean; hasSavedKey: boolean; hasEnvKey: boolean; ready: boolean; maskedKey: string | null }
         }
       }>('POST', '/api/clerk/api-key', { provider, key }),
     updateSettings: (settings: { model?: string; commentaryEnabled?: boolean; commentaryMode?: 'auto' | 'light' }) =>
@@ -502,6 +587,7 @@ export const api = {
         apiAuth: {
           openai: { hasRoomCredential: boolean; hasSavedKey: boolean; hasEnvKey: boolean; ready: boolean; maskedKey: string | null }
           anthropic: { hasRoomCredential: boolean; hasSavedKey: boolean; hasEnvKey: boolean; ready: boolean; maskedKey: string | null }
+          gemini: { hasRoomCredential: boolean; hasSavedKey: boolean; hasEnvKey: boolean; ready: boolean; maskedKey: string | null }
         }
       }>('PUT', '/api/clerk/settings', settings),
   },
@@ -622,6 +708,29 @@ export const api = {
         ok: true
         session: ProviderInstallSession
       }>('POST', `/api/providers/install-sessions/${encodeURIComponent(sessionId)}/cancel`),
+  },
+
+  // ─── Local Free Model (Ollama) ──────────────────────────
+  localModel: {
+    status: () =>
+      request<LocalModelStatus>('GET', '/api/local-model/status'),
+    install: () =>
+      request<{
+        ok: true
+        status: 'pending'
+        reused: boolean
+        session: LocalModelInstallSession
+        channel: string
+      }>('POST', '/api/local-model/install'),
+    latestInstallSession: () =>
+      request<{ session: LocalModelInstallSession | null }>('GET', '/api/local-model/install-session'),
+    cancelInstallSession: (sessionId: string) =>
+      request<{
+        ok: true
+        session: LocalModelInstallSession
+      }>('POST', `/api/local-model/install-sessions/${encodeURIComponent(sessionId)}/cancel`),
+    applyAll: () =>
+      request<LocalModelApplyAllResult>('POST', '/api/local-model/apply-all'),
   },
 
   // ─── Wallet ───────────────────────────────────────────

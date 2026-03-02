@@ -90,6 +90,13 @@ describe('runCycle', () => {
     expect(callArgs.prompt).toContain('Make money')
   })
 
+  it('aborts early when worker-room mapping is invalid', async () => {
+    const other = createRoom(db, { name: 'Other Room', goal: 'Other goal' })
+    const output = await runCycle(db, roomId, other.queen)
+    expect(output).toContain('Worker-room mapping invalid')
+    expect(mockExecuteAgent).not.toHaveBeenCalled()
+  })
+
   it('includes announced decisions in context', async () => {
     queries.createAnnouncement(db, roomId, queenId, 'Build SaaS?', 'strategy',
       new Date(Date.now() + 600000).toISOString())
@@ -337,6 +344,12 @@ describe('runCycle', () => {
 })
 
 describe('startAgentLoop', () => {
+  it('throws on startup when worker-room mapping is invalid', async () => {
+    const other = createRoom(db, { name: 'Other Room', goal: 'Other goal' })
+    await expect(startAgentLoop(db, roomId, other.queen.id)).rejects.toThrow('Worker-room mapping invalid')
+    expect(mockExecuteAgent).not.toHaveBeenCalled()
+  })
+
   it('runs cycles continuously until paused', async () => {
     let callCount = 0
     mockExecuteAgent.mockImplementation(async () => {
@@ -464,6 +477,29 @@ describe('startAgentLoop', () => {
     await startAgentLoop(db, roomId, queenId)
 
     expect(callCount).toBe(1) // Only one cycle, not two
+  })
+
+  it('stops loop when worker-room mapping drifts during runtime', async () => {
+    let callCount = 0
+    mockExecuteAgent.mockImplementation(async () => {
+      callCount++
+      if (callCount === 1) {
+        queries.updateWorker(db, queenId, { roomId: null } as Parameters<typeof queries.updateWorker>[2])
+      }
+      return {
+        output: `Cycle ${callCount}`,
+        exitCode: 0,
+        durationMs: 100,
+        sessionId: null,
+        timedOut: false
+      }
+    })
+
+    await startAgentLoop(db, roomId, queenId)
+
+    expect(callCount).toBe(1)
+    const activity = queries.getRoomActivity(db, roomId)
+    expect(activity.some(a => a.summary.includes('mapping'))).toBe(true)
   })
 })
 

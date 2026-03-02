@@ -1,6 +1,10 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
+import { APP_MODE } from '../lib/auth'
+import { api, type LocalModelInstallSession, type LocalModelStatus } from '../lib/client'
+import { getLocalInstallProgressState } from '../lib/local-model-progress'
+import { wsClient, type WsMessage } from '../lib/ws'
 
-type SetupPathId = 'claude_sub' | 'codex_sub' | 'openai_api' | 'anthropic_api' | 'gemini_api'
+type SetupPathId = 'claude_sub' | 'codex_sub' | 'openai_api' | 'anthropic_api' | 'gemini_api' | 'local_free'
 type ProviderName = 'codex' | 'claude'
 type ProviderSessionStatus = 'starting' | 'running' | 'completed' | 'failed' | 'canceled' | 'timeout'
 
@@ -58,6 +62,7 @@ interface ClerkSetupGuideProps {
   apiAuth: {
     openai: ApiAuthSignal
     anthropic: ApiAuthSignal
+    gemini: ApiAuthSignal
   } | null
   providerAuthSessions: Partial<Record<ProviderName, ProviderAuthSession | null>>
   providerInstallSessions: Partial<Record<ProviderName, ProviderInstallSession | null>>
@@ -68,11 +73,21 @@ interface ClerkSetupGuideProps {
   onCancelInstall: (sessionId: string) => Promise<void>
   onRefreshProviders: () => Promise<void>
   onApplyModel: (model: string) => Promise<void>
+  onApplyLocalModel: () => Promise<void>
   onSaveApiKey: (provider: 'openai_api' | 'anthropic_api' | 'gemini_api', key: string) => Promise<void>
   onClose: () => void
 }
 
 const PATHS: SetupPath[] = [
+  {
+    id: 'local_free',
+    title: 'Free Local (Qwen3 Coder 30B)',
+    model: 'ollama:qwen3-coder:30b',
+    summary: 'Local-only runtime. No paid API keys. Uses your machine resources.',
+    bestFor: 'Users with strong hardware who want a strict free local path.',
+    tradeoff: 'High RAM/CPU usage and local install requirements.',
+    setup: 'Compatibility gate, one-click install, then apply to Queen + Clerk + Workers.',
+  },
   {
     id: 'claude_sub',
     title: 'Claude Subscription',
@@ -124,7 +139,9 @@ function pickRecommendedPath(
   claude: ProviderSignal | null,
   codex: ProviderSignal | null,
   apiAuth: { openai: ApiAuthSignal; anthropic: ApiAuthSignal; gemini?: ApiAuthSignal } | null,
+  localStatus: LocalModelStatus | null,
 ): SetupPathId {
+  if (localStatus?.deploymentMode === 'local' && localStatus.runtime.ready) return 'local_free'
   if (claude?.connected === true) return 'claude_sub'
   if (codex?.connected === true) return 'codex_sub'
   if (claude?.installed) return 'claude_sub'
@@ -140,8 +157,18 @@ function getPathStatus(
   claude: ProviderSignal | null,
   codex: ProviderSignal | null,
   apiAuth: { openai: ApiAuthSignal; anthropic: ApiAuthSignal; gemini?: ApiAuthSignal } | null,
+  localStatus: LocalModelStatus | null,
 ): { label: string; ready: boolean } {
   switch (pathId) {
+    case 'local_free':
+      if (!localStatus) return { label: 'wait. checking...', ready: false }
+      if (localStatus.deploymentMode !== 'local') return { label: 'local mode only', ready: false }
+      if (localStatus.blockers.length > 0) return { label: 'blocked', ready: false }
+      if (localStatus.runtime.ready) return { label: 'ready', ready: true }
+      if (!localStatus.runtime.installed) return { label: 'not installed', ready: false }
+      if (!localStatus.runtime.daemonReachable) return { label: 'daemon offline', ready: false }
+      if (!localStatus.runtime.modelAvailable) return { label: 'model missing', ready: false }
+      return { label: 'not ready', ready: false }
     case 'claude_sub':
       if (!claude) return { label: 'wait. checking...', ready: false }
       if (claude.connected === true) return { label: 'connected', ready: true }
@@ -173,6 +200,10 @@ function isApiPath(pathId: SetupPathId | null): pathId is 'openai_api' | 'anthro
 
 function isSubPath(pathId: SetupPathId | null): pathId is 'claude_sub' | 'codex_sub' {
   return pathId === 'claude_sub' || pathId === 'codex_sub'
+}
+
+function isLocalPath(pathId: SetupPathId | null): pathId is 'local_free' {
+  return pathId === 'local_free'
 }
 
 function subPathProvider(pathId: 'claude_sub' | 'codex_sub'): ProviderName {
@@ -243,12 +274,19 @@ export function ClerkSetupGuide({
   onCancelInstall,
   onRefreshProviders,
   onApplyModel,
+  onApplyLocalModel,
   onSaveApiKey,
   onClose,
 }: ClerkSetupGuideProps): React.JSX.Element {
+  const localModeVisible = APP_MODE !== 'cloud'
+  const [localStatus, setLocalStatus] = useState<LocalModelStatus | null>(null)
+  const [localStatusBusy, setLocalStatusBusy] = useState(false)
+  const [localInstallSession, setLocalInstallSession] = useState<LocalModelInstallSession | null>(null)
+  const [localInstallBusy, setLocalInstallBusy] = useState(false)
+  const localPathVisible = localModeVisible && localStatus?.deploymentMode !== 'cloud'
   const recommendedId = useMemo(
-    () => pickRecommendedPath(claude, codex, apiAuth),
-    [claude, codex, apiAuth]
+    () => pickRecommendedPath(claude, codex, apiAuth, localStatus),
+    [claude, codex, apiAuth, localStatus]
   )
   const [selectedPathId, setSelectedPathId] = useState<SetupPathId | null>(null)
   const [apiKeyInput, setApiKeyInput] = useState('')
@@ -256,14 +294,122 @@ export function ClerkSetupGuide({
   const [providerBusy, setProviderBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
+  const visiblePaths = useMemo(
+    () => PATHS.filter(path => path.id !== 'local_free' || localPathVisible),
+    [localPathVisible]
+  )
+
   useEffect(() => {
-    if (!selectedPathId) setSelectedPathId(recommendedId)
-  }, [recommendedId, selectedPathId])
+    if (!selectedPathId || !visiblePaths.some(path => path.id === selectedPathId)) {
+      setSelectedPathId(recommendedId)
+    }
+  }, [recommendedId, selectedPathId, visiblePaths])
 
   const selectedProvider = selectedPathId && isSubPath(selectedPathId) ? subPathProvider(selectedPathId) : null
   const providerSignal = selectedProvider === 'claude' ? claude : selectedProvider === 'codex' ? codex : null
   const authSession = selectedProvider ? (providerAuthSessions[selectedProvider] ?? null) : null
   const installSession = selectedProvider ? (providerInstallSessions[selectedProvider] ?? null) : null
+  const localInstallProgress = useMemo(
+    () => getLocalInstallProgressState(localInstallSession),
+    [localInstallSession]
+  )
+
+  async function refreshLocalStatus(): Promise<void> {
+    if (!localModeVisible) return
+    setLocalStatusBusy(true)
+    try {
+      const status = await api.localModel.status()
+      setLocalStatus(status)
+    } catch {
+      setLocalStatus(null)
+    } finally {
+      setLocalStatusBusy(false)
+    }
+  }
+
+  async function refreshLocalInstallSession(): Promise<void> {
+    if (!localModeVisible) return
+    try {
+      const response = await api.localModel.latestInstallSession()
+      setLocalInstallSession(response.session)
+    } catch {
+      setLocalInstallSession(null)
+    }
+  }
+
+  async function handleLocalInstall(): Promise<void> {
+    if (!localModeVisible) return
+    setLocalInstallBusy(true)
+    setError(null)
+    try {
+      const response = await api.localModel.install()
+      setLocalInstallSession(response.session)
+      await refreshLocalStatus()
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to start local model installation')
+    } finally {
+      setLocalInstallBusy(false)
+    }
+  }
+
+  async function handleLocalInstallCancel(): Promise<void> {
+    if (!localInstallSession) return
+    setLocalInstallBusy(true)
+    setError(null)
+    try {
+      const response = await api.localModel.cancelInstallSession(localInstallSession.sessionId)
+      setLocalInstallSession(response.session)
+      await refreshLocalStatus()
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to cancel local model installation')
+    } finally {
+      setLocalInstallBusy(false)
+    }
+  }
+
+  useEffect(() => {
+    if (!localModeVisible) return
+    void refreshLocalStatus()
+    void refreshLocalInstallSession()
+  }, [localModeVisible])
+
+  useEffect(() => {
+    const session = localInstallSession
+    if (!session?.active) return
+    return wsClient.subscribe(`local-model-install:${session.sessionId}`, (event: WsMessage) => {
+      if (event.type === 'local_model_install:status') {
+        const data = event.data as LocalModelInstallSession
+        if (!data?.sessionId) return
+        setLocalInstallSession(data)
+        if (!data.active) void refreshLocalStatus()
+        return
+      }
+      if (event.type === 'local_model_install:line') {
+        const data = event.data as {
+          sessionId: string
+          id: number
+          stream: 'stdout' | 'stderr' | 'system'
+          text: string
+          timestamp: string
+        }
+        if (!data?.sessionId) return
+        setLocalInstallSession(prev => {
+          if (!prev || prev.sessionId !== data.sessionId) return prev
+          if (prev.lines.some(line => line.id === data.id)) return prev
+          return {
+            ...prev,
+            updatedAt: data.timestamp,
+            lines: [...prev.lines, {
+              id: data.id,
+              stream: data.stream,
+              text: data.text,
+              timestamp: data.timestamp,
+            }].slice(-300),
+          }
+        })
+      }
+    })
+  }, [localInstallSession?.sessionId, localInstallSession?.active])
 
   // Auto-install CLI when a subscription path is selected and CLI is not installed
   const autoTriggeredRef = useRef<string | null>(null)
@@ -318,9 +464,26 @@ export function ClerkSetupGuide({
     setBusy(true)
     setError(null)
     try {
+      if (isLocalPath(path.id)) {
+        if (!localStatus) {
+          setError('Checking local model compatibility. Please wait and retry.')
+          return
+        }
+        if (localStatus.blockers.length > 0) {
+          setError(localStatus.blockers.join(' '))
+          return
+        }
+        if (!localStatus.runtime.ready) {
+          setError('Install local runtime and model first, then apply to all agents.')
+          return
+        }
+        await onApplyLocalModel()
+        onClose()
+        return
+      }
       if (isApiPath(path.id)) {
         const provider = path.id as 'openai_api' | 'anthropic_api' | 'gemini_api'
-        const status = getPathStatus(path.id, claude, codex, apiAuth)
+        const status = getPathStatus(path.id, claude, codex, apiAuth, localStatus)
         const key = apiKeyInput.trim()
         if (!status.ready && !key) {
           const providerLabel = provider === 'openai_api' ? 'OpenAI' : provider === 'gemini_api' ? 'Gemini' : 'Anthropic'
@@ -370,10 +533,10 @@ export function ClerkSetupGuide({
               Pick a model path. The Clerk will use this to chat, commentate, and manage your system.
             </p>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
-              {PATHS.map((path) => {
+              {visiblePaths.map((path) => {
                 const isRecommended = path.id === recommendedId
                 const isSelected = path.id === selectedPathId
-                const status = getPathStatus(path.id, claude, codex, apiAuth)
+                const status = getPathStatus(path.id, claude, codex, apiAuth, localStatus)
                 return (
                   <button
                     key={path.id}
@@ -409,7 +572,7 @@ export function ClerkSetupGuide({
 
           {selectedPathId && (() => {
             const path = PATHS.find(p => p.id === selectedPathId)!
-            const status = getPathStatus(selectedPathId, claude, codex, apiAuth)
+            const status = getPathStatus(selectedPathId, claude, codex, apiAuth, localStatus)
             return (
               <div className="mt-2 px-3 py-2 rounded-lg bg-surface-secondary border border-border-primary">
                 <div className="text-xs text-text-secondary space-y-0.5">
@@ -417,6 +580,108 @@ export function ClerkSetupGuide({
                   <p><span className="text-text-muted">Setup:</span> {path.setup}</p>
                   <p><span className="text-text-muted">Tradeoff:</span> {path.tradeoff}</p>
                 </div>
+
+                {isLocalPath(selectedPathId) && localStatus && (
+                  <div className="mt-3 pt-3 border-t border-border-primary space-y-3">
+                    <div className="text-xs text-text-secondary">
+                      <p className="font-medium text-text-primary mb-1">Compatibility Check (required)</p>
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-1">
+                        <p>OS: {localStatus.system.platform} {localStatus.system.osRelease}</p>
+                        <p>CPU: {localStatus.system.cpuCount} cores</p>
+                        <p>RAM: {localStatus.system.memTotalGb} GB total ({localStatus.system.memUsedPct}% used)</p>
+                        <p>Disk free: {localStatus.system.diskFreeGb == null ? 'unknown' : `${localStatus.system.diskFreeGb} GB`}</p>
+                        <p>CPU load: {Math.round(localStatus.system.loadRatio * 100)}%</p>
+                        <p>Runtime: {localStatus.runtime.ready ? 'ready' : localStatus.runtime.installed ? 'installed, not ready' : 'not installed'}</p>
+                      </div>
+                    </div>
+
+                    {localStatus.blockers.length > 0 && (
+                      <div className="rounded-lg border border-status-error bg-status-error-bg px-2.5 py-2">
+                        <p className="text-xs font-medium text-status-error mb-1">Blocked</p>
+                        <ul className="list-disc pl-4 space-y-0.5 text-xs text-status-error">
+                          {localStatus.blockers.map((blocker, idx) => (
+                            <li key={`${idx}-${blocker}`}>{blocker}</li>
+                          ))}
+                        </ul>
+                      </div>
+                    )}
+
+                    {localStatus.warnings.length > 0 && (
+                      <div className="rounded-lg border border-status-warning bg-status-warning-bg px-2.5 py-2">
+                        <p className="text-xs font-medium text-status-warning mb-1">Warnings</p>
+                        <ul className="list-disc pl-4 space-y-0.5 text-xs text-status-warning">
+                          {localStatus.warnings.map((warning, idx) => (
+                            <li key={`${idx}-${warning}`}>{warning}</li>
+                          ))}
+                        </ul>
+                      </div>
+                    )}
+
+                    <div className="flex flex-wrap items-center gap-2">
+                      <span className={`text-xs font-medium ${status.ready ? 'text-status-success' : 'text-text-muted'} ${status.label === 'wait. checking...' || localStatusBusy ? 'animate-pulse' : ''}`}>
+                        {localStatusBusy ? 'checking compatibility...' : status.label}
+                      </span>
+                      <button
+                        onClick={() => { void handleLocalInstall() }}
+                        disabled={localInstallBusy || localInstallSession?.active || localStatus.blockers.length > 0}
+                        className="text-xs px-2.5 py-1 rounded-lg border border-border-primary text-text-secondary hover:bg-surface-hover disabled:opacity-50 disabled:cursor-not-allowed"
+                      >
+                        {localInstallSession?.active ? 'Installing...' : localStatus.runtime.ready ? 'Reinstall' : 'Install Ollama + Pull Model'}
+                      </button>
+                      {localInstallSession?.active ? (
+                        <button
+                          onClick={() => { void handleLocalInstallCancel() }}
+                          disabled={localInstallBusy}
+                          className="text-xs px-2.5 py-1 rounded-lg border border-border-primary text-text-secondary hover:bg-surface-hover disabled:opacity-50 disabled:cursor-not-allowed"
+                        >
+                          {localInstallBusy ? 'Canceling...' : 'Cancel'}
+                        </button>
+                      ) : (
+                        <button
+                          onClick={() => { void refreshLocalStatus(); void refreshLocalInstallSession() }}
+                          disabled={localInstallBusy || localStatusBusy}
+                          className="text-xs px-2.5 py-1 rounded-lg border border-border-primary text-text-secondary hover:bg-surface-hover disabled:opacity-50 disabled:cursor-not-allowed"
+                        >
+                          Refresh
+                        </button>
+                      )}
+                    </div>
+
+                    {localInstallSession && (
+                      <div className="space-y-2">
+                        <div className="flex flex-wrap items-center gap-2">
+                          <span className="text-xs text-text-muted">Install:</span>
+                          <span className={`text-xs ${sessionStatusColor(localInstallSession.status)}`}>
+                            {sessionStatusLabel(localInstallSession.status, 'install')}
+                          </span>
+                        </div>
+                        <div className="space-y-1">
+                          <div className="flex items-center justify-between text-[11px] text-text-muted">
+                            <span>Progress</span>
+                            <span>
+                              {localInstallProgress.indeterminate
+                                ? 'estimating...'
+                                : localInstallProgress.percent != null
+                                  ? `${localInstallProgress.percent}%`
+                                  : 'n/a'}
+                            </span>
+                          </div>
+                          <div className="h-1.5 rounded-full bg-surface-primary border border-border-primary overflow-hidden">
+                            {localInstallProgress.indeterminate ? (
+                              <div className="h-full bg-interactive rounded-full animate-pulse w-full" />
+                            ) : (
+                              <div
+                                className="h-full bg-interactive rounded-full transition-[width] duration-500 ease-out"
+                                style={{ width: `${localInstallProgress.percent ?? 0}%` }}
+                              />
+                            )}
+                          </div>
+                        </div>
+                        <SessionLog lines={localInstallSession.lines} />
+                      </div>
+                    )}
+                  </div>
+                )}
 
                 {/* Subscription path: Install / Connect / Disconnect */}
                 {isSubPath(selectedPathId) && selectedProvider && (
@@ -537,11 +802,15 @@ export function ClerkSetupGuide({
 
                 {/* API key path */}
                 {isApiPath(selectedPathId) && (() => {
-                  const auth = selectedPathId === 'openai_api' ? apiAuth?.openai : apiAuth?.anthropic
+                  const auth = selectedPathId === 'openai_api'
+                    ? apiAuth?.openai
+                    : selectedPathId === 'gemini_api'
+                      ? apiAuth?.gemini
+                      : apiAuth?.anthropic
                   return (
                     <div className="mt-3 pt-3 border-t border-border-primary space-y-2">
                       <label className="block text-xs font-medium text-text-secondary">
-                        {selectedPathId === 'openai_api' ? 'OpenAI API key' : 'Anthropic API key'}
+                        {selectedPathId === 'openai_api' ? 'OpenAI API key' : selectedPathId === 'gemini_api' ? 'Gemini API key' : 'Anthropic API key'}
                       </label>
                       {auth?.maskedKey && (
                         <div className="flex items-center gap-2 text-xs">
@@ -571,7 +840,7 @@ export function ClerkSetupGuide({
                   )
                 })()}
 
-                {!status.ready && !isSubPath(selectedPathId) && (
+                {!status.ready && isApiPath(selectedPathId) && (
                   <p className="text-xs text-status-warning mt-2">
                     This provider is not fully configured yet. The Clerk may not work until it is ready.
                   </p>
@@ -595,10 +864,22 @@ export function ClerkSetupGuide({
           </button>
           <button
             onClick={handleApply}
-            disabled={busy || !selectedPathId}
+            disabled={
+              busy
+              || !selectedPathId
+              || (isLocalPath(selectedPathId) && (
+                !localStatus
+                || localStatus.blockers.length > 0
+                || !localStatus.runtime.ready
+              ))
+            }
             className="px-3 py-1.5 text-xs bg-interactive text-text-invert rounded-lg hover:bg-interactive-hover disabled:opacity-50 disabled:cursor-not-allowed"
           >
-            {busy ? 'Connecting...' : 'Connect Clerk'}
+            {busy
+              ? 'Connecting...'
+              : isLocalPath(selectedPathId)
+                ? 'Connect Clerk (Apply All)'
+                : 'Connect Clerk'}
           </button>
         </div>
       </div>

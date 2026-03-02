@@ -49,6 +49,60 @@ export interface CreateWorkerInput {
   agentState?: AgentState
 }
 
+export interface WorkerPromptExportRequest {
+  workerIds?: number[]
+  roomId?: number
+  force?: boolean
+}
+
+export interface WorkerPromptImportRequest {
+  paths?: string[]
+  roomId?: number
+  force?: boolean
+}
+
+export interface WorkerPromptExportSummary {
+  written: number
+  skipped: number
+  errors: number
+}
+
+export interface WorkerPromptImportSummary {
+  updated: number
+  created: number
+  skipped: number
+  errors: number
+}
+
+export type WorkerPromptExportResultStatus = 'written' | 'skipped' | 'error'
+export type WorkerPromptImportResultStatus = 'updated' | 'created' | 'skipped' | 'error'
+
+export interface WorkerPromptExportResult {
+  status: WorkerPromptExportResultStatus
+  workerId?: number
+  path: string
+  reason?: string
+}
+
+export interface WorkerPromptImportResult {
+  status: WorkerPromptImportResultStatus
+  workerId?: number
+  path: string
+  reason?: string
+}
+
+export interface WorkerPromptExportResponse {
+  rootDir: string
+  summary: WorkerPromptExportSummary
+  results: WorkerPromptExportResult[]
+}
+
+export interface WorkerPromptImportResponse {
+  rootDir: string
+  summary: WorkerPromptImportSummary
+  results: WorkerPromptImportResult[]
+}
+
 // ─── Memory Types ───────────────────────────────────────────
 
 export interface Entity {

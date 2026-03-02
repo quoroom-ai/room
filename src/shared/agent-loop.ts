@@ -11,6 +11,7 @@ import { resolveApiKeyForModel, getModelProvider } from './model-provider'
 import { createCycleLogBuffer, type CycleLogEntryCallback } from './console-log-buffer'
 import { QUEEN_TOOLS, WORKER_TOOLS, executeQueenTool } from './queen-tools'
 import { WORKER_ROLE_PRESETS } from './constants'
+import { buildOllamaUnavailableMessage, probeOllamaRuntime } from './local-model'
 
 interface LoopState {
   running: boolean
@@ -104,13 +105,8 @@ export class RateLimitError extends Error {
 export async function startAgentLoop(
   db: Database.Database, roomId: number, workerId: number, options?: AgentLoopOptions
 ): Promise<void> {
-  const room = queries.getRoom(db, roomId)
-  if (!room) throw new Error(`Room ${roomId} not found`)
+  const { room } = queries.ensureWorkerRoomMapping(db, roomId, workerId)
   if (room.status !== 'active') throw new Error(`Room ${roomId} is not active (status: ${room.status})`)
-
-  const worker = queries.getWorker(db, workerId)
-  if (!worker) throw new Error(`Worker ${workerId} not found`)
-  if (worker.roomId !== roomId) throw new Error(`Worker ${workerId} does not belong to room ${roomId}`)
 
   // If already running, skip
   const existing = runningLoops.get(workerId)
@@ -121,12 +117,23 @@ export async function startAgentLoop(
 
   try {
     while (loop.running) {
-      // Re-fetch room to check if still active
-      const currentRoom = queries.getRoom(db, roomId)
-      if (!currentRoom || currentRoom.status !== 'active') break
-
-      const currentWorker = queries.getWorker(db, workerId)
-      if (!currentWorker) break
+      let currentRoom: ReturnType<typeof queries.getRoom>
+      let currentWorker: ReturnType<typeof queries.getWorker>
+      try {
+        const mapping = queries.ensureWorkerRoomMapping(db, roomId, workerId)
+        currentRoom = mapping.room
+        currentWorker = mapping.worker
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err)
+        if (queries.getRoom(db, roomId)) {
+          queries.logRoomActivity(db, roomId, 'error',
+            `Agent loop stopped (${workerId}): ${msg.slice(0, 200)}`,
+            msg, workerId)
+        }
+        try { queries.updateAgentState(db, workerId, 'idle') } catch { /* DB may be closed */ }
+        break
+      }
+      if (!currentRoom || !currentWorker || currentRoom.status !== 'active') break
 
       // Quiet hours guard — sleep until quiet window ends
       if (currentRoom.queenQuietFrom && currentRoom.queenQuietUntil &&
@@ -316,6 +323,19 @@ export async function runCycle(
   options?: AgentLoopOptions,
   abortSignal?: AbortSignal
 ): Promise<string> {
+  try {
+    queries.ensureWorkerRoomMapping(db, roomId, worker.id)
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err)
+    if (queries.getRoom(db, roomId)) {
+      queries.logRoomActivity(db, roomId, 'error',
+        `Agent cycle blocked (${worker.name}): mapping check failed`,
+        msg, worker.id)
+    }
+    try { queries.updateAgentState(db, worker.id, 'idle') } catch { /* DB may be closed */ }
+    return msg
+  }
+
   queries.logRoomActivity(db, roomId, 'system',
     `Agent cycle started (${worker.name})`, undefined, worker.id)
 
@@ -346,6 +366,18 @@ export async function runCycle(
 
     // 0. PRE-FLIGHT: ensure API key is available for API-backed models
     const provider = getModelProvider(model)
+    if (provider === 'ollama_local') {
+      const local = probeOllamaRuntime()
+      if (!local.ready) {
+        const msg = buildOllamaUnavailableMessage(local)
+        logBuffer.addSynthetic('error', msg)
+        logBuffer.flush()
+        queries.completeWorkerCycle(db, cycle.id, msg, undefined)
+        options?.onCycleLifecycle?.('failed', cycle.id, roomId)
+        queries.updateAgentState(db, worker.id, 'idle')
+        return msg
+      }
+    }
     if (provider === 'openai_api' || provider === 'anthropic_api' || provider === 'gemini_api') {
       const apiKeyCheck = resolveApiKeyForModel(db, roomId, model)
       if (!apiKeyCheck) {

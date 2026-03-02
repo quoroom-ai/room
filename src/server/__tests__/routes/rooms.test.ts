@@ -204,6 +204,51 @@ describe('Room routes', () => {
       })
       expect(typeof (res.body as any).auth.ready).toBe('boolean')
     })
+
+    it('returns local auth mode for ollama model', async () => {
+      const createRes = await request(ctx, 'POST', '/api/rooms', { name: 'QueenAuthOllama' })
+      const roomId = (createRes.body as any).room.id
+      const queenId = (createRes.body as any).queen.id
+
+      await request(ctx, 'PATCH', `/api/workers/${queenId}`, { model: 'ollama:qwen3-coder:30b' })
+      const res = await request(ctx, 'GET', `/api/rooms/${roomId}/queen`)
+      expect(res.status).toBe(200)
+      expect((res.body as any).auth).toMatchObject({
+        provider: 'ollama_local',
+        mode: 'local',
+        hasCredential: false,
+        hasEnvKey: false,
+      })
+      expect(typeof (res.body as any).auth.ready).toBe('boolean')
+    })
+  })
+
+  describe('PATCH /api/rooms/:id workerModel', () => {
+    it('allows workers to use local model while queen stays on paid model', async () => {
+      const createRes = await request(ctx, 'POST', '/api/rooms', { name: 'WorkerLocalOnly' })
+      const roomId = (createRes.body as any).room.id as number
+      const queenId = (createRes.body as any).queen.id as number
+
+      await request(ctx, 'PATCH', `/api/workers/${queenId}`, { model: 'codex' })
+
+      const patchRes = await request(ctx, 'PATCH', `/api/rooms/${roomId}`, {
+        workerModel: 'ollama:qwen3-coder:30b',
+      })
+      expect(patchRes.status).toBe(200)
+      expect((patchRes.body as any).workerModel).toBe('ollama:qwen3-coder:30b')
+
+      const roomRes = await request(ctx, 'GET', `/api/rooms/${roomId}`)
+      expect(roomRes.status).toBe(200)
+      expect((roomRes.body as any).workerModel).toBe('ollama:qwen3-coder:30b')
+
+      const queenRes = await request(ctx, 'GET', `/api/rooms/${roomId}/queen`)
+      expect(queenRes.status).toBe(200)
+      expect((queenRes.body as any).model).toBe('codex')
+      expect((queenRes.body as any).auth).toMatchObject({
+        provider: 'codex_subscription',
+        mode: 'subscription',
+      })
+    })
   })
 
   describe('POST /api/rooms/:id/start', () => {

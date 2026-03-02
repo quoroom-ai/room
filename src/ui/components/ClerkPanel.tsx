@@ -284,7 +284,8 @@ function AnimatedMarkdownMessage({
 function getModelConnectionStatus(
   model: string | null,
   providerStatus: { codex: ProviderStatusEntry; claude: ProviderStatusEntry } | null,
-  apiAuth: { openai: { ready: boolean }; anthropic: { ready: boolean } } | null,
+  apiAuth: { openai: { ready: boolean }; anthropic: { ready: boolean }; gemini?: { ready: boolean } } | null,
+  localModelStatus: { ready: boolean; deploymentMode: 'local' | 'cloud' } | null,
 ): { connected: boolean | null; label: string } {
   if (!model) return { connected: null, label: '' }
 
@@ -317,6 +318,13 @@ function getModelConnectionStatus(
     return apiAuth.gemini?.ready
       ? { connected: true, label: 'connected' }
       : { connected: false, label: 'not connected' }
+  }
+  if (model === 'ollama' || model.startsWith('ollama:')) {
+    if (!localModelStatus) return { connected: null, label: 'checking' }
+    if (localModelStatus.deploymentMode !== 'local') return { connected: false, label: 'local mode only' }
+    return localModelStatus.ready
+      ? { connected: true, label: 'ready' }
+      : { connected: false, label: 'not ready' }
   }
 
   return { connected: null, label: '' }
@@ -355,6 +363,11 @@ export function ClerkPanel({ setupLaunchKey = 0 }: ClerkPanelProps): React.JSX.E
   } | null>(
     () => api.providers.status().catch(() => null),
     120000
+  )
+
+  const { data: localModelStatus, refresh: refreshLocalModelStatus } = usePolling(
+    () => api.localModel.status().catch(() => null),
+    30000
   )
 
   // Provider session state for install/connect flows
@@ -534,7 +547,12 @@ export function ClerkPanel({ setupLaunchKey = 0 }: ClerkPanelProps): React.JSX.E
   }, [loading])
 
   // Compute connection status once for use across the component
-  const connectionStatus = getModelConnectionStatus(clerkModel, providerStatus ?? null, clerkStatus?.apiAuth ?? null)
+  const connectionStatus = getModelConnectionStatus(
+    clerkModel,
+    providerStatus ?? null,
+    clerkStatus?.apiAuth ?? null,
+    localModelStatus
+  )
   const isConnected = connectionStatus.connected === true
 
   const pingPresence = useCallback(async (): Promise<void> => {
@@ -774,12 +792,15 @@ export function ClerkPanel({ setupLaunchKey = 0 }: ClerkPanelProps): React.JSX.E
   async function handleApplyModel(model: string): Promise<void> {
     await api.clerk.updateSettings({ model })
     setClerkModel(model)
-    refreshStatus()
+    await refreshStatus()
+    if (model === 'ollama' || model.startsWith('ollama:')) {
+      await refreshLocalModelStatus()
+    }
   }
 
-  async function handleSaveApiKey(provider: 'openai_api' | 'anthropic_api', key: string): Promise<void> {
+  async function handleSaveApiKey(provider: 'openai_api' | 'anthropic_api' | 'gemini_api', key: string): Promise<void> {
     await api.clerk.setApiKey(provider, key)
-    refreshStatus()
+    await refreshStatus()
   }
 
   return (
@@ -989,6 +1010,14 @@ export function ClerkPanel({ setupLaunchKey = 0 }: ClerkPanelProps): React.JSX.E
           onCancelInstall={handleProviderInstallCancel}
           onRefreshProviders={refreshProviderStatus}
           onApplyModel={handleApplyModel}
+          onApplyLocalModel={async () => {
+            await api.localModel.applyAll()
+            await Promise.all([
+              refreshStatus(),
+              refreshProviderStatus(),
+              refreshLocalModelStatus(),
+            ])
+          }}
           onSaveApiKey={handleSaveApiKey}
           onClose={() => setShowSetup(false)}
         />

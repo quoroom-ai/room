@@ -1,8 +1,9 @@
 import type { Router } from '../router'
-import type { AgentState } from '../../shared/types'
+import type { AgentState, WorkerPromptExportRequest, WorkerPromptImportRequest } from '../../shared/types'
 import * as queries from '../../shared/db-queries'
 import { eventBus } from '../event-bus'
 import { triggerAgent, pauseAgent, isRoomLaunchEnabled } from '../../shared/agent-loop'
+import { exportWorkerPrompts, importWorkerPrompts } from '../../shared/worker-prompt-sync'
 
 export function registerWorkerRoutes(router: Router): void {
   router.post('/api/workers', (ctx) => {
@@ -28,6 +29,67 @@ export function registerWorkerRoutes(router: Router): void {
   router.get('/api/workers', (ctx) => {
     const workers = queries.listWorkers(ctx.db)
     return { data: workers }
+  })
+
+  router.post('/api/workers/prompts/export', (ctx) => {
+    const body = (ctx.body as WorkerPromptExportRequest | undefined) ?? {}
+
+    if (body.workerIds !== undefined && !Array.isArray(body.workerIds)) {
+      return { status: 400, error: 'workerIds must be an array of numbers' }
+    }
+    if (Array.isArray(body.workerIds) && body.workerIds.some(id => !Number.isInteger(id) || id <= 0)) {
+      return { status: 400, error: 'workerIds must contain positive integers' }
+    }
+    if (body.roomId !== undefined && (!Number.isInteger(body.roomId) || body.roomId <= 0)) {
+      return { status: 400, error: 'roomId must be a positive integer' }
+    }
+
+    const result = exportWorkerPrompts(ctx.db, {
+      workerIds: body.workerIds,
+      roomId: body.roomId,
+      force: body.force === true,
+    })
+
+    return { data: result }
+  })
+
+  router.post('/api/workers/prompts/import', (ctx) => {
+    const body = (ctx.body as WorkerPromptImportRequest | undefined) ?? {}
+
+    if (body.paths !== undefined && !Array.isArray(body.paths)) {
+      return { status: 400, error: 'paths must be an array of strings' }
+    }
+    if (Array.isArray(body.paths) && body.paths.some(path => typeof path !== 'string' || !path.trim())) {
+      return { status: 400, error: 'paths must contain non-empty strings' }
+    }
+    if (body.roomId !== undefined && (!Number.isInteger(body.roomId) || body.roomId <= 0)) {
+      return { status: 400, error: 'roomId must be a positive integer' }
+    }
+
+    const result = importWorkerPrompts(ctx.db, {
+      paths: body.paths,
+      roomId: body.roomId,
+      force: body.force === true,
+    })
+
+    const createdIds = new Set<number>()
+    const updatedIds = new Set<number>()
+    for (const entry of result.results) {
+      if (!entry.workerId) continue
+      if (entry.status === 'created') createdIds.add(entry.workerId)
+      if (entry.status === 'updated') updatedIds.add(entry.workerId)
+    }
+
+    for (const workerId of createdIds) {
+      const worker = queries.getWorker(ctx.db, workerId)
+      if (worker) eventBus.emit('workers', 'worker:created', worker)
+    }
+    for (const workerId of updatedIds) {
+      const worker = queries.getWorker(ctx.db, workerId)
+      if (worker) eventBus.emit('workers', 'worker:updated', worker)
+    }
+
+    return { data: result }
   })
 
   router.get('/api/workers/:id', (ctx) => {

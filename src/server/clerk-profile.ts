@@ -5,6 +5,7 @@ import type Database from 'better-sqlite3'
 import { executeAgent } from '../shared/agent-executor'
 import * as queries from '../shared/db-queries'
 import { getModelProvider } from '../shared/model-provider'
+import { probeOllamaRuntime } from '../shared/local-model'
 import { probeProviderConnected, probeProviderInstalled } from './provider-cli'
 import type { ToolDef } from '../shared/queen-tools'
 import {
@@ -107,6 +108,8 @@ export function autoConfigureClerkModel(db: Database.Database): string | null {
   if (probeProviderInstalled('claude').installed) return DEFAULT_CLERK_MODEL
   const codex = probeProviderInstalled('codex')
   if (codex.installed && probeProviderConnected('codex') === true) return CLERK_FALLBACK_SUBSCRIPTION_MODEL
+  const ollama = probeOllamaRuntime()
+  if (ollama.ready) return 'ollama:qwen3-coder:30b'
   const apiAuth = getClerkApiAuth(db)
   if (apiAuth.openai.ready) return CLERK_FALLBACK_OPENAI_MODEL
   if (apiAuth.anthropic.ready) return CLERK_FALLBACK_ANTHROPIC_MODEL
@@ -313,6 +316,9 @@ function buildClerkModelPlan(preferredModel: string): string[] {
     uniquePush(plan, CLERK_FALLBACK_OPENAI_MODEL)
     uniquePush(plan, DEFAULT_CLERK_MODEL)
     uniquePush(plan, CLERK_FALLBACK_ANTHROPIC_MODEL)
+  } else if (provider === 'ollama_local') {
+    // Fail-closed policy: do not fallback from local model to paid providers.
+    return [resolved]
   }
 
   return plan
@@ -328,6 +334,10 @@ function buildExecutionCandidates(db: Database.Database, preferredModel: string)
   for (const model of buildClerkModelPlan(preferredModel)) {
     const provider = getModelProvider(model)
     const apiKey = resolveClerkApiKey(db, model)
+    if (provider === 'ollama_local') {
+      candidates.push({ model })
+      continue
+    }
     if ((provider === 'openai_api' || provider === 'anthropic_api' || provider === 'gemini_api') && !apiKey) continue
     candidates.push({ model, apiKey })
   }

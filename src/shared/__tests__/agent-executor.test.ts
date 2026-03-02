@@ -280,6 +280,32 @@ describe('executeAgent', () => {
       expect(result.output).toContain('OpenAI API 401: Invalid API key')
     })
 
+    it('calls Ollama OpenAI-compatible endpoint without Authorization header', async () => {
+      mockFetch.mockResolvedValue({
+        ok: true,
+        status: 200,
+        json: async () => ({
+          choices: [{ message: { content: 'Local model reply' } }]
+        })
+      })
+
+      const result = await executeAgent({
+        model: 'ollama:qwen3-coder:30b',
+        prompt: 'hello from local runtime',
+      })
+
+      expect(mockFetch).toHaveBeenCalledOnce()
+      const [url, options] = mockFetch.mock.calls[0]
+      expect(url).toBe('http://127.0.0.1:11434/v1/chat/completions')
+      const headers = (options as RequestInit).headers as Record<string, string>
+      expect(headers['Content-Type']).toBe('application/json')
+      expect(headers.Authorization).toBeUndefined()
+      const payload = JSON.parse(((options as RequestInit).body as string))
+      expect(payload.model).toBe('qwen3-coder:30b')
+      expect(result.exitCode).toBe(0)
+      expect(result.output).toBe('Local model reply')
+    })
+
     it('calls Anthropic API and extracts text blocks', async () => {
       mockFetch.mockResolvedValue({
         ok: true,

@@ -1119,6 +1119,38 @@ export function getRoom(db: Database.Database, id: number): Room | null {
   return row ? mapRoomRow(row) : null
 }
 
+export function ensureWorkerRoomMapping(
+  db: Database.Database,
+  roomId: number,
+  workerId: number
+): { room: Room; worker: Worker } {
+  const room = getRoom(db, roomId)
+  if (!room) {
+    throw new Error(
+      `Worker-room mapping invalid (room=${roomId}, worker=${workerId}): room not found in active DB. `
+      + 'This usually means mixed QUOROOM_DATA_DIR contexts.'
+    )
+  }
+
+  const worker = getWorker(db, workerId)
+  if (!worker) {
+    throw new Error(
+      `Worker-room mapping invalid (room=${roomId}, worker=${workerId}): worker not found in active DB. `
+      + 'This usually means mixed QUOROOM_DATA_DIR contexts.'
+    )
+  }
+
+  if (worker.roomId !== roomId) {
+    const actual = worker.roomId == null ? 'null' : String(worker.roomId)
+    throw new Error(
+      `Worker-room mapping invalid (room=${roomId}, worker=${workerId}): worker belongs to room=${actual}. `
+      + 'This usually means mixed QUOROOM_DATA_DIR contexts.'
+    )
+  }
+
+  return { room, worker }
+}
+
 export function getRoomByWebhookToken(db: Database.Database, token: string): Room | null {
   const row = db.prepare('SELECT * FROM rooms WHERE webhook_token = ?').get(token) as Record<string, unknown> | undefined
   return row ? mapRoomRow(row) : null
@@ -2290,6 +2322,8 @@ function mapCycleLogRow(row: Record<string, unknown>): CycleLogEntry {
 }
 
 export function createWorkerCycle(db: Database.Database, workerId: number, roomId: number, model: string | null): WorkerCycle {
+  ensureWorkerRoomMapping(db, roomId, workerId)
+
   // Safety guard: ensure at most one running cycle per worker.
   // This prevents stale "running" rows from lingering after restarts/races
   // and confusing Overview Timeline/Console.

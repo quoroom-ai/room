@@ -85,6 +85,30 @@ describe('executeTask - status checks', () => {
   })
 })
 
+describe('executeTask - worker/room mapping guard', () => {
+  it('fails fast when assigned worker does not belong to task room', async () => {
+    const roomA = queries.createRoom(db, 'Room A')
+    const roomB = queries.createRoom(db, 'Room B')
+    const workerB = queries.createWorker(db, { name: 'Worker B', systemPrompt: 'worker', roomId: roomB.id })
+    const task = queries.createTask(db, {
+      name: 'Mismatch Task',
+      prompt: 'Run with mismatch',
+      triggerType: 'manual',
+      executor: 'claude_code',
+      roomId: roomA.id,
+      workerId: workerB.id
+    })
+
+    const result = await executeTask(task.id, { db, resultsDir })
+
+    expect(result.success).toBe(false)
+    expect(result.errorMessage).toContain('Worker-room mapping invalid')
+    expect(mockExecute).not.toHaveBeenCalled()
+    const runs = queries.getTaskRuns(db, task.id, 10)
+    expect(runs[0].status).toBe('failed')
+  })
+})
+
 // ─── Cross-Process Safety ──────────────────────────────────────
 
 describe('executeTask - cross-process concurrency', () => {

@@ -1,6 +1,8 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { homedir } from 'os'
 import { join } from 'path'
+import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
 import Database from 'better-sqlite3'
 import { initTestDb } from '../../../shared/__tests__/helpers/test-db'
 import * as queries from '../../../shared/db-queries'
@@ -351,6 +353,117 @@ describe('quoroom_list_workers response', () => {
     const ada = data.find((w: Record<string, unknown>) => w.name === 'Ada')
     expect(morgan.role).toBe('Chief of Staff')
     expect(ada.role).toBeNull()
+  })
+})
+
+describe('worker prompt sync tool responses', () => {
+  it('quoroom_export_worker_prompts exports files and returns concise summary', async () => {
+    const tmpRoot = mkdtempSync(join(tmpdir(), 'mcp-worker-export-'))
+    const prev = process.env.QUOROOM_PROMPTS_ROOT
+    process.env.QUOROOM_PROMPTS_ROOT = tmpRoot
+
+    try {
+      const worker = queries.createWorker(db, {
+        name: 'Export MCP Worker',
+        systemPrompt: 'export prompt',
+      })
+
+      const handler = toolHandlers.get('quoroom_export_worker_prompts')!
+      const result = await handler({ workerIds: [worker.id] })
+      const text = getResponseText(result)
+      assertCleanResponse(text)
+      expect(text).toContain('1 written')
+
+      const filePath = join(tmpRoot, '.quoroom', 'prompts', 'workers', 'room-global', `worker-${worker.id}.md`)
+      expect(readFileSync(filePath, 'utf-8')).toContain('export prompt')
+    } finally {
+      if (prev === undefined) delete process.env.QUOROOM_PROMPTS_ROOT
+      else process.env.QUOROOM_PROMPTS_ROOT = prev
+      rmSync(tmpRoot, { recursive: true, force: true })
+    }
+  })
+
+  it('quoroom_import_worker_prompts imports files and returns concise summary', async () => {
+    const tmpRoot = mkdtempSync(join(tmpdir(), 'mcp-worker-import-'))
+    const prev = process.env.QUOROOM_PROMPTS_ROOT
+    process.env.QUOROOM_PROMPTS_ROOT = tmpRoot
+
+    try {
+      const fileDir = join(tmpRoot, '.quoroom', 'prompts', 'workers', 'room-global')
+      mkdirSync(fileDir, { recursive: true })
+      const filePath = join(fileDir, 'new.md')
+      writeFileSync(filePath, [
+        '---',
+        'version: 1',
+        'name: "Imported MCP Worker"',
+        'role: "writer"',
+        '---',
+        'mcp imported prompt',
+        ''
+      ].join('\n'))
+
+      const handler = toolHandlers.get('quoroom_import_worker_prompts')!
+      const result = await handler({ paths: [filePath] })
+      const text = getResponseText(result)
+      assertCleanResponse(text)
+      expect(text).toContain('1 created')
+      expect(queries.listWorkers(db).some(w => w.name === 'Imported MCP Worker')).toBe(true)
+    } finally {
+      if (prev === undefined) delete process.env.QUOROOM_PROMPTS_ROOT
+      else process.env.QUOROOM_PROMPTS_ROOT = prev
+      rmSync(tmpRoot, { recursive: true, force: true })
+    }
+  })
+
+  it('quoroom_export_worker_prompts returns error when room does not exist', async () => {
+    const handler = toolHandlers.get('quoroom_export_worker_prompts')!
+    const result = await handler({ roomId: 999999 })
+    const text = getResponseText(result)
+    expect(result.isError).toBe(true)
+    expect(text).toContain('No room found')
+  })
+
+  it('quoroom_import_worker_prompts reports errors and still imports valid files', async () => {
+    const tmpRoot = mkdtempSync(join(tmpdir(), 'mcp-worker-import-batch-'))
+    const outside = mkdtempSync(join(tmpdir(), 'mcp-worker-outside-'))
+    const prev = process.env.QUOROOM_PROMPTS_ROOT
+    process.env.QUOROOM_PROMPTS_ROOT = tmpRoot
+
+    try {
+      const validDir = join(tmpRoot, '.quoroom', 'prompts', 'workers', 'room-global')
+      mkdirSync(validDir, { recursive: true })
+      const validPath = join(validDir, 'valid.md')
+      writeFileSync(validPath, [
+        '---',
+        'version: 1',
+        'name: "Batch Imported"',
+        '---',
+        'batch prompt',
+        ''
+      ].join('\n'))
+
+      const outsidePath = join(outside, 'outside.md')
+      writeFileSync(outsidePath, [
+        '---',
+        'name: "Outside"',
+        '---',
+        'outside prompt',
+        ''
+      ].join('\n'))
+
+      const handler = toolHandlers.get('quoroom_import_worker_prompts')!
+      const result = await handler({ paths: [outsidePath, validPath] })
+      const text = getResponseText(result)
+      assertCleanResponse(text)
+      expect(text).toContain('1 created')
+      expect(text).toContain('1 errors')
+      expect(queries.listWorkers(db).some(w => w.name === 'Batch Imported')).toBe(true)
+    } finally {
+      if (prev === undefined) delete process.env.QUOROOM_PROMPTS_ROOT
+      else process.env.QUOROOM_PROMPTS_ROOT = prev
+      rmSync(tmpRoot, { recursive: true, force: true })
+      rmSync(outside, { recursive: true, force: true })
+    }
   })
 })
 

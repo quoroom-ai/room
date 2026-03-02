@@ -1,7 +1,7 @@
 import { useState, useRef, useEffect } from 'react'
 import { usePolling } from '../hooks/usePolling'
 import { api } from '../lib/client'
-import { getCachedToken } from '../lib/auth'
+import { APP_MODE, getCachedToken } from '../lib/auth'
 import {
   ROOM_BALANCE_EVENT_TYPES,
   ROOM_SETTINGS_REFRESH_EVENT_TYPES,
@@ -24,8 +24,8 @@ interface QueenStatus {
   running: boolean
   model: string | null
   auth: {
-    provider: 'claude_subscription' | 'codex_subscription' | 'openai_api' | 'anthropic_api'
-    mode: 'subscription' | 'api'
+    provider: 'claude_subscription' | 'codex_subscription' | 'openai_api' | 'anthropic_api' | 'gemini_api' | 'ollama_local'
+    mode: 'subscription' | 'api' | 'local'
     credentialName: string | null
     envVar: string | null
     hasCredential: boolean
@@ -94,6 +94,8 @@ interface ProviderStatusEntry {
 interface InlineSpinnerProps {
   label?: string
 }
+
+const FREE_LOCAL_MODEL_ID = 'ollama:qwen3-coder:30b'
 
 function InlineSpinner({ label = 'Applying...' }: InlineSpinnerProps): React.JSX.Element {
   return (
@@ -372,6 +374,7 @@ export function RoomSettingsPanel({ roomId }: RoomSettingsPanelProps): React.JSX
   const [keeperUserNumber, setKeeperUserNumber] = useState<string | null>(null)
   const [queenModelBusyRoomId, setQueenModelBusyRoomId] = useState<number | null>(null)
   const [queenModelFeedback, setQueenModelFeedback] = useState<Record<number, ApiKeyFeedback | null>>({})
+  const [workerModelFeedback, setWorkerModelFeedback] = useState<Record<number, ApiKeyFeedback | null>>({})
   const [providerFeedback, setProviderFeedback] = useState<Record<number, ApiKeyFeedback | null>>({})
   const [providerAuthSessions, setProviderAuthSessions] = useState<Partial<Record<ProviderName, ProviderAuthSession | null>>>({})
   const [providerInstallSessions, setProviderInstallSessions] = useState<Partial<Record<ProviderName, ProviderInstallSession | null>>>({})
@@ -388,6 +391,7 @@ export function RoomSettingsPanel({ roomId }: RoomSettingsPanelProps): React.JSX
   const [showWithdraw, setShowWithdraw] = useState(false)
   const [refreshingBalance, setRefreshingBalance] = useState(false)
   const [showSetupGuide, setShowSetupGuide] = useState(false)
+  const [setupGuideInitialPath, setSetupGuideInitialPath] = useState<'local_free' | null>(null)
   const [objectivePlaceholderIdx, setObjectivePlaceholderIdx] = useState(0)
   const [pendingSwitches, setPendingSwitches] = useState<Record<string, boolean>>({})
   const pendingSwitchTokensRef = useRef<Record<string, number>>({})
@@ -410,6 +414,7 @@ export function RoomSettingsPanel({ roomId }: RoomSettingsPanelProps): React.JSX
     if (!roomId) return
     const requestedRoom = storageGet('quoroom_setup_flow_room')
     if (requestedRoom && Number(requestedRoom) === roomId) {
+      setSetupGuideInitialPath(null)
       setShowSetupGuide(true)
       storageRemove('quoroom_setup_flow_room')
     }
@@ -724,9 +729,12 @@ export function RoomSettingsPanel({ roomId }: RoomSettingsPanelProps): React.JSX
     try {
       await api.rooms.update(room.id, { workerModel })
       refresh()
+      setWorkerModelFeedback(prev => ({ ...prev, [room.id]: null }))
     } catch (e) {
       console.error('Failed to update worker model:', e)
       optimistic(room.id, { workerModel: room.workerModel })
+      const message = e instanceof Error ? e.message : 'Failed to update worker model'
+      setWorkerModelFeedback(prev => ({ ...prev, [room.id]: { kind: 'error', text: message } }))
     }
   }
 
@@ -751,6 +759,7 @@ export function RoomSettingsPanel({ roomId }: RoomSettingsPanelProps): React.JSX
     pendingModelUpdate.current = true
     setQueenModelBusyRoomId(room.id)
     let persistedModel = false
+    let fallbackApplied = false
     try {
       await api.workers.update(room.queenWorkerId, { model: dbModel })
       persistedModel = true
@@ -764,7 +773,40 @@ export function RoomSettingsPanel({ roomId }: RoomSettingsPanelProps): React.JSX
     } catch (e) {
       console.error('Failed to update queen model:', e)
       const message = e instanceof Error ? e.message : 'Failed to update queen model'
-      if (!persistedModel) {
+      const targetIsLocal = model === 'ollama' || model.startsWith('ollama:')
+      const shouldFallbackToLocal = !targetIsLocal && room.workerModel === FREE_LOCAL_MODEL_ID
+
+      if (!persistedModel && shouldFallbackToLocal) {
+        try {
+          await api.workers.update(room.queenWorkerId, { model: FREE_LOCAL_MODEL_ID })
+          fallbackApplied = true
+          const q = await api.rooms.queenStatus(room.id).catch(() => null)
+          if (q) {
+            setQueenModel(prev => ({ ...prev, [room.id]: q.model ?? null }))
+            setQueenAuth(prev => ({ ...prev, [room.id]: q.auth }))
+          } else {
+            setQueenModel(prev => ({ ...prev, [room.id]: FREE_LOCAL_MODEL_ID }))
+          }
+          setQueenModelFeedback(prev => ({
+            ...prev,
+            [room.id]: {
+              kind: 'error',
+              text: `${message}. Switched Queen back to Free Local.`,
+            },
+          }))
+        } catch (fallbackError) {
+          const fallbackMessage = fallbackError instanceof Error ? fallbackError.message : 'Fallback to Free Local failed'
+          setQueenModel(prev => ({ ...prev, [room.id]: prevModel }))
+          setQueenAuth(prev => ({ ...prev, [room.id]: prevAuth }))
+          setQueenModelFeedback(prev => ({
+            ...prev,
+            [room.id]: {
+              kind: 'error',
+              text: `${message}. ${fallbackMessage}`,
+            },
+          }))
+        }
+      } else if (!persistedModel) {
         // Revert only when model save itself failed.
         setQueenModel(prev => ({ ...prev, [room.id]: prevModel }))
         setQueenAuth(prev => ({ ...prev, [room.id]: prevAuth }))
@@ -775,7 +817,7 @@ export function RoomSettingsPanel({ roomId }: RoomSettingsPanelProps): React.JSX
       }
     } finally {
       setQueenModelSetup(null)
-      if (persistedModel) {
+      if (persistedModel || fallbackApplied) {
         const q = await api.rooms.queenStatus(room.id).catch(() => null)
         if (q) {
           setQueenModel(prev => ({ ...prev, [room.id]: q.model ?? null }))
@@ -1006,6 +1048,9 @@ export function RoomSettingsPanel({ roomId }: RoomSettingsPanelProps): React.JSX
     { value: 'gemini:gemini-2.5-flash', label: 'Gemini 2.5 Flash (API)' },
     { value: 'gemini:gemini-2.5-pro', label: 'Gemini 2.5 Pro (API)' },
   ]
+  if (APP_MODE !== 'cloud') {
+    queenModelOptions.push({ value: FREE_LOCAL_MODEL_ID, label: 'Free Local (Qwen3 Coder 30B)' })
+  }
   if (!hasQueenModelLoaded) {
     queenModelOptions.unshift({ value: '__loading__', label: 'Loading...' })
   } else if (!queenModelOptions.some((option) => option.value === queenModelValue)) {
@@ -1018,12 +1063,20 @@ export function RoomSettingsPanel({ roomId }: RoomSettingsPanelProps): React.JSX
   const hasWorkerModelLoaded = typeof room.workerModel === 'string' && room.workerModel.trim().length > 0
   const workerModelValue = hasWorkerModelLoaded ? room.workerModel : '__loading__'
   const workerModelOptions = [
-    { value: 'queen', label: 'Use queen model' },
+    { value: 'queen', label: 'Use queen model (default)' },
   ]
+  if (APP_MODE !== 'cloud') {
+    workerModelOptions.push({ value: FREE_LOCAL_MODEL_ID, label: 'Free Local (Qwen3 Coder 30B)' })
+  }
   if (!hasWorkerModelLoaded) {
     workerModelOptions.unshift({ value: '__loading__', label: 'Loading...' })
   } else if (!workerModelOptions.some((option) => option.value === room.workerModel)) {
-    workerModelOptions.unshift({ value: room.workerModel, label: `Current: ${room.workerModel}` })
+    const currentLabel = room.workerModel === 'queen'
+      ? 'Use queen model (default)'
+      : room.workerModel === FREE_LOCAL_MODEL_ID
+        ? 'Free Local (Qwen3 Coder 30B)'
+        : `Current: ${room.workerModel}`
+    workerModelOptions.unshift({ value: room.workerModel, label: currentLabel })
   }
 
   const hasClaudeSubscription = providerStatus?.claude.connected === true
@@ -1222,7 +1275,10 @@ export function RoomSettingsPanel({ roomId }: RoomSettingsPanelProps): React.JSX
             <div className="flex items-center justify-between mb-1">
               <h3 className="text-sm font-semibold text-text-secondary">Queen</h3>
               <button
-                onClick={() => setShowSetupGuide(true)}
+                onClick={() => {
+                  setSetupGuideInitialPath(null)
+                  setShowSetupGuide(true)
+                }}
                 className="text-xs px-2 py-1 rounded-lg border border-border-primary text-text-secondary hover:bg-surface-hover"
               >
                 Setup guide
@@ -1706,7 +1762,34 @@ export function RoomSettingsPanel({ roomId }: RoomSettingsPanelProps): React.JSX
                   options={workerModelOptions}
                   disabled={!hasWorkerModelLoaded}
                 />,
-                'Choose worker model. "Use queen model" inherits whatever queen uses; API models use their own key.'
+                'Default is "Use queen model". You can switch workers to Free Local independently, even when Queen uses a paid model.'
+              )}
+              {workerModelFeedback[room.id] && (
+                <div className={`text-xs mt-1 ${
+                  workerModelFeedback[room.id]?.kind === 'success'
+                    ? 'text-status-success'
+                    : workerModelFeedback[room.id]?.kind === 'error'
+                      ? 'text-status-error'
+                      : 'text-text-muted'
+                }`}>
+                  {workerModelFeedback[room.id]?.text}
+                </div>
+              )}
+              {APP_MODE !== 'cloud' && (
+                <div className="pt-2 border-t border-border-primary mt-1">
+                  <button
+                    onClick={() => {
+                      setSetupGuideInitialPath('local_free')
+                      setShowSetupGuide(true)
+                    }}
+                    className="text-xs px-2.5 py-1.5 rounded-lg border border-border-primary text-text-secondary hover:bg-surface-hover"
+                  >
+                    Install Free Model
+                  </button>
+                  <p className="text-xs text-text-muted mt-1">
+                    Runs compatibility check, installs local runtime, and applies model to Queen + Clerk + Workers.
+                  </p>
+                </div>
               )}
             </div>
           </div>
@@ -1817,6 +1900,7 @@ export function RoomSettingsPanel({ roomId }: RoomSettingsPanelProps): React.JSX
           roomName={room.name}
           roomId={room.id}
           currentModel={queenModelValue}
+          initialPathId={setupGuideInitialPath ?? undefined}
           claude={providerStatus?.claude ? { installed: providerStatus.claude.installed, connected: providerStatus.claude.connected } : null}
           codex={providerStatus?.codex ? { installed: providerStatus.codex.installed, connected: providerStatus.codex.connected } : null}
           queenAuth={activeQueenAuth}
@@ -1829,6 +1913,17 @@ export function RoomSettingsPanel({ roomId }: RoomSettingsPanelProps): React.JSX
           onCancelInstall={async (sessionId) => { await handleProviderInstallCancel(room, sessionId) }}
           onRefreshProviders={refreshProviderStatus}
           onApplyModel={async (model) => { await handleSetQueenModel(room, model) }}
+          onApplyLocalModel={async () => {
+            const result = await api.localModel.applyAll()
+            await refresh()
+            await refreshProviderStatus()
+            setQueenModel(prev => ({ ...prev, [room.id]: result.modelId }))
+            const q = await api.rooms.queenStatus(room.id).catch(() => null)
+            if (q) {
+              setQueenModel(prev => ({ ...prev, [room.id]: q.model ?? null }))
+              setQueenAuth(prev => ({ ...prev, [room.id]: q.auth }))
+            }
+          }}
           onSaveApiKey={async (credentialName, key) => {
             await api.credentials.validate(room.id, credentialName, key)
             await api.credentials.create(room.id, credentialName, key, 'api_key')
@@ -1837,7 +1932,10 @@ export function RoomSettingsPanel({ roomId }: RoomSettingsPanelProps): React.JSX
               setQueenAuth(prev => ({ ...prev, [room.id]: q.auth }))
             }
           }}
-          onClose={() => setShowSetupGuide(false)}
+          onClose={() => {
+            setShowSetupGuide(false)
+            setSetupGuideInitialPath(null)
+          }}
         />
       )}
 

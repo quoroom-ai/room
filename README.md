@@ -339,6 +339,16 @@ The room engine exposes an MCP server over stdio. All tools use the `quoroom_` p
 | `quoroom_list_workers` | List all workers |
 | `quoroom_update_worker` | Update a worker's configuration |
 | `quoroom_delete_worker` | Delete a worker |
+| `quoroom_export_worker_prompts` | Export worker prompts to markdown files |
+| `quoroom_import_worker_prompts` | Import worker prompts from markdown files |
+
+#### Worker Prompt Markdown Sync
+
+- Runtime source of truth stays in SQLite (`workers.system_prompt`).
+- Markdown sync is explicit (no background watcher): export/import via Workers UI, HTTP API, or MCP tools.
+- Default path: `.quoroom/prompts/workers/room-<roomId|global>/worker-<workerId>.md`.
+- File format: YAML frontmatter + markdown body (body becomes full system prompt).
+- Conflict policy: newest mtime wins unless `force=true` is passed on import/export.
 
 ### Task Scheduling
 

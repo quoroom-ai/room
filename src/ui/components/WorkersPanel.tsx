@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import { usePolling } from '../hooks/usePolling'
 import { useWebSocket } from '../hooks/useWebSocket'
 import { api } from '../lib/client'
-import type { Worker } from '@shared/types'
+import type { Worker, WorkerPromptExportResponse, WorkerPromptImportResponse } from '@shared/types'
 import { WORKER_TEMPLATES, type WorkerTemplatePreset } from '@shared/worker-templates'
 import { WORKER_ROLE_PRESETS } from '@shared/constants'
 import { AutoModeLockModal, AUTO_MODE_LOCKED_BUTTON_CLASS, modeAwareButtonClass, useAutonomyControlGate } from './AutonomyControlGate'
@@ -45,6 +45,8 @@ export function WorkersPanel({ roomId, autonomyMode }: WorkersPanelProps): React
   const [editUseDefaultMaxTurns, setEditUseDefaultMaxTurns] = useState(true)
 
   const [confirmDeleteId, setConfirmDeleteId] = useState<number | null>(null)
+  const [syncMessage, setSyncMessage] = useState<string | null>(null)
+  const [syncBusy, setSyncBusy] = useState(false)
   const roomDefaults = room ? {
     queenCycleGapMs: room.queenCycleGapMs,
     queenMaxTurns: room.queenMaxTurns,
@@ -95,6 +97,50 @@ export function WorkersPanel({ roomId, autonomyMode }: WorkersPanelProps): React
     if (ms % 60_000 === 0) return `${ms / 60_000}m`
     if (ms % 1_000 === 0) return `${ms / 1_000}s`
     return `${ms}ms`
+  }
+
+  function summarizeExport(result: WorkerPromptExportResponse): string {
+    return `Exported prompts: ${result.summary.written} written, ${result.summary.skipped} skipped, ${result.summary.errors} errors.`
+  }
+
+  function summarizeImport(result: WorkerPromptImportResponse): string {
+    return `Imported prompts: ${result.summary.updated} updated, ${result.summary.created} created, ${result.summary.skipped} skipped, ${result.summary.errors} errors.`
+  }
+
+  function getErrorMessage(err: unknown): string {
+    return err instanceof Error ? err.message : String(err)
+  }
+
+  async function handleExportPrompts(workerIds?: number[]): Promise<void> {
+    setSyncBusy(true)
+    try {
+      const result = await api.workers.exportPrompts({
+        roomId: roomId ?? undefined,
+        workerIds,
+        force: false,
+      })
+      setSyncMessage(`${summarizeExport(result)} Root: ${result.rootDir}`)
+    } catch (err) {
+      setSyncMessage(`Export failed: ${getErrorMessage(err)}`)
+    } finally {
+      setSyncBusy(false)
+    }
+  }
+
+  async function handleImportPrompts(): Promise<void> {
+    setSyncBusy(true)
+    try {
+      const result = await api.workers.importPrompts({
+        roomId: roomId ?? undefined,
+        force: false,
+      })
+      setSyncMessage(`${summarizeImport(result)} Root: ${result.rootDir}`)
+      refresh()
+    } catch (err) {
+      setSyncMessage(`Import failed: ${getErrorMessage(err)}`)
+    } finally {
+      setSyncBusy(false)
+    }
   }
 
   async function handleCreate(): Promise<void> {
@@ -202,6 +248,23 @@ export function WorkersPanel({ roomId, autonomyMode }: WorkersPanelProps): React
         >
           {showCreate ? 'Cancel' : '+ New Worker'}
         </button>
+        <button
+          onClick={() => guard(() => void handleExportPrompts())}
+          disabled={syncBusy}
+          className={`text-xs px-2.5 py-1.5 rounded-lg ${modeAwareButtonClass(semi, 'bg-interactive text-text-invert hover:bg-interactive-hover')} disabled:opacity-60 disabled:cursor-not-allowed`}
+        >
+          Export Prompts
+        </button>
+        <button
+          onClick={() => guard(() => void handleImportPrompts())}
+          disabled={syncBusy}
+          className={`text-xs px-2.5 py-1.5 rounded-lg ${modeAwareButtonClass(semi, 'bg-interactive text-text-invert hover:bg-interactive-hover')} disabled:opacity-60 disabled:cursor-not-allowed`}
+        >
+          Import Prompts
+        </button>
+        {syncMessage && (
+          <span className="text-xs text-text-muted break-all">{syncMessage}</span>
+        )}
       </div>
 
       {semi && showCreate && (
@@ -357,6 +420,7 @@ export function WorkersPanel({ roomId, autonomyMode }: WorkersPanelProps): React
                         <textarea value={editPrompt} onChange={(e) => setEditPrompt(e.target.value)} rows={12} className="w-full px-2.5 py-1.5 text-sm border border-border-primary rounded-lg focus:outline-none focus:border-text-muted bg-surface-primary text-text-primary placeholder:text-text-muted font-mono resize-y" placeholder="System prompt" />
                         <div className="flex gap-2">
                           <button onClick={() => handleSave(worker.id)} className="text-sm bg-interactive text-text-invert px-4 py-2 rounded-lg hover:bg-interactive-hover">Save</button>
+                          <button onClick={() => void handleExportPrompts([worker.id])} className="text-sm bg-interactive text-text-invert px-4 py-2 rounded-lg hover:bg-interactive-hover">Export MD</button>
                           {!worker.isDefault && (
                             <button
                               onClick={() => handleSetDefault(worker.id)}
@@ -400,6 +464,12 @@ export function WorkersPanel({ roomId, autonomyMode }: WorkersPanelProps): React
                           {worker.systemPrompt}
                         </pre>
                         <div className="flex gap-2 flex-wrap">
+                          <button
+                            onClick={() => void handleExportPrompts([worker.id])}
+                            className="text-xs px-2.5 py-1.5 rounded-lg bg-interactive text-text-invert hover:bg-interactive-hover"
+                          >
+                            Export MD
+                          </button>
                           <button
                             onClick={requestSemiMode}
                             className={`text-xs px-2.5 py-1.5 rounded-lg ${AUTO_MODE_LOCKED_BUTTON_CLASS}`}

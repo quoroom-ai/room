@@ -8,6 +8,8 @@ import { shouldDistill, distillLearnedContext } from './learned-context'
 import { detectRateLimit, sleep, RATE_LIMIT_MAX_RETRIES } from './rate-limit'
 import type Database from 'better-sqlite3'
 import type { Task } from './types'
+import { getModelProvider } from './model-provider'
+import { buildOllamaUnavailableMessage, probeOllamaRuntime } from './local-model'
 
 export interface TaskExecutionOptions {
   db: Database.Database
@@ -326,6 +328,18 @@ export async function executeTask(
     }
   }
 
+  if (task.workerId != null && task.roomId != null) {
+    try {
+      queries.ensureWorkerRoomMapping(db, task.roomId, task.workerId)
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err)
+      const run = queries.createTaskRun(db, taskId)
+      queries.completeTaskRun(db, run.id, '', undefined, msg)
+      onFailed?.(task, msg)
+      return { success: false, output: '', errorMessage: msg, durationMs: Date.now() - startTime }
+    }
+  }
+
   // ─── Resolve worker model EARLY to decide execution path ──────
   // worker.model > room.workerModel > 'claude' (default)
   let systemPrompt: string | undefined
@@ -359,6 +373,19 @@ export async function executeTask(
     }
   } catch (err) {
     console.warn('Non-fatal: worker resolution failed:', err)
+  }
+
+  const effectiveModel = (model ?? 'claude').trim()
+  const provider = getModelProvider(effectiveModel)
+  if (provider === 'ollama_local') {
+    const local = probeOllamaRuntime()
+    if (!local.ready) {
+      const msg = buildOllamaUnavailableMessage(local)
+      const run = queries.createTaskRun(db, taskId)
+      queries.completeTaskRun(db, run.id, '', undefined, msg)
+      onFailed?.(task, msg)
+      return { success: false, output: '', errorMessage: msg, durationMs: Date.now() - startTime }
+    }
   }
 
   // ─── Runtime-host execution path (local mode local machine; cloud mode swarm host) ───

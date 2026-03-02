@@ -81,4 +81,28 @@ describe('executeClerkWithFallback', () => {
     expect(result.error).toContain('Fatal validation error')
     expect(mockExecuteAgent).toHaveBeenCalledTimes(1)
   })
+
+  it('does not fallback to paid providers when preferred model is local ollama', async () => {
+    mockExecuteAgent.mockResolvedValueOnce({
+      output: 'Local runtime unavailable',
+      exitCode: 1,
+      durationMs: 120,
+      sessionId: null,
+      timedOut: false,
+      usage: { inputTokens: 12, outputTokens: 0 }
+    })
+
+    const result = await executeClerkWithFallback({
+      db,
+      preferredModel: 'ollama:qwen3-coder:30b',
+      prompt: 'do work',
+      systemPrompt: 'system'
+    })
+
+    expect(result.ok).toBe(false)
+    expect(result.model).toBe('ollama:qwen3-coder:30b')
+    expect(result.attempts).toHaveLength(1)
+    expect(mockExecuteAgent).toHaveBeenCalledTimes(1)
+    expect(mockExecuteAgent.mock.calls[0][0]).toMatchObject({ model: 'ollama:qwen3-coder:30b' })
+  })
 })
