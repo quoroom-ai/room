@@ -21,6 +21,7 @@ In the dashboard, open the **Clerk** tab and click **Setup**.
 
 Available model paths:
 
+- `ollama:qwen3-coder:30b` (Free Local path, local deployment mode only)
 - `claude` (Claude subscription path)
 - `codex` (Codex/ChatGPT subscription path)
 - `openai:gpt-4o-mini` (OpenAI API path)
@@ -28,6 +29,8 @@ Available model paths:
 - `gemini:gemini-2.5-flash` (Gemini API path)
 
 For API paths, Clerk Setup validates keys before storing them.
+
+For the free local path, Clerk Setup runs a compatibility gate first, then one-click installs Ollama and pulls `qwen3-coder:30b` with live progress logs. No API key is required.
 
 ## API Key Resolution Order
 
@@ -85,3 +88,4 @@ Route implementation: `src/server/routes/clerk.ts`.
 - Clerk says key missing: add key in Clerk Setup, set `OPENAI_API_KEY` / `ANTHROPIC_API_KEY` / `GEMINI_API_KEY`, or add room credential in Room Settings (Clerk can reuse it)
 - Commentary not appearing: confirm rooms are active and generating cycle events, check `clerk_commentary_enabled` is not `false`, and wait at least 60 seconds after your last Clerk message
 - Clerk not responding: confirm a model is selected in Clerk Setup and check provider availability in Settings/server logs
+- Free local path unavailable: confirm deployment mode is local, Ollama daemon is running, and model `qwen3-coder:30b` is pulled

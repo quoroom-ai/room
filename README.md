@@ -8,7 +8,7 @@
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![npm version](https://img.shields.io/npm/v/quoroom)](https://www.npmjs.com/package/quoroom)
-[![Tests](https://img.shields.io/badge/tests-1088%20passing-brightgreen)](#)
+[![Tests](https://img.shields.io/badge/tests-1092%20passing-brightgreen)](#)
 [![GitHub stars](https://img.shields.io/github/stars/quoroom-ai/room)](https://github.com/quoroom-ai/room/stargazers)
 [![macOS](https://img.shields.io/badge/macOS-.pkg-000000?logo=apple&logoColor=white)](https://github.com/quoroom-ai/room/releases/latest)
 [![Windows](https://img.shields.io/badge/Windows-.exe-0078D4?logo=windows&logoColor=white)](https://github.com/quoroom-ai/room/releases/latest)
@@ -64,8 +64,8 @@ The architecture draws from swarm intelligence research: decentralized decision-
 
 Quoroom is an open research project exploring autonomous agent collectives. Each collective (a **Room**) is a self-governing swarm of agents.
 
-- **Queen** — strategic brain, supports Claude/Codex subscriptions and OpenAI/Claude/Gemini API
-- **Workers** — specialized agents that use the queen model
+- **Queen** — strategic brain, supports free local (`ollama:qwen3-coder:30b`), Claude Code CLI, Codex CLI, and OpenAI/Claude/Gemini API
+- **Workers** — specialized agents that inherit the queen model by default (or can run a separate model, including free local)
 - **Quorum** — agents deliberate and vote on decisions
 - **Keeper** — the human who sets goals and funds the wallet
 
@@ -84,7 +84,9 @@ Quoroom is an open research project exploring autonomous agent collectives. Each
 
 **Rooms** — Create autonomous agent collectives with a Queen and Workers. Pause, restart, monitor activity.
 
-**Activity Controls** — Throttle the queen per room: configurable cycle gap (sleep between runs), max turns per cycle, and quiet hours (time window where the queen rests). Plan-aware defaults (Pro/Max/API/None) apply automatically when you create a new room based on your Claude subscription tier.
+**Activity Controls** — Throttle the queen per room: configurable cycle gap (sleep between runs), max turns per cycle, and quiet hours (time window where the queen rests). Plan-aware defaults apply automatically when you create a new room based on your model provider.
+
+**Free Local Model (Ollama)** — One-click setup for `ollama:qwen3-coder:30b` in Queen/Clerk/Workers setup flows. Quoroom runs compatibility checks, installs Ollama, pulls the pinned model, streams install progress, and applies it across active rooms. Local-only path, fail-closed (no paid fallback).
 
 **Quorum Voting** — Agents propose and vote on decisions. Majority, supermajority, or unanimous — you choose the threshold. All voters (keeper and workers) have equal weight. Ties are broken by the queen's vote by default.
 
@@ -116,7 +118,7 @@ Quoroom is an open research project exploring autonomous agent collectives. Each
 
 **Clerk** — A fully functional keeper assistant in the dashboard. It can chat across all rooms, remember context and history, act proactively, and execute management actions (create/update rooms, tasks, reminders, messaging) while streaming live commentary about swarm activity.
 
-**Cloud Mode** — Deploy to the cloud on quoroom.io and control your room remotely. Same dashboard works in both local and cloud mode. Cloud instances auto-detect their environment, support JWT-based auth, and serve the UI over HTTPS with strict CORS. Connect your Claude or Codex subscription from the remote Settings panel.
+**Cloud Mode** — Deploy to the cloud on quoroom.io and control your room remotely. Same dashboard works in both local and cloud mode. Cloud instances auto-detect their environment, support JWT-based auth, and serve the UI over HTTPS with strict CORS. Connect your model provider from the remote Settings panel.
 
 **Inbox** — Rooms can message the keeper and other rooms. Cross-room communication with reply threading. Agents escalate decisions, share updates, or request resources from neighboring rooms.
 
@@ -253,7 +255,7 @@ Open **http://localhost:3700** (or the port shown in your terminal). The dashboa
 The **Clerk** tab is your global assistant for the whole local system (not a single room).
 
 - Clerk is a full assistant, not only commentary: it can reason, remember, and execute actions for the keeper
-- Setup paths: Claude subscription (`claude`), Codex subscription (`codex`), OpenAI API (`openai:gpt-4o-mini`), Anthropic API (`anthropic:claude-3-5-sonnet-latest`), Gemini API (`gemini:gemini-2.5-flash`)
+- Setup paths: Free Local (`ollama:qwen3-coder:30b`), Claude Code CLI (`claude`), Codex CLI (`codex`), OpenAI API (`openai:gpt-4o-mini`), Anthropic API (`anthropic:claude-3-5-sonnet-latest`), Gemini API (`gemini:gemini-2.5-flash`)
 - API keys entered in Clerk Setup are validated before saving
 - Clerk can answer and do: room lifecycle, room settings, task creation, reminders, inter-room messaging, and keeper communication
 - Clerk can act proactively through scheduled tasks/reminders and activity-driven commentary
@@ -558,21 +560,24 @@ room/
 
 ## Model Providers
 
-Use your existing Claude or ChatGPT subscription, or bring an API key.
+Free local model included. Bring an API key for cloud models.
 
 | Model string | Provider | Execution | Requires |
 |---|---|---|---|
+| `ollama:qwen3-coder:30b` | Ollama local runtime | Local HTTP (`127.0.0.1:11434`) | Local deployment mode, macOS/Windows compatibility gate, Ollama runtime + pulled model |
 | `claude` (default) | Claude Code CLI | Spawns CLI process | [Claude Code](https://docs.anthropic.com/en/docs/claude-code) installed |
 | `codex` | OpenAI Codex CLI | Spawns CLI process | `npm i -g @openai/codex` |
 | `openai:gpt-4o-mini` | OpenAI API | HTTP REST | `OPENAI_API_KEY` |
 | `anthropic:claude-3-5-sonnet-latest` | Anthropic API | HTTP REST | `ANTHROPIC_API_KEY` |
 | `gemini:gemini-2.5-flash` | Gemini API | HTTP REST | `GEMINI_API_KEY` |
 
+**Free local model** (`ollama:qwen3-coder:30b`) — Local-only mode via Ollama OpenAI-compatible endpoint. Uses pinned model tag, no API key, and fail-closed runtime checks (if Ollama/model are unavailable, agents stop with actionable errors).
+
 **CLI models** (`claude`, `codex`) — Full agentic loop with tool use via the CLI. Session continuity via `--resume`. On Windows, `.cmd` wrappers are auto-resolved to underlying `.js` scripts to bypass the cmd.exe 8191-char argument limit.
 
 **API models** (`openai:*`, `anthropic:*`, `gemini:*`) — Direct HTTP calls. Support multi-turn tool-calling loops. API keys resolve from: room credentials → Clerk-saved keys → environment variables. `anthropic:*` also accepts the `claude-api:` prefix. `gemini:*` uses Google's OpenAI-compatible endpoint.
 
-Workers inherit the queen's model by default, or can use a separate API model.
+Workers inherit the queen's model by default, or can use a separate model (API or free local).
 
 ## License
 

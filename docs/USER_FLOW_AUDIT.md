@@ -25,7 +25,7 @@ After creating a room:
 1. User is routed to Room Settings automatically.
 2. A setup popup appears once for that newly created room.
 3. Popup guides keeper through:
-- choose setup path (Claude sub / Codex sub / OpenAI API / Anthropic API)
+- choose setup path (Free Local / Claude sub / Codex sub / OpenAI API / Anthropic API / Gemini API)
 - review required prerequisites and likely outcome
 - apply selected model path directly
 4. Keeper can reopen the same setup popup later via Room Settings -> Queen -> "Setup guide".
@@ -38,7 +38,16 @@ Why this matters:
 
 When configuring a new room, model/provider choice changes reliability, cost, and required keeper actions:
 
-1. Claude subscription path (`model=claude` or other Claude subscription variants)
+1. Free local path (`model=ollama:qwen3-coder:30b`)
+- Keeper action:
+  - Run in local deployment mode.
+  - Pass compatibility checks (OS, RAM, disk, CPU).
+  - Use one-click install/apply from setup popup.
+- Outcome:
+  - No API key required.
+  - Pinned local model path with fail-closed behavior.
+
+2. Claude subscription path (`model=claude` or other Claude subscription variants)
 - Keeper action:
   - Ensure Claude CLI is installed.
   - Connect via Room Settings -> Queen -> Status -> Connect.
@@ -46,21 +55,21 @@ When configuring a new room, model/provider choice changes reliability, cost, an
   - Usually best quality + lowest setup friction when subscription exists.
   - No API key maintenance in room credentials.
 
-2. Codex subscription path (`model=codex`)
+3. Codex subscription path (`model=codex`)
 - Keeper action:
   - Ensure Codex CLI is installed.
   - Connect via Room Settings -> Queen -> Status -> Connect.
 - Outcome:
   - Strong coding behavior, simple auth flow for ChatGPT/Codex subscribers.
 
-3. OpenAI API path (`model=openai:gpt-4o-mini`)
+4. OpenAI API path (`model=openai:gpt-4o-mini`)
 - Keeper action:
   - Add/validate `openai_api_key` in room credentials.
 - Outcome:
   - Key-based billing control, deterministic API ownership.
   - Fails closed if key missing/invalid.
 
-4. Anthropic API path (`model=anthropic:claude-3-5-sonnet-latest`)
+5. Anthropic API path (`model=anthropic:claude-3-5-sonnet-latest`)
 - Keeper action:
   - Add/validate `anthropic_api_key` in room credentials.
 - Outcome:

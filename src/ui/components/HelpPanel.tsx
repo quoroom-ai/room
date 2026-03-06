@@ -48,7 +48,10 @@ export function HelpPanel({ onStartWalkthrough }: HelpPanelProps): React.JSX.Ele
                 ? 'Hosted server, SQLite database.'
                 : <>Server at <span className="font-mono text-text-secondary">localhost:3700</span>, SQLite database.</>
               }{' '}
-              Queen and workers support Claude, Codex, OpenAI, and Anthropic API models.
+              {APP_MODE === 'cloud'
+                ? 'Queen and workers support Claude, Codex, OpenAI, Anthropic, and Gemini API models.'
+                : 'Queen and workers support Free Local (Qwen3 Coder 30B via Ollama), Claude, Codex, OpenAI, Anthropic, and Gemini API models.'
+              }
             </p>
             <p className="text-xs text-text-muted">
               {APP_MODE === 'cloud'

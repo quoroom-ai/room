@@ -7,7 +7,9 @@ const isCloud = APP_MODE === 'cloud'
 const steps = [
   {
     title: 'You are the Keeper',
-    body: 'Your room is a swarm of AI agents. A Queen is created automatically when you start - pick her brain in Settings: Claude, Codex, OpenAI, or Anthropic API.',
+    body: isCloud
+      ? 'Your room is a swarm of AI agents. A Queen is created automatically when you start - pick her brain in Settings: Claude, Codex, OpenAI, Anthropic, or Gemini API.'
+      : 'Your room is a swarm of AI agents. A Queen is created automatically when you start - pick her brain in Settings: Free Local (Qwen3 Coder 30B), Claude, Codex, OpenAI, Anthropic, or Gemini API.',
   },
   {
     title: 'The Queen leads',
