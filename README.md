@@ -574,6 +574,31 @@ Use your existing Claude or ChatGPT subscription, or bring an API key.
 
 Workers inherit the queen's model by default, or can use a separate API model.
 
+## Telemetry and Machine ID
+
+Quoroom includes optional anonymous telemetry to help improve the product.
+
+### Machine ID Generation
+- **Purpose**: Unique, anonymous identifier for telemetry aggregation
+- **Generation**: Cryptographically secure random ID (24 hex characters)
+- **Storage**: 
+  - Primary: `~/.quoroom/machine-id`
+  - Fallback: `/tmp/.quoroom-machine-id` (for Docker/containers)
+  - Ephemeral: In-memory only if all persistence fails
+- **Privacy**: 
+  - ID is **not** derived from hostname, username, or any system identifier
+  - ID cannot be reversed to reveal your identity
+  - ID is not shared with any third party
+  - Telemetry data is anonymous by design
+
+### Disabling Telemetry
+Set the environment variable `QUOROOM_TELEMETRY_TOKEN=` (empty) to disable telemetry completely.
+
+### Migration Note
+As of version X.X.X, machine ID generation has been hardened to use random IDs instead of hostname-based IDs. This is a security improvement that resets the anonymous identifier for all users. Historical telemetry data cannot be linked to new data, which is intentional for privacy protection.
+
+---
+
 ## License
 
 MIT License. See [LICENSE](LICENSE) for details.
