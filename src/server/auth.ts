@@ -15,6 +15,13 @@
  * 3. Browser calls GET /api/auth/handshake (Origin must be localhost) → receives user token
  * 4. All /api/* requests require Authorization: Bearer <token>
  * 5. WebSocket connects with ws://localhost:PORT/ws?token=<token>
+ *
+ * Cloud / Docker deployments:
+ * - Set QUOROOM_DEPLOYMENT_MODE=cloud to enable cloud mode
+ * - Set QUOROOM_ALLOWED_ORIGINS=https://yourdomain.com,https://other.com to allow
+ *   custom origins (comma-separated). Falls back to DEFAULT_CLOUD_ALLOWED_ORIGINS.
+ * - Set QUOROOM_CLOUD_JWT_SECRET for cloud JWT validation
+ * - Set QUOROOM_CLOUD_INSTANCE_ID to scope tokens to a specific instance
  */
 
 import crypto from 'node:crypto'
@@ -60,12 +67,19 @@ function normalizeOrigin(origin: string): string {
 }
 
 function getCloudAllowedOrigins(): Set<string> {
-  const configured = (process.env.QUOROOM_ALLOWED_ORIGINS || '')
-    .split(',')
-    .map(s => normalizeOrigin(s.trim()))
-    .filter(Boolean)
-  const origins = configured.length > 0 ? configured : DEFAULT_CLOUD_ALLOWED_ORIGINS
-  return new Set(origins.map(normalizeOrigin).filter(Boolean))
+  // QUOROOM_ALLOWED_ORIGINS takes precedence over the built-in default list,
+  // allowing Docker / cloud operators to configure custom frontend domains.
+  const envValue = (process.env.QUOROOM_ALLOWED_ORIGINS || '').trim()
+  if (envValue) {
+    const configured = envValue
+      .split(',')
+      .map(s => normalizeOrigin(s.trim()))
+      .filter(Boolean)
+    if (configured.length > 0) {
+      return new Set(configured)
+    }
+  }
+  return new Set(DEFAULT_CLOUD_ALLOWED_ORIGINS.map(normalizeOrigin).filter(Boolean))
 }
 
 function getCloudJwtSecret(): string {

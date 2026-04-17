@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react'
 import { storageSet } from '../lib/storage'
-import { API_BASE } from '../lib/auth'
+import { API_BASE, APP_MODE } from '../lib/auth'
 import {
   detectPlatform,
   pickLatestStableRelease,
@@ -59,7 +59,95 @@ function useReleaseAssets(): { assets: ReleaseAssets; releaseUrl: string } {
   return { assets, releaseUrl }
 }
 
+function CloudErrorPage({ onRetry }: { onRetry: () => void }): React.JSX.Element {
+  const [retrying, setRetrying] = useState(false)
+
+  function handleRetry(): void {
+    setRetrying(true)
+    onRetry()
+  }
+
+  return (
+    <div className="flex flex-col h-screen bg-surface-primary items-center justify-center px-4 overflow-y-auto">
+      <div className="max-w-sm w-full py-8 space-y-6 text-center">
+        {/* Title */}
+        <div>
+          <h1 className="text-xl font-bold text-text-primary">Quoroom</h1>
+          <p className="text-sm text-text-muted mt-1">Autonomous AI agent collective engine</p>
+        </div>
+
+        {/* Status */}
+        <div className="bg-surface-secondary rounded-lg p-4 space-y-2 shadow-sm">
+          <div className="flex items-center justify-center gap-2">
+            <span className="w-2 h-2 rounded-full bg-status-error" />
+            <span className="text-sm text-status-error font-medium">Server not reachable</span>
+          </div>
+          <p className="text-xs text-text-muted">
+            The Quoroom server could not be reached. It may be starting up, restarting, or
+            experiencing an issue. Please wait a moment and try again.
+          </p>
+        </div>
+
+        {/* Retry */}
+        <div className="space-y-2">
+          <button
+            onClick={handleRetry}
+            disabled={retrying}
+            className="block w-full py-3 text-sm font-medium text-text-invert bg-interactive hover:bg-interactive-hover rounded-lg transition-colors shadow-sm disabled:opacity-40"
+          >
+            {retrying ? 'Connecting...' : 'Retry Connection'}
+          </button>
+          <p className="text-xs text-text-muted">
+            If this persists, check the server logs or restart the Docker container.
+          </p>
+        </div>
+
+        {/* Help */}
+        <div className="bg-surface-secondary rounded-lg p-4 text-left space-y-2 shadow-sm">
+          <p className="text-xs font-medium text-text-muted uppercase tracking-wide">Troubleshooting</p>
+          <ul className="space-y-1.5">
+            {[
+              'Ensure the Docker container is running and healthy',
+              'Check that QUOROOM_DEPLOYMENT_MODE=cloud is set',
+              'Verify the container port mapping (default: 3700)',
+              'Review container logs: docker logs <container>',
+            ].map((tip, i) => (
+              <li key={i} className="flex items-start gap-2">
+                <span className="text-xs text-text-muted font-mono mt-0.5 shrink-0">{i + 1}.</span>
+                <span className="text-sm text-text-secondary">{tip}</span>
+              </li>
+            ))}
+          </ul>
+        </div>
+
+        {/* Links */}
+        <div className="flex items-center justify-center gap-3">
+          <a href="https://github.com/quoroom-ai/room" target="_blank" rel="noopener noreferrer" className="text-xs text-text-muted hover:text-text-secondary">GitHub</a>
+          <span className="text-border-primary">|</span>
+          <a href="https://github.com/quoroom-ai/room/issues/new" target="_blank" rel="noopener noreferrer" className="text-xs text-text-muted hover:text-text-secondary">Report Bug</a>
+          <span className="text-border-primary">|</span>
+          <button
+            onClick={() => window.open('mailto:hello@email.quoroom.ai?subject=Cloud connection issue&body=I am having trouble connecting to my Quoroom cloud deployment.')}
+            className="text-xs text-text-muted hover:text-text-secondary"
+          >
+            Email Developer
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 export function ConnectPage({ port, onRetry }: ConnectPageProps): React.JSX.Element {
+  // In cloud mode, show a cloud-specific error page instead of the local download prompt
+  if (APP_MODE === 'cloud') {
+    return <CloudErrorPage onRetry={onRetry} />
+  }
+
+  return <LocalConnectPage port={port} onRetry={onRetry} />
+}
+
+function LocalConnectPage({ port, onRetry }: ConnectPageProps): React.JSX.Element {
   const [editPort, setEditPort] = useState(port)
   const [retrying, setRetrying] = useState(false)
   const [restarting, setRestarting] = useState(false)
