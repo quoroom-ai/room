@@ -1,3 +1,5 @@
+[![MseeP.ai Security Assessment Badge](https://mseep.net/pr/quoroom-ai-room-badge.png)](https://mseep.ai/app/quoroom-ai-room)
+
 <p align="center">
   <a href="https://quoroom.ai">
     <img src="docs/banner.png?v=3" alt="Quoroom — Swarm Intelligence. Relentless Execution." width="100%">
