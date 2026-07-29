@@ -19,7 +19,7 @@ import {
   type ClerkProjectDocSpec,
 } from '../shared/clerk-profile-config'
 
-export type ClerkApiProvider = 'openai_api' | 'anthropic_api' | 'gemini_api'
+export type ClerkApiProvider = 'openai_api' | 'anthropic_api' | 'gemini_api' | 'minimax_api'
 
 export interface ClerkApiAuthState {
   hasRoomCredential: boolean
@@ -57,7 +57,7 @@ export interface ClerkExecutionOutcome {
 let lastProjectDocSyncAt = 0
 let lastProjectDocSnapshot = 'Project docs memory not synced yet.'
 
-function findAnyRoomCredential(db: Database.Database, credentialName: 'openai_api_key' | 'anthropic_api_key' | 'gemini_api_key'): string | null {
+function findAnyRoomCredential(db: Database.Database, credentialName: 'openai_api_key' | 'anthropic_api_key' | 'gemini_api_key' | 'minimax_api_key'): string | null {
   const rooms = queries.listRooms(db)
   for (const room of rooms) {
     const credential = queries.getCredentialByName(db, room.id, credentialName)
@@ -77,8 +77,20 @@ function maskKey(key: string | null): string | null {
 }
 
 function getClerkApiAuthState(db: Database.Database, provider: ClerkApiProvider): ClerkApiAuthState {
-  const credentialName = provider === 'openai_api' ? 'openai_api_key' : provider === 'gemini_api' ? 'gemini_api_key' : 'anthropic_api_key'
-  const envVar = provider === 'openai_api' ? 'OPENAI_API_KEY' : provider === 'gemini_api' ? 'GEMINI_API_KEY' : 'ANTHROPIC_API_KEY'
+  const credentialName = provider === 'openai_api'
+    ? 'openai_api_key'
+    : provider === 'gemini_api'
+      ? 'gemini_api_key'
+      : provider === 'minimax_api'
+        ? 'minimax_api_key'
+        : 'anthropic_api_key'
+  const envVar = provider === 'openai_api'
+    ? 'OPENAI_API_KEY'
+    : provider === 'gemini_api'
+      ? 'GEMINI_API_KEY'
+      : provider === 'minimax_api'
+        ? 'MINIMAX_API_KEY'
+        : 'ANTHROPIC_API_KEY'
   const roomCredential = findAnyRoomCredential(db, credentialName)
   const savedKey = queries.getClerkApiKey(db, provider)
   const envKey = (process.env[envVar] || '').trim() || null
@@ -92,11 +104,12 @@ function getClerkApiAuthState(db: Database.Database, provider: ClerkApiProvider)
   }
 }
 
-export function getClerkApiAuth(db: Database.Database): { openai: ClerkApiAuthState; anthropic: ClerkApiAuthState; gemini: ClerkApiAuthState } {
+export function getClerkApiAuth(db: Database.Database): { openai: ClerkApiAuthState; anthropic: ClerkApiAuthState; gemini: ClerkApiAuthState; minimax: ClerkApiAuthState } {
   return {
     openai: getClerkApiAuthState(db, 'openai_api'),
     anthropic: getClerkApiAuthState(db, 'anthropic_api'),
     gemini: getClerkApiAuthState(db, 'gemini_api'),
+    minimax: getClerkApiAuthState(db, 'minimax_api'),
   }
 }
 
@@ -136,6 +149,11 @@ export function resolveClerkApiKey(db: Database.Database, model: string | null |
     return findAnyRoomCredential(db, 'gemini_api_key')
       || queries.getClerkApiKey(db, 'gemini_api')
       || (process.env.GEMINI_API_KEY || undefined)
+  }
+  if (provider === 'minimax_api') {
+    return findAnyRoomCredential(db, 'minimax_api_key')
+      || queries.getClerkApiKey(db, 'minimax_api')
+      || (process.env.MINIMAX_API_KEY || undefined)
   }
   return undefined
 }

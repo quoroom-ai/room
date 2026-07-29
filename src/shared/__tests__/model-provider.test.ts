@@ -15,6 +15,7 @@ describe('model-provider', () => {
     delete process.env.OPENAI_API_KEY
     delete process.env.ANTHROPIC_API_KEY
     delete process.env.GEMINI_API_KEY
+    delete process.env.MINIMAX_API_KEY
   })
 
   it('detects provider type from model string', () => {
@@ -27,6 +28,14 @@ describe('model-provider', () => {
     expect(getModelProvider('gemini:gemini-2.5-flash')).toBe('gemini_api')
     expect(getModelProvider('gemini:gemini-2.5-pro')).toBe('gemini_api')
     expect(getModelProvider('ollama:qwen3-coder:30b')).toBe('ollama_local')
+  })
+
+  it('detects MiniMax provider from OpenAI-compatible and Anthropic-compatible model strings', () => {
+    expect(getModelProvider('minimax')).toBe('minimax_api')
+    expect(getModelProvider('minimax:MiniMax-M3')).toBe('minimax_api')
+    expect(getModelProvider('minimax:MiniMax-M2.7')).toBe('minimax_api')
+    expect(getModelProvider('minimax-anthropic')).toBe('minimax_api')
+    expect(getModelProvider('minimax-anthropic:MiniMax-M2.7')).toBe('minimax_api')
   })
 
   it('returns api auth readiness from room credentials', async () => {
@@ -101,5 +110,24 @@ describe('model-provider', () => {
     expect(status.hasCredential).toBe(false)
     expect(status.hasEnvKey).toBe(false)
     expect(typeof status.ready).toBe('boolean')
+  })
+
+  it('minimax_api returns api auth readiness from room credentials', async () => {
+    q.createCredential(db, roomId, 'minimax_api_key', 'api_key', 'mm-room')
+    const status = await getModelAuthStatus(db, roomId, 'minimax:MiniMax-M3')
+    expect(status.provider).toBe('minimax_api')
+    expect(status.mode).toBe('api')
+    expect(status.hasCredential).toBe(true)
+    expect(status.ready).toBe(true)
+    expect(resolveApiKeyForModel(db, roomId, 'minimax:MiniMax-M3')).toBe('mm-room')
+  })
+
+  it('minimax_api falls back to env key', async () => {
+    process.env.MINIMAX_API_KEY = 'mm-env'
+    const status = await getModelAuthStatus(db, roomId, 'minimax-anthropic:MiniMax-M2.7')
+    expect(status.hasCredential).toBe(false)
+    expect(status.hasEnvKey).toBe(true)
+    expect(status.ready).toBe(true)
+    expect(resolveApiKeyForModel(db, roomId, 'minimax-anthropic:MiniMax-M2.7')).toBe('mm-env')
   })
 })

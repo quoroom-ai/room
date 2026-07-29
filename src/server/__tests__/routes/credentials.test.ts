@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeAll, afterAll } from 'vitest'
+import { describe, it, expect, beforeAll, afterAll, vi } from 'vitest'
 import { createTestServer, request, type TestContext } from '../helpers/test-server'
 
 let ctx: TestContext
@@ -78,6 +78,26 @@ describe('Credential routes', () => {
       const res = await request(ctx, 'GET', `/api/rooms/${roomId}/credentials`)
       expect(res.status).toBe(200)
       expect(Array.isArray(res.body)).toBe(true)
+    })
+
+    it('validates MiniMax API key against the OpenAI-compatible models endpoint', async () => {
+      const mockFetch = vi.fn().mockResolvedValue({ ok: true, status: 200 })
+      vi.stubGlobal('fetch', mockFetch)
+      try {
+        const res = await request(ctx, 'POST', `/api/rooms/${roomId}/credentials/validate`, {
+          name: 'minimax_api_key',
+          value: 'mm-test-key'
+        })
+        expect(res.status).toBe(200)
+        expect(mockFetch).toHaveBeenCalledOnce()
+        const [url, options] = mockFetch.mock.calls[0]
+        expect(String(url)).toContain('api.minimax.io/v1/models')
+        expect((options as RequestInit).headers).toMatchObject({
+          Authorization: 'Bearer mm-test-key'
+        })
+      } finally {
+        vi.unstubAllGlobals()
+      }
     })
   })
 

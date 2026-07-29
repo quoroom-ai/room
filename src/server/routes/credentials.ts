@@ -7,7 +7,7 @@ function maskCredential<T extends { valueEncrypted: string }>(credential: T): T 
 }
 
 const VALIDATION_TIMEOUT_MS = 8000
-const SUPPORTED_CREDENTIALS = new Set(['openai_api_key', 'anthropic_api_key', 'gemini_api_key'])
+const SUPPORTED_CREDENTIALS = new Set(['openai_api_key', 'anthropic_api_key', 'gemini_api_key', 'minimax_api_key'])
 
 function extractApiError(payload: unknown): string | null {
   if (!payload || typeof payload !== 'object') return null
@@ -89,6 +89,33 @@ async function validateAnthropicKey(value: string): Promise<{ ok: true } | { ok:
   }
 }
 
+async function validateMinimaxKey(value: string): Promise<{ ok: true } | { ok: false; error: string }> {
+  const region = (process.env.MINIMAX_REGION || '').trim().toLowerCase()
+  const base = (region === 'cn_zh' || region === 'cn')
+    ? 'https://api.minimaxi.com/v1'
+    : 'https://api.minimax.io/v1'
+  const controller = new AbortController()
+  const timer = setTimeout(() => controller.abort(), VALIDATION_TIMEOUT_MS)
+  try {
+    const res = await fetch(`${base}/models?limit=1`, {
+      method: 'GET',
+      headers: {
+        Authorization: `Bearer ${value}`
+      },
+      signal: controller.signal
+    })
+    if (res.ok) return { ok: true }
+    const body = await res.json().catch(() => null)
+    const message = extractApiError(body) || `HTTP ${res.status}`
+    return { ok: false, error: `MiniMax key validation failed: ${message}` }
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err)
+    return { ok: false, error: `MiniMax key validation failed: ${message}` }
+  } finally {
+    clearTimeout(timer)
+  }
+}
+
 export function registerCredentialRoutes(router: Router): void {
   router.get('/api/rooms/:roomId/credentials', (ctx) => {
     const roomId = Number(ctx.params.roomId)
@@ -120,7 +147,9 @@ export function registerCredentialRoutes(router: Router): void {
       ? await validateOpenAiKey(value)
       : name === 'gemini_api_key'
         ? await validateGeminiKey(value)
-        : await validateAnthropicKey(value)
+        : name === 'minimax_api_key'
+          ? await validateMinimaxKey(value)
+          : await validateAnthropicKey(value)
     if (!result.ok) return { status: 400, error: result.error }
     return { data: { ok: true } }
   })

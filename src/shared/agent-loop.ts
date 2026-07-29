@@ -378,10 +378,16 @@ export async function runCycle(
         return msg
       }
     }
-    if (provider === 'openai_api' || provider === 'anthropic_api' || provider === 'gemini_api') {
+    if (provider === 'openai_api' || provider === 'anthropic_api' || provider === 'gemini_api' || provider === 'minimax_api') {
       const apiKeyCheck = resolveApiKeyForModel(db, roomId, model)
       if (!apiKeyCheck) {
-        const label = provider === 'openai_api' ? 'OpenAI' : provider === 'gemini_api' ? 'Gemini' : 'Anthropic'
+        const label = provider === 'openai_api'
+          ? 'OpenAI'
+          : provider === 'gemini_api'
+            ? 'Gemini'
+            : provider === 'minimax_api'
+              ? 'MiniMax'
+              : 'Anthropic'
         const msg = `Missing ${label} API key. Set it in Room Settings or the Setup Guide.`
         logBuffer.addSynthetic('error', msg)
         logBuffer.flush()
@@ -699,6 +705,8 @@ At the end of this cycle, call quoroom_save_wip to save your updated position.`)
     // Role-based tool separation: queen gets coordinator tools, workers get executor tools
     const needsQueenTools = model === 'openai' || model.startsWith('openai:')
       || model === 'anthropic' || model.startsWith('anthropic:') || model.startsWith('claude-api:')
+      || model === 'minimax' || model.startsWith('minimax:')
+      || model === 'minimax-anthropic' || model.startsWith('minimax-anthropic:')
 
     const roleToolDefs = isQueen ? QUEEN_TOOLS : WORKER_TOOLS
     const filteredToolDefs = allowSet

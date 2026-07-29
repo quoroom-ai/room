@@ -381,5 +381,125 @@ describe('executeAgent', () => {
         if (prev != null) process.env.ANTHROPIC_API_KEY = prev
       }
     })
+
+    it('calls MiniMax OpenAI-compatible endpoint with Bearer key', async () => {
+      mockFetch.mockResolvedValue({
+        ok: true,
+        status: 200,
+        json: async () => ({
+          choices: [{ message: { content: 'MiniMax says hello' } }]
+        })
+      })
+
+      const result = await executeAgent({
+        model: 'minimax:MiniMax-M3',
+        prompt: 'hello',
+        systemPrompt: 'test system',
+        apiKey: 'mm-room'
+      })
+
+      expect(mockFetch).toHaveBeenCalledOnce()
+      const [url, options] = mockFetch.mock.calls[0]
+      expect(url).toBe('https://api.minimax.io/v1/chat/completions')
+      expect((options as RequestInit).headers).toMatchObject({
+        Authorization: 'Bearer mm-room',
+        'Content-Type': 'application/json'
+      })
+      const payload = JSON.parse(((options as RequestInit).body as string))
+      expect(payload.model).toBe('MiniMax-M3')
+      expect(result.exitCode).toBe(0)
+      expect(result.output).toBe('MiniMax says hello')
+    })
+
+    it('selects MiniMax China OpenAI-compatible endpoint when MINIMAX_REGION=cn_zh', async () => {
+      const prev = process.env.MINIMAX_REGION
+      process.env.MINIMAX_REGION = 'cn_zh'
+      try {
+        mockFetch.mockResolvedValue({
+          ok: true,
+          status: 200,
+          json: async () => ({
+            choices: [{ message: { content: 'cn reply' } }]
+          })
+        })
+
+        const result = await executeAgent({
+          model: 'minimax:MiniMax-M3',
+          prompt: 'hello',
+          apiKey: 'mm-room'
+        })
+
+        expect(mockFetch).toHaveBeenCalledOnce()
+        const [url] = mockFetch.mock.calls[0]
+        expect(url).toBe('https://api.minimaxi.com/v1/chat/completions')
+        expect(result.exitCode).toBe(0)
+      } finally {
+        if (prev == null) delete process.env.MINIMAX_REGION
+        else process.env.MINIMAX_REGION = prev
+      }
+    })
+
+    it('calls MiniMax Anthropic-compatible endpoint with x-api-key header', async () => {
+      mockFetch.mockResolvedValue({
+        ok: true,
+        status: 200,
+        json: async () => ({
+          content: [{ type: 'text', text: 'MiniMax anthropic reply' }]
+        })
+      })
+
+      const result = await executeAgent({
+        model: 'minimax-anthropic:MiniMax-M2.7',
+        prompt: 'hello',
+        apiKey: 'mm-room'
+      })
+
+      expect(mockFetch).toHaveBeenCalledOnce()
+      const [url, options] = mockFetch.mock.calls[0]
+      expect(url).toBe('https://api.minimax.io/anthropic/v1/messages')
+      expect((options as RequestInit).headers).toMatchObject({
+        'x-api-key': 'mm-room',
+        'anthropic-version': '2023-06-01',
+        'content-type': 'application/json'
+      })
+      const payload = JSON.parse(((options as RequestInit).body as string))
+      expect(payload.model).toBe('MiniMax-M2.7')
+      expect(result.exitCode).toBe(0)
+      expect(result.output).toBe('MiniMax anthropic reply')
+    })
+
+    it('surfaces MiniMax Anthropic-compatible API error message', async () => {
+      mockFetch.mockResolvedValue({
+        ok: false,
+        status: 401,
+        json: async () => ({
+          error: { message: 'Invalid MiniMax key' }
+        })
+      })
+
+      const result = await executeAgent({
+        model: 'minimax-anthropic:MiniMax-M3',
+        prompt: 'hello',
+        apiKey: 'mm-bad'
+      })
+
+      expect(result.exitCode).toBe(1)
+      expect(result.output).toContain('MiniMax API 401: Invalid MiniMax key')
+    })
+
+    it('fails fast for MiniMax API model when key is missing', async () => {
+      const prev = process.env.MINIMAX_API_KEY
+      delete process.env.MINIMAX_API_KEY
+      try {
+        const result = await executeAgent({
+          model: 'minimax:MiniMax-M3',
+          prompt: 'hello'
+        })
+        expect(result.exitCode).toBe(1)
+        expect(result.output.toLowerCase()).toContain('missing minimax api key')
+      } finally {
+        if (prev != null) process.env.MINIMAX_API_KEY = prev
+      }
+    })
   })
 })

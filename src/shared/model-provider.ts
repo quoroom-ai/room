@@ -11,6 +11,7 @@ export type ModelProvider =
   | 'openai_api'
   | 'anthropic_api'
   | 'gemini_api'
+  | 'minimax_api'
 
 export interface ModelAuthStatus {
   provider: ModelProvider
@@ -37,6 +38,14 @@ export function getModelProvider(model: string | null | undefined): ModelProvide
     return 'anthropic_api'
   }
   if (normalized === 'gemini' || normalized.startsWith('gemini:')) return 'gemini_api'
+  if (
+    normalized === 'minimax'
+    || normalized.startsWith('minimax:')
+    || normalized === 'minimax-anthropic'
+    || normalized.startsWith('minimax-anthropic:')
+  ) {
+    return 'minimax_api'
+  }
   return 'claude_subscription'
 }
 
@@ -50,6 +59,9 @@ export async function getModelAuthStatus(db: Database.Database, roomId: number, 
   }
   if (provider === 'gemini_api') {
     return resolveApiAuthStatus(db, roomId, 'gemini_api_key', 'GEMINI_API_KEY', provider)
+  }
+  if (provider === 'minimax_api') {
+    return resolveApiAuthStatus(db, roomId, 'minimax_api_key', 'MINIMAX_API_KEY', provider)
   }
   if (provider === 'ollama_local') {
     const runtime = probeOllamaRuntime()
@@ -94,6 +106,9 @@ export function resolveApiKeyForModel(db: Database.Database, roomId: number, mod
   }
   if (provider === 'gemini_api') {
     return resolveApiKey(db, roomId, 'gemini_api_key', 'GEMINI_API_KEY')
+  }
+  if (provider === 'minimax_api') {
+    return resolveApiKey(db, roomId, 'minimax_api_key', 'MINIMAX_API_KEY')
   }
   return undefined
 }
@@ -159,6 +174,9 @@ function getClerkCredential(db: Database.Database, credentialName: string): stri
   }
   if (credentialName === 'gemini_api_key') {
     return queries.getClerkApiKey(db, 'gemini_api')
+  }
+  if (credentialName === 'minimax_api_key') {
+    return queries.getClerkApiKey(db, 'minimax_api')
   }
   return null
 }

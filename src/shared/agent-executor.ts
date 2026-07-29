@@ -49,6 +49,48 @@ export interface AgentExecutionResult {
 
 const DEFAULT_HTTP_TIMEOUT_MS = 60_000
 
+// ─── MiniMax provider configuration ─────────────────────────────────────────
+// MiniMax exposes both an OpenAI-compatible and an Anthropic-compatible API.
+// The active region is selected via the MINIMAX_REGION env var
+// ("cn_zh"/"cn" selects the China endpoints; anything else uses global).
+const MINIMAX_DEFAULT_MODEL = 'MiniMax-M3'
+
+interface MinimaxEndpoints {
+  openai: string
+  anthropic: string
+}
+
+function resolveMinimaxEndpoints(): MinimaxEndpoints {
+  const region = (process.env.MINIMAX_REGION || '').trim().toLowerCase()
+  if (region === 'cn_zh' || region === 'cn') {
+    return {
+      openai: 'https://api.minimaxi.com/v1/chat/completions',
+      anthropic: 'https://api.minimaxi.com/anthropic/v1/messages',
+    }
+  }
+  return {
+    openai: 'https://api.minimax.io/v1/chat/completions',
+    anthropic: 'https://api.minimax.io/anthropic/v1/messages',
+  }
+}
+
+function isMinimaxAnthropicModel(model: string): boolean {
+  const trimmed = model.trim()
+  return trimmed === 'minimax-anthropic' || trimmed.startsWith('minimax-anthropic:')
+}
+
+function resolveAnthropicMessagesUrl(model: string): string {
+  if (isMinimaxAnthropicModel(model)) return resolveMinimaxEndpoints().anthropic
+  return 'https://api.anthropic.com/v1/messages'
+}
+
+function resolveAnthropicApiKey(options: AgentExecutionOptions): string | undefined {
+  if (isMinimaxAnthropicModel(options.model)) {
+    return options.apiKey?.trim() || (process.env.MINIMAX_API_KEY || '').trim() || undefined
+  }
+  return options.apiKey?.trim() || (process.env.ANTHROPIC_API_KEY || '').trim() || undefined
+}
+
 function linkAbortSignal(controller: AbortController, external?: AbortSignal): (() => void) | null {
   if (!external) return null
   const onAbort = () => controller.abort()
@@ -100,13 +142,20 @@ export async function executeAgent(options: AgentExecutionOptions): Promise<Agen
     || model.startsWith('gemini:')
     || model === 'ollama'
     || model.startsWith('ollama:')
+    || model === 'minimax'
+    || model.startsWith('minimax:')
   ) {
     if (options.toolDefs && options.toolDefs.length > 0 && options.onToolCall) {
       return executeOpenAiWithTools(options)
     }
     return executeOpenAiApi(options)
   }
-  if (model === 'anthropic' || model.startsWith('anthropic:') || model.startsWith('claude-api:')) {
+  if (
+    model === 'anthropic'
+    || model.startsWith('anthropic:')
+    || model.startsWith('claude-api:')
+    || isMinimaxAnthropicModel(model)
+  ) {
     if (options.toolDefs && options.toolDefs.length > 0 && options.onToolCall) {
       return executeAnthropicWithTools(options)
     }
@@ -348,6 +397,18 @@ function resolveOpenAiCompatible(model: string, apiKeyOverride?: string): OpenAi
       prefix: 'gemini',
     }
   }
+  if (trimmed === 'minimax' || trimmed.startsWith('minimax:')) {
+    const apiKey = apiKeyOverride?.trim() || (process.env.MINIMAX_API_KEY || '').trim()
+    if (!apiKey) return null
+    return {
+      apiKey,
+      requiresApiKey: true,
+      url: resolveMinimaxEndpoints().openai,
+      defaultModel: MINIMAX_DEFAULT_MODEL,
+      label: 'MiniMax',
+      prefix: 'minimax',
+    }
+  }
   // Default: OpenAI
   const apiKey = apiKeyOverride?.trim() || (process.env.OPENAI_API_KEY || '').trim()
   if (!apiKey) return null
@@ -377,7 +438,12 @@ interface OpenAiMessage {
 
 async function executeOpenAiWithTools(options: AgentExecutionOptions): Promise<AgentExecutionResult> {
   const config = resolveOpenAiCompatible(options.model, options.apiKey)
-  if (!config) return immediateError(`Missing ${options.model.startsWith('gemini') ? 'Gemini' : 'OpenAI'} API key.`)
+  if (!config) {
+    if (options.model.startsWith('minimax') || options.model === 'minimax') {
+      return immediateError('Missing MiniMax API key. Set room credential "minimax_api_key" or MINIMAX_API_KEY.')
+    }
+    return immediateError(`Missing ${options.model.startsWith('gemini') ? 'Gemini' : 'OpenAI'} API key.`)
+  }
 
   const { apiKey, requiresApiKey, url: apiUrl, defaultModel, label: providerLabel, prefix } = config
   const modelName = parseModelSuffix(options.model, prefix) || defaultModel
@@ -497,10 +563,17 @@ function apiToolDefsToAnthropic(defs: import('./queen-tools').ToolDef[]): Array<
 }
 
 async function executeAnthropicWithTools(options: AgentExecutionOptions): Promise<AgentExecutionResult> {
-  const apiKey = options.apiKey?.trim() || (process.env.ANTHROPIC_API_KEY || '').trim()
-  if (!apiKey) return immediateError('Missing Anthropic API key.')
+  const apiKey = resolveAnthropicApiKey(options)
+  const isMinimax = isMinimaxAnthropicModel(options.model)
+  if (!apiKey) {
+    return immediateError(isMinimax
+      ? 'Missing MiniMax API key. Set room credential "minimax_api_key" or MINIMAX_API_KEY.'
+      : 'Missing Anthropic API key. Set room credential "anthropic_api_key" or ANTHROPIC_API_KEY.')
+  }
 
   const modelName = parseAnthropicModel(options.model)
+  const messagesUrl = resolveAnthropicMessagesUrl(options.model)
+  const providerLabel = isMinimax ? 'MiniMax' : 'Anthropic'
   const startTime = Date.now()
   const maxTurns = options.maxTurns ?? 10
   const anthropicTools = options.toolDefs ? apiToolDefsToAnthropic(options.toolDefs) : []
@@ -528,7 +601,7 @@ async function executeAnthropicWithTools(options: AgentExecutionOptions): Promis
 
     let json: Record<string, unknown>
     try {
-      const response = await fetch('https://api.anthropic.com/v1/messages', {
+      const response = await fetch(messagesUrl, {
         method: 'POST',
         headers: {
           'x-api-key': apiKey,
@@ -546,7 +619,7 @@ async function executeAnthropicWithTools(options: AgentExecutionOptions): Promis
       })
       json = await response.json() as Record<string, unknown>
       if (!response.ok) {
-        return { output: `Anthropic API ${response.status}: ${extractApiError(json)}`, exitCode: 1, durationMs: Date.now() - startTime, sessionId: null, timedOut: false, usage: { inputTokens: totalInputTokens, outputTokens: totalOutputTokens } }
+        return { output: `${providerLabel} API ${response.status}: ${extractApiError(json)}`, exitCode: 1, durationMs: Date.now() - startTime, sessionId: null, timedOut: false, usage: { inputTokens: totalInputTokens, outputTokens: totalOutputTokens } }
       }
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err)
@@ -607,6 +680,9 @@ async function executeOpenAiApi(options: AgentExecutionOptions): Promise<AgentEx
   if (!config) {
     if (options.model.startsWith('ollama') || options.model === 'ollama') {
       return immediateError('Ollama runtime is unavailable. Install/start Ollama and pull qwen3-coder:30b.')
+    }
+    if (options.model.startsWith('minimax') || options.model === 'minimax') {
+      return immediateError('Missing MiniMax API key. Set room credential "minimax_api_key" or MINIMAX_API_KEY.')
     }
     const isGemini = options.model.startsWith('gemini')
     return immediateError(`Missing ${isGemini ? 'Gemini' : 'OpenAI'} API key. Set room credential "${isGemini ? 'gemini_api_key' : 'openai_api_key'}" or ${isGemini ? 'GEMINI_API_KEY' : 'OPENAI_API_KEY'}.`)
@@ -676,19 +752,24 @@ async function executeOpenAiApi(options: AgentExecutionOptions): Promise<AgentEx
 }
 
 async function executeAnthropicApi(options: AgentExecutionOptions): Promise<AgentExecutionResult> {
-  const apiKey = options.apiKey?.trim() || (process.env.ANTHROPIC_API_KEY || '').trim()
+  const isMinimax = isMinimaxAnthropicModel(options.model)
+  const apiKey = resolveAnthropicApiKey(options)
   if (!apiKey) {
-    return immediateError('Missing Anthropic API key. Set room credential "anthropic_api_key" or ANTHROPIC_API_KEY.')
+    return immediateError(isMinimax
+      ? 'Missing MiniMax API key. Set room credential "minimax_api_key" or MINIMAX_API_KEY.'
+      : 'Missing Anthropic API key. Set room credential "anthropic_api_key" or ANTHROPIC_API_KEY.')
   }
 
   const modelName = parseAnthropicModel(options.model)
+  const messagesUrl = resolveAnthropicMessagesUrl(options.model)
+  const providerLabel = isMinimax ? 'MiniMax' : 'Anthropic'
   const startTime = Date.now()
   const controller = new AbortController()
   const detachAbort = linkAbortSignal(controller, options.abortSignal)
   const timeoutMs = options.timeoutMs ?? DEFAULT_HTTP_TIMEOUT_MS
   const timer = setTimeout(() => controller.abort(), timeoutMs)
   try {
-    const response = await fetch('https://api.anthropic.com/v1/messages', {
+    const response = await fetch(messagesUrl, {
       method: 'POST',
       headers: {
         'x-api-key': apiKey,
@@ -706,7 +787,7 @@ async function executeAnthropicApi(options: AgentExecutionOptions): Promise<Agen
     const json = await response.json() as Record<string, unknown>
     if (!response.ok) {
       return {
-        output: `Anthropic API ${response.status}: ${extractApiError(json)}`,
+        output: `${providerLabel} API ${response.status}: ${extractApiError(json)}`,
         exitCode: 1,
         durationMs: Date.now() - startTime,
         sessionId: null,
@@ -750,6 +831,10 @@ function parseModelSuffix(model: string, prefix: string): string {
 
 function parseAnthropicModel(model: string): string {
   const normalized = model.trim()
+  // MiniMax Anthropic-compatible variant
+  const minimaxModel = parseModelSuffix(normalized, 'minimax-anthropic')
+  if (minimaxModel) return minimaxModel
+  if (normalized === 'minimax-anthropic') return MINIMAX_DEFAULT_MODEL
   if (normalized === 'anthropic') return 'claude-3-5-sonnet-latest'
   const anthropicModel = parseModelSuffix(normalized, 'anthropic')
   if (anthropicModel) return anthropicModel
@@ -871,7 +956,7 @@ function immediateError(message: string): AgentExecutionResult {
 /**
  * Compress a long conversation history into a compact JSON summary.
  * Called at the start of a cycle when the session exceeds the trim threshold.
- * Applies to API models (openai:*, gemini:*, anthropic:*). CLI models manage their own context.
+ * Applies to API models (openai:*, gemini:*, anthropic:*, minimax:*, minimax-anthropic:*). CLI models manage their own context.
  *
  * Returns the raw summary text (JSON string from the model), or null on failure.
  */
@@ -912,6 +997,8 @@ Respond ONLY with a JSON object (no markdown, no explanation):
       || model.startsWith('gemini:')
       || model === 'ollama'
       || model.startsWith('ollama:')
+      || model === 'minimax'
+      || model.startsWith('minimax:')
     ) {
       const config = resolveOpenAiCompatible(model, apiKey)
       if (!config) return null
@@ -928,11 +1015,13 @@ Respond ONLY with a JSON object (no markdown, no explanation):
       return extractOpenAiText(json).trim() || null
     }
 
-    if (model === 'anthropic' || model.startsWith('anthropic:') || model.startsWith('claude-api:')) {
-      const key = apiKey?.trim() || (process.env.ANTHROPIC_API_KEY || '').trim()
+    if (model === 'anthropic' || model.startsWith('anthropic:') || model.startsWith('claude-api:') || isMinimaxAnthropicModel(model)) {
+      const key = isMinimaxAnthropicModel(model)
+        ? (apiKey?.trim() || (process.env.MINIMAX_API_KEY || '').trim())
+        : (apiKey?.trim() || (process.env.ANTHROPIC_API_KEY || '').trim())
       if (!key) return null
       const modelName = parseAnthropicModel(model)
-      const response = await fetch('https://api.anthropic.com/v1/messages', {
+      const response = await fetch(resolveAnthropicMessagesUrl(model), {
         method: 'POST',
         headers: { 'x-api-key': key, 'anthropic-version': '2023-06-01', 'content-type': 'application/json' },
         body: JSON.stringify({ model: modelName, max_tokens: 1024, messages: [{ role: 'user', content: compressionPrompt }] }),
